@@ -57,7 +57,15 @@ ${getTimeGreeting()}！你现在的状态：${describePetState(petState)}
 - 偶尔提到自己的状态（饿、开心、累等），自然融入对话`;
 
   const customPrompt = userConfig.systemPrompt?.trim();
-  return customPrompt ? `${basePrompt}\n\n${customPrompt}` : basePrompt;
+  const installedAgentConfig = config.installedAgentConfig;
+  const agentPrompt = installedAgentConfig && typeof installedAgentConfig === 'object'
+    ? (installedAgentConfig as { systemPrompt?: unknown }).systemPrompt
+    : null;
+  const prompts = [
+    typeof agentPrompt === 'string' ? agentPrompt.trim() : '',
+    customPrompt || '',
+  ].filter(Boolean);
+  return prompts.length > 0 ? `${basePrompt}\n\n${prompts.join('\n\n')}` : basePrompt;
 }
 
 export class ConversationManager {

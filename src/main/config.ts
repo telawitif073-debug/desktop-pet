@@ -15,6 +15,14 @@ export interface UserProfile {
   preferences: Record<string, unknown>;
 }
 
+export interface PlatformConfig {
+  baseUrl: string;
+  frontendUrl: string;
+  accessToken: string;
+  refreshToken: string;
+  user: { id: string; username: string; email: string; role: 'user' | 'admin' } | null;
+}
+
 export interface AppConfig {
   petSystemEnabled: boolean;
   foodSystemEnabled: boolean;
@@ -28,6 +36,11 @@ export interface AppConfig {
     affection: number;
   };
   llm: LLMConfig;
+  platform: PlatformConfig;
+  petAssetPath?: string;
+  agentConfigPath?: string;
+  installedAgentId?: string;
+  installedAgentConfig?: unknown;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -52,6 +65,13 @@ const DEFAULT_CONFIG: AppConfig = {
     model: 'gpt-4o-mini',
     systemPrompt: '',
   },
+  platform: {
+    baseUrl: 'http://localhost:3001/api',
+    frontendUrl: 'http://localhost:5174',
+    accessToken: '',
+    refreshToken: '',
+    user: null,
+  },
 };
 
 let cachedConfig: AppConfig | null = null;
@@ -68,7 +88,14 @@ export function loadConfig(): AppConfig {
     if (fs.existsSync(configPath)) {
       const raw = fs.readFileSync(configPath, 'utf-8');
       const parsed = JSON.parse(raw);
-      cachedConfig = { ...DEFAULT_CONFIG, ...parsed };
+      cachedConfig = {
+        ...DEFAULT_CONFIG,
+        ...parsed,
+        platform: { ...DEFAULT_CONFIG.platform, ...(parsed.platform || {}) },
+      };
+      if (cachedConfig.platform.frontendUrl === 'http://localhost:5173') {
+        cachedConfig.platform.frontendUrl = DEFAULT_CONFIG.platform.frontendUrl;
+      }
     } else {
       cachedConfig = { ...DEFAULT_CONFIG };
       saveConfig(cachedConfig);
@@ -76,7 +103,7 @@ export function loadConfig(): AppConfig {
   } catch {
     cachedConfig = { ...DEFAULT_CONFIG };
   }
-  return cachedConfig;
+  return cachedConfig!;
 }
 
 export function saveConfig(config: Partial<AppConfig>): AppConfig {
@@ -87,6 +114,7 @@ export function saveConfig(config: Partial<AppConfig>): AppConfig {
     userProfile: { ...current.userProfile, ...(config.userProfile || {}) },
     petState: { ...current.petState, ...(config.petState || {}) },
     llm: { ...current.llm, ...(config.llm || {}) },
+    platform: { ...current.platform, ...(config.platform || {}) },
   };
   const configPath = getConfigPath();
   try {

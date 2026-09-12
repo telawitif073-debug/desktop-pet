@@ -90,3 +90,11 @@ typings/
 
 # Electron-Forge
 out/
+
+# Local development services and generated artifacts
+platform/.pg/
+platform/backend/dist/
+platform/frontend/dist/
+platform/backend/uploads/*
+!platform/backend/uploads/sample-agent-config.json
+!platform/backend/uploads/sample-pet-asset.txt

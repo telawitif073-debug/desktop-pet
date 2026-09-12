@@ -1,5 +1,11 @@
 export {};
 
+declare module 'react' {
+  interface CSSProperties {
+    WebkitAppRegion?: 'drag' | 'no-drag' | 'none';
+  }
+}
+
 export interface ChatResult {
   success: boolean;
   text?: string;
@@ -32,6 +38,17 @@ export interface AppConfig {
     affection: number;
   };
   llm: LLMConfig;
+  platform: {
+    baseUrl: string;
+    frontendUrl: string;
+    accessToken: string;
+    refreshToken: string;
+    user: { id: string; username: string; email: string; role: 'user' | 'admin' } | null;
+  };
+  petAssetPath?: string;
+  agentConfigPath?: string;
+  installedAgentId?: string;
+  installedAgentConfig?: unknown;
 }
 
 export interface ChatMessage {
@@ -64,6 +81,18 @@ declare global {
       config: {
         get: () => Promise<AppConfig>;
         set: (partial: Partial<AppConfig>) => Promise<AppConfig>;
+      };
+
+      platform: {
+        search: (type: 'pet' | 'agent', query: string, page?: number) => Promise<unknown>;
+        getDetail: (type: 'pet' | 'agent', id: string) => Promise<unknown>;
+        download: (type: 'pet' | 'agent', id: string) => Promise<unknown>;
+        install: (type: 'pet' | 'agent', id: string) => Promise<unknown>;
+        getInstalledPet: () => Promise<{ path: string; dataUrl: string } | null>;
+        getInstalledAgent: () => Promise<unknown>;
+        login: (identifier: string, password: string) => Promise<unknown>;
+        logout: () => Promise<{ success: boolean }>;
+        openStore: () => Promise<{ success: boolean }>;
       };
 
       pet: {

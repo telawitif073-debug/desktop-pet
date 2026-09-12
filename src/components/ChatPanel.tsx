@@ -217,13 +217,13 @@ const ChatPanel = ({ onClose }: { onClose: () => void }) => {
           padding: '8px 12px',
           background: '#252525',
           borderBottom: '1px solid #333',
-          WebkitAppRegion: 'drag',
+...({ WebkitAppRegion: 'drag' } as React.CSSProperties),
         }}
       >
         <span style={{ fontSize: '13px', color: '#ddd', fontWeight: 600 }}>
           {showSettings ? '设置' : '聊天'}
         </span>
-        <div style={{ display: 'flex', gap: '4px', WebkitAppRegion: 'no-drag' }}>
+        <div style={{ display: 'flex', gap: '4px', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           {!showSettings && (
             <>
               <button

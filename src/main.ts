@@ -6,6 +6,7 @@ import {
   ConversationManager,
   type PetStateSnapshot,
 } from './main/conversationManager';
+import { platformClient, type PlatformAssetType } from './main/platformClient';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -15,6 +16,7 @@ const CHAT_WINDOW_SIZE = { width: 650, height: 450 };
 const MARGIN = 20;
 
 let mainWindow: BrowserWindow | null = null;
+let storeWindow: BrowserWindow | null = null;
 let isChatOpen = false;
 let currentPetState: PetStateSnapshot = { hunger: 80, mood: 80, energy: 80, affection: 50 };
 
@@ -158,6 +160,57 @@ ipcMain.handle('config:set', (_event, partial: Partial<AppConfig>) => {
   const updated = saveConfig(partial);
   conversationManager.updateConfig(updated);
   return updated;
+});
+
+// Platform: resource search, details, download and installation
+ipcMain.handle('platform:search', (_event, type: PlatformAssetType, query: string, page = 1) =>
+  platformClient.search(type, query, page),
+);
+
+ipcMain.handle('platform:getDetail', (_event, type: PlatformAssetType, id: string) =>
+  platformClient.getDetail(type, id),
+);
+
+ipcMain.handle('platform:download', (_event, type: PlatformAssetType, id: string) =>
+  platformClient.download(type, id),
+);
+
+ipcMain.handle('platform:install', (_event, type: PlatformAssetType, id: string) =>
+  platformClient.install(type, id),
+);
+
+ipcMain.handle('platform:getInstalledPet', () => platformClient.getInstalledPet());
+
+ipcMain.handle('platform:getInstalledAgent', () => platformClient.getInstalledAgent());
+
+ipcMain.handle('platform:login', (_event, identifier: string, password: string) =>
+  platformClient.login(identifier, password),
+);
+
+ipcMain.handle('platform:logout', () => platformClient.logout());
+
+ipcMain.handle('platform:open-store', () => {
+  if (storeWindow && !storeWindow.isDestroyed()) {
+    storeWindow.focus();
+    return { success: true };
+  }
+
+  const platformConfig = loadConfig().platform;
+  storeWindow = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    title: '资源商店',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  storeWindow.on('closed', () => {
+    storeWindow = null;
+  });
+  storeWindow.loadURL(platformConfig.frontendUrl);
+  return { success: true };
 });
 
 // Pet state: update (sent from renderer so main can use it in system prompt)

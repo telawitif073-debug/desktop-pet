@@ -61,7 +61,8 @@ const App = () => {
       container.appendChild(app.canvas as HTMLCanvasElement);
       app.canvas.style.pointerEvents = 'none';
 
-      const texture = await PIXI.Assets.load(petImg);
+      const installedPet = await window.electronAPI.platform.getInstalledPet();
+      const texture = await PIXI.Assets.load(installedPet?.dataUrl ?? petImg);
       pet = new PIXI.Sprite(texture);
       pet.anchor.set(0.5);
       pet.x = 150;
@@ -149,6 +150,16 @@ const App = () => {
           }}
         >
           {chatOpen ? '收' : '聊'}
+        </button>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            window.electronAPI.platform.openStore();
+          }}
+          style={{ ...btnBaseStyle, bottom: 80, right: 5 }}
+        >
+          商店
         </button>
 
         {/* Action buttons */}
