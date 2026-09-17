@@ -158,7 +158,7 @@ export class PlatformClient {
     if (!installedPath) throw new Error('资源文件为空，无法安装');
 
     if (type === 'pet') {
-      saveConfig({ petAssetPath: installedPath });
+      saveConfig({ petAssetPath: installedPath, petAssetName: downloaded.detail.name });
     } else {
       let agentConfig: unknown = null;
       if (installedPath.endsWith('.json')) {
@@ -178,6 +178,28 @@ export class PlatformClient {
 
     fs.rmSync(path.dirname(downloaded.tempPath), { recursive: true, force: true });
     return { success: true, type, id, path: installedPath };
+  }
+
+  async uninstall(type: PlatformAssetType, id: string) {
+    assertAssetType(type);
+    const installDir = path.join(app.getPath('userData'), assetPath(type), id);
+    fs.rmSync(installDir, { recursive: true, force: true });
+
+    // 若删除的是当前生效的资源，复位配置（宠物恢复默认形象，智能体恢复 default）
+    if (type === 'pet') {
+      const current = this.config.petAssetPath;
+      if (current && path.dirname(path.resolve(current)).toLowerCase() === installDir.toLowerCase()) {
+        saveConfig({ petAssetPath: undefined, petAssetName: undefined });
+      }
+    } else if (this.config.installedAgentId === id) {
+      saveConfig({
+        agentType: 'default',
+        agentConfigPath: undefined,
+        installedAgentId: undefined,
+        installedAgentConfig: undefined,
+      });
+    }
+    return { success: true };
   }
 
   getInstalledPet() {

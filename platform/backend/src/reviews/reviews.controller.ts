@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   IsIn,
@@ -56,5 +56,26 @@ export class ReviewsController {
       rating: dto.rating,
       comment: dto.comment,
     });
+  }
+
+  /** 当前用户下载过的资源列表（个人中心"已下载资源"板块） */
+  @Get('downloads/mine')
+  @UseGuards(JwtAuthGuard)
+  myDownloads(@CurrentUser() user: User) {
+    return this.reviewsService.listDownloaded(user.id);
+  }
+
+  /** 删除当前用户对某资源的下载记录（个人中心移除已下载资源） */
+  @Delete('downloads/:assetType/:assetId')
+  @UseGuards(JwtAuthGuard)
+  removeDownload(
+    @CurrentUser() user: User,
+    @Param('assetType') assetType: AssetType,
+    @Param('assetId') assetId: string,
+  ) {
+    if (assetType !== 'pet' && assetType !== 'agent') {
+      throw new BadRequestException('资源类型必须是 pet 或 agent');
+    }
+    return this.reviewsService.deleteDownload(assetType, assetId, user.id);
   }
 }

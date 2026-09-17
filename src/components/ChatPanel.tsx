@@ -1,8 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 
+// 从 config.installedAgentConfig 中解析当前生效的智能体信息
+function resolveAgent(config: { installedAgentConfig?: unknown } | null) {
+  const cfg = config?.installedAgentConfig;
+  if (!cfg || typeof cfg !== 'object') return null;
+  const fields = cfg as { name?: unknown; systemPrompt?: unknown };
+  return {
+    name: typeof fields.name === 'string' && fields.name ? fields.name : '自定义智能体',
+    systemPrompt: typeof fields.systemPrompt === 'string' ? fields.systemPrompt : '',
+    isCustom: fields.name === '自定义智能体',
+  };
+}
+
 const SettingsPanel = () => {
   const { config, saveConfig, toggleSettings } = useChatStore();
+  const [notice, setNotice] = useState('');
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showNotice = (text: string) => {
+    setNotice(text);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(''), 3000);
+  };
   const [form, setForm] = useState({
     apiKey: config?.llm.apiKey || '',
     baseUrl: config?.llm.baseUrl || 'https://api.openai.com/v1',
@@ -11,7 +30,36 @@ const SettingsPanel = () => {
     userName: config?.userProfile.name || '',
   });
 
+  // 将自定义提示词（连同模型/接口地址）一键生成自定义智能体，立即生效
+  const generateAgent = async () => {
+    const prompt = form.systemPrompt.trim();
+    if (!prompt) {
+      showNotice('请先在下方填写自定义提示词，再生成自定义智能体');
+      return;
+    }
+    await saveConfig({
+      installedAgentConfig: {
+        name: '自定义智能体',
+        systemPrompt: prompt,
+        ...(form.model.trim() ? { model: form.model.trim() } : {}),
+        ...(form.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
+      },
+    });
+    showNotice('自定义智能体已生成并立即生效');
+  };
+
+  // 移除自定义智能体：其提示词回填到自定义提示词输入框，避免内容丢失
+  const removeAgent = async () => {
+    const agent = resolveAgent(config);
+    await saveConfig({ installedAgentConfig: undefined });
+    if (agent?.systemPrompt) {
+      setForm((prev) => ({ ...prev, systemPrompt: agent.systemPrompt }));
+    }
+    showNotice('已移除自定义智能体，恢复默认人格');
+  };
+
   const handleSave = async () => {
+    const agent = resolveAgent(config);
     await saveConfig({
       llm: {
         provider: 'openai',
@@ -20,7 +68,18 @@ const SettingsPanel = () => {
         model: form.model,
         systemPrompt: form.systemPrompt,
       },
-      userProfile: { name: form.userName, preferences: {} },
+      userProfile: { name: form.userName, preferences: config?.userProfile.preferences || {} },
+      // 自定义智能体生效时，保存即自动同步其提示词与模型/接口配置，无需再点"生成"
+      ...(agent?.isCustom
+        ? {
+            installedAgentConfig: {
+              name: '自定义智能体',
+              systemPrompt: form.systemPrompt.trim(),
+              ...(form.model.trim() ? { model: form.model.trim() } : {}),
+              ...(form.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
+            },
+          }
+        : {}),
     });
     toggleSettings();
   };
@@ -46,9 +105,58 @@ const SettingsPanel = () => {
 
   return (
     <div style={{ padding: '12px', overflowY: 'auto', height: '100%' }}>
+      {notice && (
+        <div style={{ padding: '6px 10px', marginBottom: '10px', borderRadius: '4px', background: '#2b3a4a', color: '#9fd0ff', fontSize: '12px' }}>
+          {notice}
+        </div>
+      )}
       <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '8px', color: '#eee' }}>
         设置
       </div>
+
+      {/* 当前生效的智能体状态 + 自定义智能体生成/移除操作 */}
+      {(() => {
+        const agent = resolveAgent(config);
+        const btnStyle: React.CSSProperties = {
+          width: '100%', padding: '6px', borderRadius: '4px', fontSize: '12px',
+          cursor: 'pointer', marginTop: '8px',
+          border: agent ? '1px solid #666' : 'none',
+          background: agent ? '#333' : '#4a9eff',
+          color: agent ? '#ccc' : 'white',
+        };
+        return (
+          <div style={{ padding: '8px 10px', marginBottom: '10px', border: '1px solid #444', borderRadius: '4px', background: '#252525' }}>
+            <div style={{ fontSize: '11px', color: '#aaa', marginBottom: '4px' }}>当前智能体</div>
+            <div style={{ fontSize: '12px', color: agent ? '#7ec8ff' : '#888' }}>
+              {agent ? `${agent.name}（已生效）` : '默认宠物人格（未启用智能体）'}
+            </div>
+            {agent && !agent.isCustom && (
+              <div style={{ fontSize: '11px', color: '#888', marginTop: '4px', lineHeight: 1.5 }}>
+                该智能体来自资源库安装，可在个人中心-已下载资源中卸载；其提示词与参数会覆盖下方手动配置。
+              </div>
+            )}
+            {agent && agent.isCustom && (
+              <div style={{ fontSize: '11px', color: '#888', marginTop: '4px', lineHeight: 1.5 }}>
+                由自定义提示词生成，模型/接口地址取自下方表单；移除后提示词会自动回填。
+              </div>
+            )}
+            {!agent && (
+              <div style={{ fontSize: '11px', color: '#888', marginTop: '4px', lineHeight: 1.5 }}>
+                填写下方自定义提示词后，可一键生成为自定义智能体（立即生效，无需上传审核）。
+              </div>
+            )}
+            {!agent || agent.isCustom ? (
+              <button
+                type="button"
+                onClick={agent?.isCustom ? removeAgent : generateAgent}
+                style={btnStyle}
+              >
+                {agent?.isCustom ? '移除自定义智能体（恢复默认人格）' : '将自定义提示词生成为自定义智能体'}
+              </button>
+            ) : null}
+          </div>
+        );
+      })()}
 
       <label style={labelStyle}>API Key</label>
       <input
@@ -194,6 +302,7 @@ const ChatPanel = ({ onClose }: { onClose: () => void }) => {
   };
 
   const isConfigured = config?.llm?.apiKey;
+  const agent = resolveAgent(config);
 
   return (
     <div
@@ -221,7 +330,7 @@ const ChatPanel = ({ onClose }: { onClose: () => void }) => {
         }}
       >
         <span style={{ fontSize: '13px', color: '#ddd', fontWeight: 600 }}>
-          {showSettings ? '设置' : '聊天'}
+          {showSettings ? '设置' : agent ? `聊天 · ${agent.name}` : '聊天'}
         </span>
         <div style={{ display: 'flex', gap: '4px', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           {!showSettings && (

@@ -64,6 +64,44 @@ export class ReviewsService {
     return this.downloadsRepo.save(record);
   }
 
+  /** 当前用户下载过的资源（按资源去重，保留最近一次下载时间，已删除的资源自动过滤） */
+  async listDownloaded(userId: string) {
+    const records = await this.downloadsRepo.find({
+      where: { userId },
+      order: { downloadedAt: 'DESC' },
+    });
+    const latest = new Map<string, DownloadRecord>();
+    for (const record of records) {
+      const key = `${record.assetType}:${record.assetId}`;
+      if (!latest.has(key)) latest.set(key, record);
+    }
+
+    const petIds = [...latest.values()].filter((r) => r.assetType === 'pet').map((r) => r.assetId);
+    const agentIds = [...latest.values()].filter((r) => r.assetType === 'agent').map((r) => r.assetId);
+    const [pets, agents] = await Promise.all([
+      petIds.length ? this.petsRepo.find({ where: { id: In(petIds) } }) : Promise.resolve([]),
+      agentIds.length ? this.agentsRepo.find({ where: { id: In(agentIds) } }) : Promise.resolve([]),
+    ]);
+    const assetMap = new Map<string, PetAsset | AgentAsset>();
+    pets.forEach((asset) => assetMap.set(`pet:${asset.id}`, asset));
+    agents.forEach((asset) => assetMap.set(`agent:${asset.id}`, asset));
+
+    return [...latest.entries()]
+      .map(([key, record]) => ({
+        assetType: record.assetType,
+        assetId: record.assetId,
+        downloadedAt: record.downloadedAt,
+        asset: assetMap.get(key) ?? null,
+      }))
+      .filter((entry) => entry.asset);
+  }
+
+  /** 删除当前用户对某资源的下载记录 */
+  async deleteDownload(assetType: AssetType, assetId: string, userId: string) {
+    await this.downloadsRepo.delete({ userId, assetType, assetId });
+    return { success: true };
+  }
+
   private async assertAssetExists(assetType: AssetType, assetId: string) {
     if (assetType === 'pet') {
       if (!(await this.petsRepo.findOne({ where: { id: assetId } }))) {

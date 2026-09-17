@@ -26,7 +26,30 @@ export default function ResourceDetailPage({ user }: { user: User | null }) {
 
   const download = async () => {
     setDownloading(true);
-    try { const result = await downloadAsset(type, asset.id); setAsset({ ...asset, downloads: result.downloads }); window.open(assetUrl(result.url), '_blank'); }
+    try {
+      if (window.electronAPI?.platform) {
+        // 桌面宠物客户端内：调用主进程下载并安装到本地（宠物/智能体）
+        await window.electronAPI.platform.install(type, asset.id);
+        messageApi.success(type === 'pet' ? '已下载并安装为桌面宠物形象' : '智能体已安装到桌面宠物');
+      } else {
+        // 浏览器环境：触发真实文件下载，而不是打开预览
+        const result = await downloadAsset(type, asset.id);
+        setAsset({ ...asset, downloads: result.downloads });
+        const fileUrl = assetUrl(result.url);
+        if (!fileUrl) throw new Error('资源文件地址为空');
+        const response = await fetch(fileUrl);
+        if (!response.ok) throw new Error('资源文件下载失败');
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = asset.fileUrl.split('/').pop() || asset.name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(blobUrl);
+      }
+    }
     catch (err) { messageApi.error(getErrorMessage(err)); }
     finally { setDownloading(false); }
   };

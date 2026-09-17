@@ -50,3 +50,25 @@ export interface AuthResponse {
   accessToken: string;
   refreshToken: string;
 }
+
+export interface DownloadedEntry {
+  assetType: AssetType;
+  assetId: string;
+  downloadedAt: string;
+  asset: Asset | null;
+}
+
+// 桌面宠物客户端的宠物窗口设置
+export interface PetWindowSettings {
+  width: number;
+  height: number;
+  opacity: number;
+}
+
+// 桌面宠物客户端的宠物互动功能开关（关闭后隐藏对应按钮与进度条）
+export interface PetFeaturesSettings {
+  feedEnabled: boolean;
+  restEnabled: boolean;
+  playEnabled: boolean;
+  affectionEnabled: boolean;
+}

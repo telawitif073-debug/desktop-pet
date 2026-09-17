@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Asset, AssetType, AuthResponse, PageResponse, Review, User } from './types';
+import type { Asset, AssetType, AuthResponse, DownloadedEntry, PageResponse, Review, User } from './types';
 
 const TOKEN_KEY = 'platform_access_token';
 const REFRESH_TOKEN_KEY = 'platform_refresh_token';
@@ -112,6 +112,15 @@ export async function listMine(type: AssetType) {
   return response.data;
 }
 
+export async function listDownloaded() {
+  const response = await api.get<DownloadedEntry[]>('/reviews/downloads/mine');
+  return response.data;
+}
+
+export async function deleteDownloaded(assetType: AssetType, assetId: string) {
+  await api.delete(`/reviews/downloads/${assetType}/${assetId}`);
+}
+
 export async function updateAsset(type: AssetType, id: string, values: Record<string, unknown>) {
   const response = await api.put<Asset>(`/${type}s/${id}`, values);
   return response.data;
@@ -131,4 +140,9 @@ export async function uploadAsset(type: AssetType, values: Record<string, unknow
   });
   const response = await api.post<Asset>(`/${type}s`, form);
   return response.data;
+}
+
+export async function generatePetDesign(description: string) {
+  const response = await api.post<{ design: import('./utils/petCanvas').PetDesign }>('/ai/generate-pet', { description });
+  return response.data.design;
 }

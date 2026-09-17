@@ -74,20 +74,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     // Set up chunk listener if not already active
     if (!chunkCleanup) {
-      chunkCleanup = window.electronAPI.onChatChunk((chunk: string) => {
+      chunkCleanup = window.electronAPI?.onChatChunk((chunk: string) => {
         get().setStreamingContent(chunk);
       });
     }
 
     try {
-      const result = await window.electronAPI.chat.send(text.trim());
+      const result = await window.electronAPI?.chat.send(text.trim());
 
-      if (!result.success) {
+      if (!result?.success) {
         set((state) => ({
           messages: state.messages.map((m) =>
-            m.id === streamingMessageId ? { ...m, content: result.error || '发送失败', streaming: false } : m
+            m.id === streamingMessageId ? { ...m, content: result?.error || '发送失败', streaming: false } : m
           ),
-          error: result.error || '发送失败',
+          error: result?.error || '发送失败',
         }));
       } else {
         // Final text from result (in case streaming missed some chunks)
@@ -112,13 +112,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   clearMessages: async () => {
-    await window.electronAPI.chat.clear();
+    await window.electronAPI?.chat.clear();
     set({ messages: [], error: null });
   },
 
   loadHistory: async () => {
-    const result = await window.electronAPI.chat.getHistory();
-    if (!result.success || result.history.length === 0) return;
+    const result = await window.electronAPI?.chat.getHistory();
+    if (!result?.success || result.history.length === 0) return;
     set((state) => {
       // Don't overwrite messages already shown in the current session
       if (state.messages.length > 0) return state;
@@ -152,14 +152,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
 
     if (!chunkCleanup) {
-      chunkCleanup = window.electronAPI.onChatChunk((chunk: string) => {
+      chunkCleanup = window.electronAPI?.onChatChunk((chunk: string) => {
         get().setStreamingContent(chunk);
       });
     }
 
     try {
-      const result = await window.electronAPI.chat.greet();
-      if (!result.success) {
+      const result = await window.electronAPI?.chat.greet();
+      if (!result?.success) {
         set((state) => ({
           messages: state.messages.map((m) =>
             m.id === streamingMessageId ? { ...m, content: '', streaming: false } : m
@@ -186,12 +186,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   loadConfig: async () => {
-    const config = await window.electronAPI.config.get();
+    const config = (await window.electronAPI?.config.get()) ?? null;
     set({ config });
   },
 
   saveConfig: async (partial: Partial<AppConfig>) => {
-    const updated = await window.electronAPI.config.set(partial);
+    const updated = (await window.electronAPI?.config.set(partial)) ?? null;
     set({ config: updated });
   },
 

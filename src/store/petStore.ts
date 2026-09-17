@@ -10,7 +10,7 @@ interface PetState {
   feed: () => void;    // 喂食
   play: () => void;    // 玩耍
   rest: () => void;    // 休息
-  decay: () => void;   // 自然衰减（定时调用）
+  decay: (gates?: { feed: boolean; play: boolean; rest: boolean }) => void; // 自然衰减（定时调用），gates 为 false 的项冻结不衰减
   load: (state: Partial<PetState>) => void; // 加载持久化数据
 }
 
@@ -65,12 +65,13 @@ export const usePetStore = create<PetState>((set) => ({
     return newState;
   }),
 
-  decay: () => set((s) => {
+  decay: (gates) => set((s) => {
+    const g = gates ?? { feed: true, play: true, rest: true };
     const newState = {
       ...s,
-      hunger: Math.max(0, s.hunger - 0.5),
-      mood: Math.max(0, s.mood - 0.2),
-      energy: Math.max(0, s.energy - 0.1),
+      hunger: g.feed ? Math.max(0, s.hunger - 0.5) : s.hunger,
+      mood: g.play ? Math.max(0, s.mood - 0.2) : s.mood,
+      energy: g.rest ? Math.max(0, s.energy - 0.1) : s.energy,
     };
     // 每10次decay才保存一次，避免频繁写localStorage
     if (Math.random() < 0.1) {

@@ -1,9 +1,13 @@
 import 'reflect-metadata';
 import * as bcrypt from 'bcryptjs';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
 import { DataSource } from 'typeorm';
 import { User } from '../src/users/user.entity';
 import { PetAsset } from '../src/pets/pet-asset.entity';
 import { AgentAsset } from '../src/agents/agent-asset.entity';
+
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 async function main() {
   const dataSource = new DataSource({
@@ -50,19 +54,6 @@ async function main() {
       }),
     );
     console.log('seeded demo: demo@platform.local / demo123');
-  }
-
-  let creator = await usersRepo.findOne({ where: { email: 'creator@platform.local' } });
-  if (!creator) {
-    creator = await usersRepo.save(
-      usersRepo.create({
-        email: 'creator@platform.local',
-        username: 'creator',
-        passwordHash: await bcrypt.hash('creator123', 10),
-        role: 'user',
-      }),
-    );
-    console.log('seeded creator: creator@platform.local / creator123');
   }
 
   // ---- 示例宠物资源 ----

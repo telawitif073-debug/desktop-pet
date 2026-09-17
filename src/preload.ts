@@ -11,10 +11,6 @@ function createListener(channel: string) {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Window drag (fallback)
-  moveWindow: (data: { screenX: number; screenY: number; offsetX: number; offsetY: number }) =>
-    ipcRenderer.send('move-window', data),
-
   // Chat
   chat: {
     send: (message: string) => ipcRenderer.invoke('chat:send', message),
@@ -39,6 +35,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('platform:download', type, id),
     install: (type: 'pet' | 'agent', id: string) =>
       ipcRenderer.invoke('platform:install', type, id),
+    uninstall: (type: 'pet' | 'agent', id: string) =>
+      ipcRenderer.invoke('platform:uninstall', type, id),
     getInstalledPet: () => ipcRenderer.invoke('platform:getInstalledPet'),
     getInstalledAgent: () => ipcRenderer.invoke('platform:getInstalledAgent'),
     login: (identifier: string, password: string) =>
@@ -53,13 +51,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('pet:state-update', state),
   },
 
+  // Pet actions（动作系统：AI 生成变换动画 / 手动上传帧序列 / 删除）
+  actions: {
+    generate: (name: string) => ipcRenderer.invoke('actions:generate', name),
+    addFrames: (name: string, files: Array<{ filename: string; data: Uint8Array }>) =>
+      ipcRenderer.invoke('actions:add-frames', name, files),
+    remove: (id: string) => ipcRenderer.invoke('actions:remove', id),
+  },
+
   // Window control
   window: {
     toggleChat: (open: boolean) => ipcRenderer.invoke('window:toggle-chat', open),
+    toggleActions: (open: boolean) => ipcRenderer.invoke('window:toggle-actions', open),
     isChatOpen: () => ipcRenderer.invoke('window:is-chat-open'),
+    setIgnoreMouseEvents: (ignore: boolean) => ipcRenderer.send('window:set-ignore-mouse', ignore),
+    beginDrag: () => ipcRenderer.send('pet:begin-drag'),
+    dragMove: (delta: { dx: number; dy: number }) => ipcRenderer.send('pet:drag-move', delta),
+    endDrag: () => ipcRenderer.send('pet:end-drag'),
+    showContextMenu: () => ipcRenderer.send('pet:show-context-menu'),
   },
 
   // Event listeners
   onChatChunk: createListener('chat:chunk'),
   onGreetingTrigger: createListener('chat:greeting-trigger'),
+  onPetSettingsChanged: createListener('pet:settings-changed'),
+  onPetFeaturesChanged: createListener('pet:features-changed'),
+  onPetAssetChanged: createListener('pet:asset-changed'),
+  onPetContextAction: createListener('pet:context-action'),
+  onPetActionsChanged: createListener('pet:actions-changed'),
+  onPlayAction: createListener('pet:play-action'),
+  onToggleActions: createListener('pet:toggle-actions'),
 });

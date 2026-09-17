@@ -25,8 +25,9 @@ async function streamChat(
     model: config.model,
     messages: options.messages,
     stream: true,
-    temperature: 0.8,
-    max_tokens: 1024,
+    temperature: config.temperature ?? 0.8,
+    // 2048：推理模型的思维链会占用输出额度，过低会导致正式内容为空
+    max_tokens: 2048,
   });
 
   const response = await fetch(url, {
@@ -93,8 +94,8 @@ async function nonStreamChat(
     model: config.model,
     messages: options.messages,
     stream: false,
-    temperature: 0.8,
-    max_tokens: 1024,
+    temperature: config.temperature ?? 0.8,
+    max_tokens: 2048,
   });
 
   const response = await fetch(url, {
@@ -132,15 +133,23 @@ export function createLLMService(getConfig: () => LLMConfig): LLMService {
       }
 
       // Try streaming first, fall back to non-streaming
+      let result: string;
       try {
-        return await streamChat(config, options);
+        result = await streamChat(config, options);
       } catch (err) {
         // If streaming fails due to non-streaming endpoint, try non-streaming
         if (err instanceof Error && err.message.includes('stream')) {
-          return await nonStreamChat(config, options);
+          result = await nonStreamChat(config, options);
+        } else {
+          throw err;
         }
-        throw err;
       }
+      if (!result || !result.trim()) {
+        throw new Error(
+          'AI 返回内容为空：推理类模型（如 deepseek-reasoner）的思维链可能耗尽了输出额度，请换用非推理模型（如 deepseek-chat）后重试'
+        );
+      }
+      return result;
     },
   };
 }
