@@ -6,12 +6,18 @@ interface PetState {
   mood: number;        // 心情值 0-100，100为极好
   energy: number;      // 精力值 0-100，100为充沛
   affection: number;   // 好感度 0-100
+  // 瞬时字段（不持久化）：精灵表五状态动画的绑定依据
+  lastFeedAt: number;  // 最近一次喂食时间戳（eating 动画播放 4s）
+  lastPlayAt: number;  // 最近一次玩耍时间戳（playing 动画播放 4s）
+  lastRestAt: number;  // 最近一次休息时间戳（resting 动画播放 6s）
+  moving: boolean;     // 主进程 wander 漫步进行中（moving 动画）
   // 操作方法
   feed: () => void;    // 喂食
   play: () => void;    // 玩耍
   rest: () => void;    // 休息
   decay: (gates?: { feed: boolean; play: boolean; rest: boolean }) => void; // 自然衰减（定时调用），gates 为 false 的项冻结不衰减
   load: (state: Partial<PetState>) => void; // 加载持久化数据
+  setMoving: (v: boolean) => void; // 漫步状态回报（pet:wander-state）
 }
 
 // 从 localStorage 读取初始状态
@@ -31,9 +37,13 @@ export const usePetStore = create<PetState>((set) => ({
   mood: initialPersisted.mood ?? 80,
   energy: initialPersisted.energy ?? 80,
   affection: initialPersisted.affection ?? 50,
+  lastFeedAt: 0,
+  lastPlayAt: 0,
+  lastRestAt: 0,
+  moving: false,
 
   feed: () => set((s) => {
-    const newState = { ...s, hunger: Math.min(100, s.hunger + 15), affection: Math.min(100, s.affection + 2) };
+    const newState = { ...s, hunger: Math.min(100, s.hunger + 15), affection: Math.min(100, s.affection + 2), lastFeedAt: Date.now() };
     localStorage.setItem('pet-state', JSON.stringify({
       hunger: newState.hunger,
       mood: newState.mood,
@@ -44,7 +54,7 @@ export const usePetStore = create<PetState>((set) => ({
   }),
 
   play: () => set((s) => {
-    const newState = { ...s, mood: Math.min(100, s.mood + 20), energy: Math.max(0, s.energy - 10), affection: Math.min(100, s.affection + 5) };
+    const newState = { ...s, mood: Math.min(100, s.mood + 20), energy: Math.max(0, s.energy - 10), affection: Math.min(100, s.affection + 5), lastPlayAt: Date.now() };
     localStorage.setItem('pet-state', JSON.stringify({
       hunger: newState.hunger,
       mood: newState.mood,
@@ -55,7 +65,7 @@ export const usePetStore = create<PetState>((set) => ({
   }),
 
   rest: () => set((s) => {
-    const newState = { ...s, energy: Math.min(100, s.energy + 30), hunger: Math.max(0, s.hunger - 5) };
+    const newState = { ...s, energy: Math.min(100, s.energy + 30), hunger: Math.max(0, s.hunger - 5), lastRestAt: Date.now() };
     localStorage.setItem('pet-state', JSON.stringify({
       hunger: newState.hunger,
       mood: newState.mood,
@@ -86,4 +96,6 @@ export const usePetStore = create<PetState>((set) => ({
   }),
 
   load: (state) => set((s) => ({ ...s, ...state })),
+
+  setMoving: (v) => set((s) => (s.moving === v ? s : { ...s, moving: v })),
 }));

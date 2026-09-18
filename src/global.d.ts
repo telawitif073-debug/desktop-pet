@@ -63,14 +63,35 @@ export interface AppConfig {
   /** 当前安装宠物资源 id（platform 动作挂靠归属） */
   petAssetId?: string;
   /** 宠物形态：单图(含GIF)/多图包/Live2D/3D模型 */
-  petAssetFormat?: 'image' | 'pack' | 'live2d' | 'model3d';
+  petAssetFormat?: 'image' | 'pack' | 'live2d' | 'model3d' | 'sprite';
   /** 动作生成专用 AI 覆盖（可选） */
   actionLLM?: { model?: string; baseUrl?: string; temperature?: number };
   /** 智能体主动对话配置 */
   agentProactive?: { enabled: boolean; intervalMinutes: number };
+  /** AI 生成宠物（本地生成）用户自备 Key */
+  aiGen?: { dashscopeKey?: string; arkKey?: string; zhipuKey?: string };
   agentConfigPath?: string;
   installedAgentId?: string;
   installedAgentConfig?: unknown;
+}
+
+/** AI 生成宠物任务快照（轮询 aiGen.jobStatus 返回；渲染端镜像 src/main/aiGen/index.ts 的 AiGenJob） */
+export interface AiGenJobSnapshot {
+  id: string;
+  status: 'running' | 'done' | 'failed';
+  stage: string;
+  done: number;
+  total: number;
+  current?: string;
+  error?: string;
+  result?: {
+    kind: 'sprite' | 'live2d';
+    name: string;
+    sheetDataUrl?: string;
+    animations?: Record<string, unknown>;
+    zipDataUrl?: string;
+    previewDataUrl: string;
+  };
 }
 
 export interface ChatMessage {
@@ -140,6 +161,11 @@ declare global {
           energy: number;
           affection: number;
         }) => Promise<{ success: boolean }>;
+        wanderStart: (opts: {
+          dx: number;
+          durationMs: number;
+        }) => Promise<{ ok: boolean; reason?: string }>;
+        onWanderState: (callback: (moving: boolean) => void) => (() => void);
       };
 
       actions: {
@@ -149,6 +175,16 @@ declare global {
           files: Array<{ filename: string; data: Uint8Array }>
         ) => Promise<{ success: boolean; action?: PetAction; error?: string }>;
         remove: (id: string) => Promise<{ success: boolean; error?: string }>;
+      };
+
+      aiGen: {
+        generateSprite: (description: string, style?: string) => Promise<{ jobId: string }>;
+        generateLive2d: (
+          description: string,
+          style?: string
+        ) => Promise<{ ok: boolean; jobId?: string; error?: string }>;
+        jobStatus: (jobId: string) => Promise<AiGenJobSnapshot | null>;
+        install: (jobId: string) => Promise<{ success: boolean; name: string; path: string; format: string }>;
       };
 
       window: {

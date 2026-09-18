@@ -49,6 +49,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pet: {
     stateUpdate: (state: { hunger: number; mood: number; energy: number; affection: number }) =>
       ipcRenderer.invoke('pet:state-update', state),
+    // 随机漫步：请求主进程平移窗口（主进程校验互斥/开关/精力），状态经 onWanderState 回报
+    wanderStart: (opts: { dx: number; durationMs: number }) =>
+      ipcRenderer.invoke('pet:wander-start', opts),
+    onWanderState: createListener('pet:wander-state'),
   },
 
   // Pet actions（动作系统：AI 生成变换动画 / 手动上传帧序列 / 删除）
@@ -57,6 +61,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     addFrames: (name: string, files: Array<{ filename: string; data: Uint8Array }>) =>
       ipcRenderer.invoke('actions:add-frames', name, files),
     remove: (id: string) => ipcRenderer.invoke('actions:remove', id),
+  },
+
+  // AI 生成宠物（用户自备 Key 本地生成：任务式流水线 + 结果安装）
+  aiGen: {
+    generateSprite: (description: string, style?: string) =>
+      ipcRenderer.invoke('ai:generate-sprite', description, style),
+    generateLive2d: (description: string, style?: string) =>
+      ipcRenderer.invoke('ai:generate-live2d', description, style),
+    jobStatus: (jobId: string) => ipcRenderer.invoke('ai:gen-job-status', jobId),
+    install: (jobId: string) => ipcRenderer.invoke('ai:gen-install', jobId),
   },
 
   // Window control

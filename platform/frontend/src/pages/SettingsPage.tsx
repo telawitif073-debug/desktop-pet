@@ -21,6 +21,7 @@ const FEATURE_ITEMS: Array<{ key: keyof PetFeaturesSettings; label: string; desc
 export default function SettingsPage() {
   const [settings, setSettings] = useState<PetWindowSettings>(DEFAULTS);
   const [features, setFeatures] = useState<PetFeaturesSettings>(FEATURE_DEFAULTS);
+  const [randomMove, setRandomMove] = useState(false);
   const [loading, setLoading] = useState(electronConfig ? true : false);
   const [messageApi, contextHolder] = message.useMessage();
 
@@ -29,13 +30,14 @@ export default function SettingsPage() {
     electronConfig.get().then((config) => {
       if (config.petWindow) setSettings({ ...DEFAULTS, ...config.petWindow });
       if (config.petFeatures) setFeatures({ ...FEATURE_DEFAULTS, ...config.petFeatures });
+      setRandomMove(config.randomMoveEnabled === true);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const save = async () => {
     if (!electronConfig) return;
     try {
-      await electronConfig.set({ petWindow: settings, petFeatures: features });
+      await electronConfig.set({ petWindow: settings, petFeatures: features, randomMoveEnabled: randomMove });
       messageApi.success('设置已保存，宠物窗口实时生效');
     }
     catch (err) { messageApi.error(getErrorMessage(err)); }
@@ -75,6 +77,14 @@ export default function SettingsPage() {
             <Switch disabled={!electronConfig} checked={features[item.key]} onChange={(value) => setFeatures((cur) => ({ ...cur, [item.key]: value }))} />
           </div>
         ))}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <div>
+            <Typography.Text strong>随机漫步</Typography.Text>
+            <br />
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>宠物每隔一段时间在桌面上随机左右走动（精力不足时自动休息）</Typography.Text>
+          </div>
+          <Switch disabled={!electronConfig} checked={randomMove} onChange={setRandomMove} />
+        </div>
       </div>
       {electronConfig && <Button type="primary" icon={<SaveOutlined />} onClick={save} style={{ marginTop: 32 }}>保存设置</Button>}
     </Card>

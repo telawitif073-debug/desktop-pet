@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
+import GenSettingsPanel from './GenSettingsPanel';
 
 // 从 config.installedAgentConfig 中解析当前生效的智能体信息
 function resolveAgent(config: { installedAgentConfig?: unknown } | null) {
@@ -232,6 +233,9 @@ const SettingsPanel = () => {
           </>
         )}
       </div>
+
+      {/* AI 生成宠物（本地生成，用户自备 Key）：自带 Key 保存按钮，与上方"保存"相互独立 */}
+      <GenSettingsPanel />
 
       <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
         <button

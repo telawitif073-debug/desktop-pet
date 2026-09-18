@@ -163,12 +163,13 @@ export class PlatformClient {
 
   /** 按平台标记或解压目录内容推断宠物形态 */
   private resolveFormat(detailFormat: unknown, installDir: string): PetFormat {
-    if (detailFormat === 'pack' || detailFormat === 'live2d' || detailFormat === 'model3d' || detailFormat === 'image') {
+    if (detailFormat === 'pack' || detailFormat === 'live2d' || detailFormat === 'model3d' || detailFormat === 'image' || detailFormat === 'sprite') {
       return detailFormat;
     }
     if (findFirstFile(installDir, (p) => /live2d-lite\.json$/i.test(p))) return 'live2d';
     if (findFirstFile(installDir, (p) => /model3\.json$/i.test(p))) return 'live2d';
-    if (findFirstFile(installDir, (p) => /\.(glb|gltf)$/i.test(p))) return 'model3d';
+    if (findFirstFile(installDir, (p) => /\.glb$|\.gltf$/i.test(p))) return 'model3d';
+    if (findFirstFile(installDir, (p) => /animations\.json$/i.test(p))) return 'sprite';
     if (listFiles(installDir).filter((p) => IMAGE_EXTS.test(p)).length > 1) return 'pack';
     return 'image';
   }
@@ -255,7 +256,9 @@ export class PlatformClient {
         ? [(p) => /model3\.json$/i.test(p), (p) => /live2d-lite\.json$/i.test(p)]
         : format === 'model3d'
           ? [(p) => /\.(glb|gltf)$/i.test(p)]
-          : [(p) => /main\.(png|jpe?g|gif|webp)$/i.test(p), (p) => IMAGE_EXTS.test(p)];
+          : format === 'sprite'
+            ? [(p) => /spritesheet\.png$/i.test(p)]
+            : [(p) => /main\.(png|jpe?g|gif|webp)$/i.test(p), (p) => IMAGE_EXTS.test(p)];
       let installedPath: string | null = null;
       for (const predicate of pickers) {
         installedPath = findFirstFile(installDir, predicate);

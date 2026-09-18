@@ -47,6 +47,7 @@ interface Window {
       get: () => Promise<{
         petWindow?: { width: number; height: number; opacity: number };
         petFeatures?: { feedEnabled: boolean; restEnabled: boolean; playEnabled: boolean; affectionEnabled: boolean };
+        randomMoveEnabled?: boolean;
       } & Record<string, unknown>>;
       set: (partial: Record<string, unknown>) => Promise<unknown>;
     };

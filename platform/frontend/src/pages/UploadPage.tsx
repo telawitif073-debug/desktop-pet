@@ -8,9 +8,8 @@ import type { PetActionUpload } from '../api';
 import type { AssetType, PetFormat } from '../types';
 import { getErrorMessage } from '../utils';
 import SubjectExtractionPanel from '../components/SubjectExtractionPanel';
-import AiPetGeneratorPanel from '../components/AiPetGeneratorPanel';
-import type { AiApplyOptions } from '../components/AiPetGeneratorPanel';
-import type { PetDesign } from '../utils/petCanvas';
+import AiPetStudioPanel from '../components/AiPetStudioPanel';
+import type { AiPetApplyPayload } from '../components/AiPetStudioPanel';
 
 const { Dragger } = Upload;
 
@@ -95,24 +94,23 @@ export default function UploadPage() {
     }
   };
 
-  const handleApplyAiPet = (file: File, design: PetDesign, opts?: AiApplyOptions) => {
-    setSelectedFile(file);
-    if (opts?.format) setPetFormat(opts.format);
-    if (opts?.preview) {
+  /** AI 生成结果填入表单：zip（精灵表或 Live2D 模型包）+ 预览图，形态随生成路径 */
+  const handleApplyAiPet = (payload: AiPetApplyPayload) => {
+    setSelectedFile(payload.file);
+    setPetFormat(payload.format);
+    if (payload.preview) {
       setPreviewList([{
         uid: `${Date.now()}`,
-        name: opts.preview.name,
+        name: payload.preview.name,
         status: 'done',
-        originFileObj: opts.preview as unknown as UploadFile['originFileObj'],
+        originFileObj: payload.preview as unknown as UploadFile['originFileObj'],
       }]);
     }
     form.setFieldsValue({
-      name: design.name || form.getFieldValue('name'),
-      description: design.desc || form.getFieldValue('description'),
+      name: payload.name || form.getFieldValue('name'),
       category: 'AI 生成',
     });
-    const label = opts?.format === 'live2d' ? 'Live2D 模型包' : opts?.format === 'model3d' ? '3D 模型' : '生成图片';
-    messageApi.success(`已填入「${design.name}」的${label}${opts?.preview ? '与预览图' : ''}，可直接提交审核`);
+    messageApi.success(`已填入「${payload.name}」的${payload.format === 'live2d' ? 'Live2D 模型' : '精灵表'}与预览图，可直接提交审核`);
   };
 
   const submit = async (values: Record<string, unknown>) => {
@@ -273,7 +271,7 @@ export default function UploadPage() {
           </Form.Item>
           {type === 'pet' ? (
             <>
-              <AiPetGeneratorPanel onApply={handleApplyAiPet} />
+              <AiPetStudioPanel onApply={handleApplyAiPet} />
               <Form.Item name="category" label="分类"><Input placeholder="图片、动画或 3D" /></Form.Item>
               <Form.Item name="tags" label="标签"><Input placeholder="用逗号分隔，例如：猫, 可爱, 动画" /></Form.Item>
               <Form.Item label="宠物形态" tooltip="“自动识别”按文件后缀判断：zip=多图包、glb/gltf=3D 模型、其余=单图（含 GIF）。Live2D 模型包同为 zip，需手动选择">
@@ -283,6 +281,7 @@ export default function UploadPage() {
                   <Radio.Button value="pack">多图包</Radio.Button>
                   <Radio.Button value="live2d">Live2D</Radio.Button>
                   <Radio.Button value="model3d">3D 模型</Radio.Button>
+                  <Radio.Button value="sprite">精灵表</Radio.Button>
                 </Radio.Group>
               </Form.Item>
               <Form.Item label="资源文件" required>

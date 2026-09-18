@@ -62,7 +62,7 @@ export interface PetActionTransform {
 }
 
 /** 宠物资源形态：image=单张图片（含 GIF），pack=多图帧序列包，live2d=Live2D 模型包，model3d=3D 模型（glb/gltf） */
-export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
+export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d' | 'sprite';
 
 /** 宠物动作：kind=transform 为程序化变换动画（AI 生成），kind=frames 为帧序列（手动/宠物资源包附带），
  * kind=clip 为 Live2D/3D 模型内置动画 clip（仅模型宠物可用）。
@@ -109,6 +109,16 @@ export interface AgentProactiveConfig {
   intervalMinutes: number;
 }
 
+/** AI 生成宠物（客户端本地流水线）用户自备 Key，仅存本机 config.json */
+export interface AiGenConfig {
+  /** 阿里云百炼 DashScope Key：通义万相图生视频（精灵表路径必需） */
+  dashscopeKey?: string;
+  /** 火山方舟 Key：Seedream 基准图出图（可选，未配置时回退 CogView 免费模型） */
+  arkKey?: string;
+  /** 智谱 Key：CogView-3-Flash 免费出图 + glm-4-flash 提示词细化（推荐配置） */
+  zhipuKey?: string;
+}
+
 export interface AppConfig {
   petSystemEnabled: boolean;
   foodSystemEnabled: boolean;
@@ -138,6 +148,8 @@ export interface AppConfig {
   actionLLM?: ActionLLMConfig;
   /** 智能体主动对话配置 */
   agentProactive?: AgentProactiveConfig;
+  /** AI 生成宠物（本地生成）用户自备 Key */
+  aiGen?: AiGenConfig;
   agentConfigPath?: string;
   installedAgentId?: string;
   installedAgentConfig?: unknown;
@@ -218,6 +230,7 @@ export function loadConfig(): AppConfig {
           enabled: parsed.agentProactive?.enabled ?? DEFAULT_CONFIG.agentProactive!.enabled,
           intervalMinutes: parsed.agentProactive?.intervalMinutes ?? DEFAULT_CONFIG.agentProactive!.intervalMinutes,
         },
+        aiGen: parsed.aiGen && typeof parsed.aiGen === 'object' ? (parsed.aiGen as AiGenConfig) : {},
       };
       if (loaded.platform.frontendUrl === 'http://localhost:5173') {
         loaded.platform.frontendUrl = DEFAULT_CONFIG.platform.frontendUrl;
@@ -252,6 +265,7 @@ export function saveConfig(config: Partial<AppConfig>): AppConfig {
       enabled: config.agentProactive?.enabled ?? current.agentProactive?.enabled ?? true,
       intervalMinutes: config.agentProactive?.intervalMinutes ?? current.agentProactive?.intervalMinutes ?? 30,
     },
+    aiGen: { ...current.aiGen, ...(config.aiGen || {}) },
   };
   const configPath = getConfigPath();
   try {

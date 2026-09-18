@@ -17,6 +17,8 @@ import {
   removeAction,
   resolvePetInfo,
 } from './main/petActions';
+import { isWandering, startWander, stopWander } from './main/wander';
+import { registerAiGenIpc } from './main/aiGen';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -279,6 +281,9 @@ const notifyPetAssetChanged = () => {
   }
 };
 
+// AI 生成宠物（用户自备 Key 本地生成）：任务式流水线 + 结果直接安装并切换当前宠物
+registerAiGenIpc({ notifyPetAssetChanged });
+
 ipcMain.handle('platform:install', async (_event, type: PlatformAssetType, id: string) => {
   const result = await platformClient.install(type, id) as { actionsCount?: number };
   if (type === 'pet') {
@@ -391,6 +396,11 @@ ipcMain.handle('window:toggle-chat', (event, open: boolean) => {
   if (!win) return { success: false };
 
   isChatOpen = open;
+  // 面板展开与漫步互斥：进行中的漫步立即停止（窗口随即按面板尺寸重排）
+  if (open && isWandering()) {
+    stopWander();
+    win.webContents.send('pet:wander-state', false);
+  }
   applyWindowSize(win, open);
   return { success: true, isChatOpen: open };
 });
@@ -405,6 +415,11 @@ ipcMain.handle('window:toggle-actions', (event, open: boolean) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return { success: false };
   isActionsOpen = open;
+  // 面板展开与漫步互斥：进行中的漫步立即停止
+  if (open && isWandering()) {
+    stopWander();
+    win.webContents.send('pet:wander-state', false);
+  }
   applyWindowSize(win, open);
   return { success: true };
 });
@@ -445,6 +460,11 @@ function petDragTick() {
 
 ipcMain.on('pet:begin-drag', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  // 拖拽与漫步互斥：拖拽开始时中断进行中的漫步
+  if (isWandering()) {
+    stopWander();
+    mainWindow.webContents.send('pet:wander-state', false);
+  }
   const [wx, wy] = mainWindow.getPosition();
   const [w, h] = mainWindow.getSize();
   petDragBase.cursor = screen.getCursorScreenPoint();
@@ -471,6 +491,25 @@ ipcMain.on('pet:end-drag', () => {
   }
 });
 
+// 随机漫步：渲染端调度（5s 一次掷骰），主进程校验互斥/开关/精力后执行窗口平移。
+// 漫步状态经 pet:wander-state 推送渲染端，驱动精灵表 moving 动画。
+ipcMain.handle('pet:wander-start', (_event, opts: { dx: number; durationMs: number }) => {
+  const reject = (reason: string) => ({ ok: false, reason });
+  if (!mainWindow || mainWindow.isDestroyed()) return reject('no-window');
+  if (petDragging || isChatOpen || isActionsOpen || isWandering()) return reject('busy');
+  if (!loadConfig().randomMoveEnabled) return reject('disabled');
+  if (currentPetState.energy <= 30) return reject('tired');
+  const dx = Number.isFinite(opts?.dx) ? Math.max(-400, Math.min(400, Math.round(opts.dx))) : 0;
+  const durationMs = Math.max(500, Math.min(10_000, Math.round(opts?.durationMs ?? 2500)));
+  if (!dx) return reject('noop');
+  const win = mainWindow;
+  startWander(win, dx, durationMs, () => {
+    if (!win.isDestroyed()) win.webContents.send('pet:wander-state', false);
+  });
+  win.webContents.send('pet:wander-state', true);
+  return { ok: true };
+});
+
 // "重新加载页面"禁止直接 webContents.reload()：透明无边框窗口在 Windows 上重载
 // 会丢失透明度（变成不透明白块），且主进程残留状态（isChatOpen/点击穿透标志/拖拽
 // 定时器）与重载后渲染端的初始状态不同步，导致应用不可用。改为整窗重建：保留
@@ -481,6 +520,7 @@ function recreatePetWindow() {
   isChatOpen = false;
   isActionsOpen = false;
   petDragging = false;
+  stopWander();
   if (petDragTimer) {
     clearInterval(petDragTimer);
     petDragTimer = null;

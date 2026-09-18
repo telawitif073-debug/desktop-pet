@@ -7,6 +7,7 @@ import petImg from './assets/pet.png';
 import coreJsUrl from './assets/live2dcubismcore.min.js?url';
 import { usePetStore } from './store/petStore';
 import { useChatStore } from './store/chatStore';
+import { SpriteAnimator, type SpriteAnimationsConfig } from './renderer/spriteAnimator';
 import ChatPanel from './components/ChatPanel';
 import ActionsPanel from './components/ActionsPanel';
 import type { PetAction } from './global.d';
@@ -29,6 +30,21 @@ const DEFAULT_FEATURES: PetFeatures = { feedEnabled: true, restEnabled: true, pl
 
 // Cubism Core（Live2D 官方运行时）：需在加载 Live2D 模型前以 <script> 注入全局 window.Live2DCubismCore
 let cubismCorePromise: Promise<void> | null = null;
+
+/** 精灵表动画配置加载：animations.json 与 spritesheet.png 同目录，经 petaction:// 协议读取 */
+async function loadSpriteAnimations(sheetPath?: string | null): Promise<SpriteAnimationsConfig | null> {
+  if (!sheetPath) return null;
+  const dir = sheetPath.slice(0, Math.max(sheetPath.lastIndexOf('\\'), sheetPath.lastIndexOf('/')));
+  try {
+    const res = await fetch(`petaction://local/${encodeURIComponent('animations.json')}?p=${encodeURIComponent(`${dir}/animations.json`)}`);
+    if (!res.ok) return null;
+    const json = (await res.json()) as SpriteAnimationsConfig | null;
+    if (!json || typeof json.frameWidth !== 'number' || typeof json.frameHeight !== 'number' || !json.animations) return null;
+    return json;
+  } catch {
+    return null;
+  }
+}
 const loadCubismCore = (): Promise<void> => {
   if ((window as unknown as { Live2DCubismCore?: unknown }).Live2DCubismCore) return Promise.resolve();
   if (!cubismCorePromise) {
@@ -48,7 +64,11 @@ const loadCubismCore = (): Promise<void> => {
 
 const App = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({ hunger: 80, mood: 80, energy: 80, affection: 50 });
+  // 精灵表五状态判定依据（ticker 内读取）：四项数值 + 互动时间戳 + 漫步标志
+  const stateRef = useRef({
+    hunger: 80, mood: 80, energy: 80, affection: 50,
+    lastFeedAt: 0, lastPlayAt: 0, lastRestAt: 0, moving: false,
+  });
   const [chatOpen, setChatOpen] = useState(false);
   const chatOpenRef = useRef(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -69,15 +89,35 @@ const App = () => {
   const ignoreRef = useRef(true);
   const hitRectRef = useRef<{ left: number; top: number; w: number; h: number } | null>(null);
   const hitAlphaRef = useRef<{ data: Uint8ClampedArray; w: number; h: number } | null>(null);
+  /** 精灵表动画驱动（petAssetFormat === 'sprite' 时由 initPixi 注入，五状态切换用） */
+  const spriteAnimatorRef = useRef<SpriteAnimator | null>(null);
 
-  const { hunger, mood, energy, affection, feed, play, rest, decay } = usePetStore();
+  const { hunger, mood, energy, affection, lastFeedAt, lastPlayAt, lastRestAt, moving, feed, play, rest, decay, setMoving } = usePetStore();
   const { triggerGreeting } = useChatStore();
 
   useEffect(() => {
-    stateRef.current = { hunger, mood, energy, affection };
+    stateRef.current = { hunger, mood, energy, affection, lastFeedAt, lastPlayAt, lastRestAt, moving };
     // Sync pet state to main process for LLM context
     window.electronAPI?.pet.stateUpdate({ hunger, mood, energy, affection });
-  }, [hunger, mood, energy, affection]);
+  }, [hunger, mood, energy, affection, lastFeedAt, lastPlayAt, lastRestAt, moving]);
+
+  // 随机漫步：主进程回报漫步状态（开始/结束/被拖拽或面板中断），驱动 moving 标志与精灵表 moving 动画
+  useEffect(() => {
+    const cleanup = window.electronAPI?.pet.onWanderState((v) => setMoving(v));
+    return cleanup;
+  }, [setMoving]);
+
+  // 漫步调度：每 5s 掷骰（15% 概率 ≈ 平均 33s 漫步一次），方向/幅度/时长随机；
+  // 互斥、开关（randomMoveEnabled）与精力门槛由主进程校验，拒绝时静默忽略
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (Math.random() >= 0.15) return;
+      const dx = (Math.random() < 0.5 ? -1 : 1) * (60 + Math.floor(Math.random() * 101));
+      const durationMs = 2000 + Math.floor(Math.random() * 1500);
+      void window.electronAPI?.pet.wanderStart({ dx, durationMs });
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   // 读取宠物窗口设置与互动功能开关，并监听资源库设置页的实时变更
   useEffect(() => {
@@ -443,7 +483,7 @@ const App = () => {
     // 删除动作时立即中断播放（stopTransform + stopActionSprite 覆盖各动作类型）
     stopActionRef.current = () => { stopTransform(); stopActionSprite(); };
 
-    const initPixi = async () => {
+    const initPixi = async (spriteMode = false) => {
       const newApp = new PIXI.Application();
       await newApp.init({
         width,
@@ -466,13 +506,26 @@ const App = () => {
       // GIF 主图：pixi 的 GifAsset 按 data:image/gif 前缀识别，加载结果为 GifSource（多帧动画）
       const isGifMain = typeof sourceUrl === 'string' && sourceUrl.startsWith('data:image/gif');
       let texture: PIXI.Texture | null = null;
-      if (isGifMain) {
+      let spriteAnimator: SpriteAnimator | null = null;
+      if (spriteMode && typeof sourceUrl === 'string') {
+        // 精灵表宠物：animations.json 与 spritesheet.png 同目录，按行列切帧后由 SpriteAnimator 驱动
+        const cfg = await loadSpriteAnimations(installedPet?.path);
+        const baseTex = await PIXI.Assets.load<PIXI.Texture>(sourceUrl);
+        pet = new PIXI.Sprite();
+        pet.anchor.set(0.5);
+        if (cfg) {
+          spriteAnimator = new SpriteAnimator(pet, baseTex, cfg);
+        } else {
+          pet.texture = baseTex; // 配置缺失：整张表当静态图退化
+        }
+      } else if (isGifMain) {
         pet = new GifSprite({ source: await PIXI.Assets.load<GifSource>(sourceUrl), loop: true, autoPlay: true });
       } else {
         const tex = await PIXI.Assets.load(sourceUrl);
         texture = tex;
         pet = new PIXI.Sprite(tex);
       }
+      spriteAnimatorRef.current = spriteAnimator;
       pet.anchor.set(0.5);
       // 等比缩放保证宠物完整显示（四周留白 30px，避免大图溢出画布被裁切）
       const pad = 30;
@@ -535,7 +588,21 @@ const App = () => {
 
       app.ticker.add(() => {
         if (!pet) return;
+        // 精灵表动画：按当前状态 fps 步进帧纹理（非 1:1 raf）
+        if (spriteAnimator) spriteAnimator.update(newApp.ticker.deltaMS);
         const { energy, mood, hunger } = stateRef.current;
+        // 五状态自动绑定（手动动作播放中不抢占）：eating(喂食后4s) > playing(玩耍后4s)
+        // > resting(休息后6s 或 精力<20) > moving(漫步) > idle；未收录的状态自动跳过
+        if (spriteAnimator && !playingActionIdRef.current) {
+          const { moving: isMoving, lastFeedAt: fedAt, lastPlayAt: playedAt, lastRestAt: restedAt } = stateRef.current;
+          const now = Date.now();
+          const anim = now - fedAt < 4000 ? 'eating'
+            : now - playedAt < 4000 ? 'playing'
+            : now - restedAt < 6000 || energy < 20 ? 'resting'
+            : isMoving ? 'moving'
+            : 'idle';
+          if (spriteAnimator.has(anim)) spriteAnimator.setAnimation(anim);
+        }
         pet.tint = hunger < 30 ? 0xaaaaaa : 0xffffff;
 
         // 状态过渡补间进行中：插值 x/y/rotation/scale，让姿态平滑衔接不跳变
@@ -1078,7 +1145,7 @@ const App = () => {
       }
     };
 
-    // 宠物形态分流：model3d 走 three.js，live2d 走 Live2D，其余（image/pack/gif）走 Pixi
+    // 宠物形态分流：model3d 走 three.js，live2d 走 Live2D，sprite 走 Pixi 精灵表，其余（image/pack/gif）走 Pixi
     void (async () => {
       let format: string | undefined;
       try {
@@ -1087,6 +1154,7 @@ const App = () => {
       if (isCancelled) return;
       if (format === 'model3d') await initThree();
       else if (format === 'live2d') await initLive2D();
+      else if (format === 'sprite') await initPixi(true);
       else initPixi();
     })();
 

@@ -14,7 +14,7 @@ export type AssetStatus = 'pending' | 'approved' | 'rejected';
 
 /** 宠物资源形态：image=单张图片（含 GIF 动图），pack=多图模型包（zip），
  * live2d=Live2D 模型包（zip 含 model3.json），model3d=3D 模型（glb/gltf） */
-export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
+export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d' | 'sprite';
 
 @Entity('pet_assets')
 export class PetAsset {
@@ -28,7 +28,7 @@ export class PetAsset {
   description: string | null;
 
   @Index()
-  @Column({ type: 'enum', enum: ['image', 'pack', 'live2d', 'model3d'], default: 'image' })
+  @Column({ type: 'enum', enum: ['image', 'pack', 'live2d', 'model3d', 'sprite'], default: 'image' })
   format: PetFormat;
 
   @Column({ name: 'author_id', type: 'uuid' })

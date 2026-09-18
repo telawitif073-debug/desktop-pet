@@ -1,15 +1,15 @@
 /**
- * AI 抠图智能体（独立文件，与绘图智能体 painting-agent.ts 构成两段链路）。
- * 职责：接收图像生成模型（CogView）产出的纯白底原始立绘，在服务端去背，返回只有主体的透明 PNG。
- * 算法（针对「白色主体 + 白色背景」防误删设计）：
- *   ① 洪泛：从四边清除与背景色差在容差内的 4 邻接连通像素；
- *   ② 腐蚀 + 边缘连通过滤（核心）：白色裙子/尾巴等主体内部与背景色差极小，洪泛会沿
- *      抗锯齿细缝「泄漏」进主体内部——对清除掩码做 3x3 腐蚀两轮，细泄漏通道断裂，
- *      再只保留与画面边缘连通的清除区域（真实背景），被泄漏的主体内部恢复不透明；
+ * 绿幕抠图管线（供基准图与视频截帧共用）——自平台后端 cutout.ts 原样移植。
+ * 职责：接收纯色浅绿底（#E9FFEB）原始立绘/视频帧，去背，返回只有主体的透明 PNG。
+ * 算法（针对「浅色主体 + 浅绿背景」防误删设计）：
+ *   ① 洪泛：从四边清除与背景色差在容差内的 4 邻接连通像素（逐行左右边缘基准，容忍幕布渐变）；
+ *   ② 腐蚀 + 边缘连通过滤：浅色主体与背景色差极小处，洪泛会沿抗锯齿细缝「泄漏」进
+ *      主体内部——对清除掩码做 3x3 腐蚀两轮，细泄漏通道断裂，再只保留与画面边缘连通的
+ *      清除区域（真实背景），被泄漏的主体内部恢复不透明；
  *   ③ 残留小岛清理：清掉与主体不相连的小块背景残渣；
- *   ④ 边界按色差羽化，弱化锯齿/白边；
- *   ⑤ 自检阶梯（34→46→58）：透明占比不达标自动提高容差重试（最多 3 轮）。
- * 依赖 jpeg-js/pngjs 纯 JS 编解码（无原生编译）。
+ *   ④ 绿幕残晕清扫：清除与背景连通的「绿色主导」残晕（CogView 常画的绿色光晕/脚下阴影）；
+ *   ⑤ 边界按色差羽化，弱化锯齿/绿边；
+ *   ⑥ 自检阶梯（34→46→58）：透明占比不达标自动调整容差重试（最多 3 轮）。
  */
 
 import jpegJs from 'jpeg-js';
@@ -22,6 +22,11 @@ export interface CutoutResult {
   tolerance: number;
   /** 透明像素占比（0-100，自检指标） */
   transparentPct: number;
+  /** 图像尺寸（精灵表对齐裁剪用） */
+  width: number;
+  height: number;
+  /** 主体包围盒（alpha>16 像素范围；全透明时为 null） */
+  bbox: { x0: number; y0: number; x1: number; y1: number } | null;
 }
 
 /** dataUrl → { mime, buffer }（mime 按魔数复核：FFD8=jpeg / 8950=png） */
@@ -35,7 +40,7 @@ function parseDataUrl(dataUrl: string): { buffer: Buffer; mime: string } {
 }
 
 /** 解码为 RGBA 像素（jpeg 走 jpeg-js，png 走 pngjs，其余格式不支持） */
-function decodeToRgba(buffer: Buffer, mime: string): { data: Buffer; width: number; height: number } {
+export function decodeToRgba(buffer: Buffer, mime: string): { data: Buffer; width: number; height: number } {
   if (mime === 'image/jpeg') {
     const img = jpegJs.decode(buffer, { useTArray: true, formatAsRGBA: true });
     return { data: Buffer.from(img.data), width: img.width, height: img.height };
@@ -47,7 +52,7 @@ function decodeToRgba(buffer: Buffer, mime: string): { data: Buffer; width: numb
   throw new Error(`不支持的图像格式: ${mime}`);
 }
 
-/** 背景基准色取四边像素平均（提示词要求纯白底，边缘应全为背景） */
+/** 背景基准色取四边像素平均（提示词要求纯色底，边缘应全为背景） */
 function bgColorOf(rgba: Buffer, width: number, height: number): { br: number; bg: number; bb: number } {
   let br = 0;
   let bg = 0;
@@ -118,8 +123,7 @@ function rowBenchmarks(rgba: Buffer, width: number, height: number): { L: Float6
 }
 
 /** 从四边向内洪泛，标记与背景色差在容差内的 4 邻接连通区域（只算掩码不写 alpha）。
- *  判定基准三选一：全局四边平均 / 本行本侧边缘基准 / 本行任一侧基准（取 min，
- *  兼容中央地面被主体投影压暗时离对侧基准更近的情形）。 */
+ *  判定基准三选一：全局四边平均 / 本行本侧边缘基准 / 本行任一侧基准（取 min） */
 function floodMask(
   rgba: Buffer,
   width: number,
@@ -267,8 +271,6 @@ function forceClearBorderBand(clear: Uint8Array, width: number, height: number, 
 }
 
 /** 绿幕残晕清扫：从已清除区向内洪泛，连片清除「绿色主导」的残晕像素。
- *  CogView 常无视平涂要求，在浅绿底上画出绿色光晕/脚下椭圆阴影，其色差远超洪泛
- *  容差后以大块深浅绿斑残留。只清除与清除区连通且 G 通道显著高于 R/B 的像素——
  *  主体内部的绿色（眼睛/服饰）不与背景清除区连通，不会被波及。 */
 function sweepGreenResidue(rgba: Buffer, clear: Uint8Array, width: number, height: number): void {
   const total = width * height;
@@ -307,7 +309,7 @@ function sweepGreenResidue(rgba: Buffer, clear: Uint8Array, width: number, heigh
 }
 
 /** 兜底清除右下角「AI生成」徽章矩形区：当水印角标与残留阴影/光晕连成同一连通域时，
- *  removeSmallIslands 的外接框判定失效（外接框不再落在角落内），此矩形硬清除保证徽章必除。
+ *  removeSmallIslands 的外接框判定失效，此矩形硬清除保证徽章必除。
  *  提示词强制主体四边留 5% 边距，右下角 (80%w, 91%h) 以下不会有主体部位。 */
 function forceClearBadgeZone(clear: Uint8Array, width: number, height: number): void {
   const x0 = Math.round(width * 0.8);
@@ -320,8 +322,7 @@ function forceClearBadgeZone(clear: Uint8Array, width: number, height: number): 
 /**
  * 残留小岛清理 + 水印清除：对未清除像素做连通域标记，保留最大连通域（主体），
  * 清掉与主体不相连的小块背景碎块（<0.15% 画布），以及外接框完全落在右下角
- * 25%×12% 区域内的「AI生成」水印角标（CogView 免费版强制添加；腐蚀会让水印域
- * 外扩 1-2px，0.8/0.92 的紧边界的判定会以 1px 之差落空）。
+ * 25%×12% 区域内的「AI生成」水印角标。
  */
 function removeSmallIslands(width: number, height: number, clear: Uint8Array): Uint8Array {
   const total = width * height;
@@ -371,8 +372,7 @@ function removeSmallIslands(width: number, height: number, clear: Uint8Array): U
     if (area > mainArea) { mainArea = area; mainLabel = next; }
   }
   const islandMin = Math.max(300, Math.round(total * 0.0015));
-  // 「AI生成」水印固定在画面右下角（CogView 免费版强制角标，无关闭参数）：
-  // 连通域外接框完全落在右下角 25%×12% 区域内的一律清除（主体部位与身体相连，不受影响）
+  // 「AI生成」水印固定在画面右下角：连通域外接框完全落在右下角 25%×12% 区域内的一律清除
   const cornerX = Math.round(width * 0.75);
   const cornerY = Math.round(height * 0.88);
   const out = clear.slice();
@@ -411,6 +411,25 @@ function applyMask(rgba: Buffer, width: number, height: number, clear: Uint8Arra
   return (cleared / total) * 100;
 }
 
+/** 主体包围盒：alpha>16 的像素范围（与客户端命中判定阈值一致） */
+function subjectBbox(rgba: Buffer, width: number, height: number): CutoutResult['bbox'] {
+  let x0 = -1;
+  let y0 = -1;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (rgba[(y * width + x) * 4 + 3] > 16) {
+        if (x0 === -1 || x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y0 === -1) y0 = y;
+        y1 = y;
+      }
+    }
+  }
+  return x0 === -1 ? null : { x0, y0, x1, y1 };
+}
+
 /** RGBA Buffer → 透明 PNG dataUrl */
 function encodePngDataUrl(rgba: Buffer, width: number, height: number): string {
   const png = new PNG({ width, height });
@@ -419,11 +438,10 @@ function encodePngDataUrl(rgba: Buffer, width: number, height: number): string {
 }
 
 /**
- * 运行抠图智能体：洪泛 → 腐蚀断泄漏通道 → 只留边缘连通背景 → 小岛清理 → 羽化。
- * 自检阶梯：透明占比 <8% 视为没抠动（背景非纯白）→ 提高容差重试；>97% 过度清除 → 降低容差。最多 3 轮。
+ * 运行抠图管线：洪泛 → 腐蚀断泄漏通道 → 只留边缘连通背景 → 小岛清理 → 绿残晕清扫 → 羽化。
+ * 自检阶梯：透明占比 <8% 视为没抠动（背景非纯色）→ 提高容差重试；>97% 过度清除 → 降低容差。最多 3 轮。
  */
-export async function cutoutImage(dataUrl: string): Promise<CutoutResult> {
-  const { buffer, mime } = parseDataUrl(dataUrl);
+export async function cutoutBuffer(buffer: Buffer, mime: string): Promise<CutoutResult> {
   const source = decodeToRgba(buffer, mime);
   const ladder = [34, 46, 58];
 
@@ -445,10 +463,19 @@ export async function cutoutImage(dataUrl: string): Promise<CutoutResult> {
     if (transparentPct >= 8 && transparentPct <= 97) break;
   }
 
-  if (!best) throw new Error('抠图智能体未产出结果');
+  if (!best) throw new Error('抠图管线未产出结果');
   return {
     dataUrl: encodePngDataUrl(best.rgba, source.width, source.height),
     tolerance: best.tolerance,
     transparentPct: Math.round(best.transparentPct * 10) / 10,
+    width: source.width,
+    height: source.height,
+    bbox: subjectBbox(best.rgba, source.width, source.height),
   };
+}
+
+/** dataUrl 入口（基准图链路使用；视频截帧走 cutoutBuffer） */
+export async function cutoutImage(dataUrl: string): Promise<CutoutResult> {
+  const { buffer, mime } = parseDataUrl(dataUrl);
+  return cutoutBuffer(buffer, mime);
 }
