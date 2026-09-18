@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { Button, Card, Segmented, Space, Spin, Typography, Upload, message } from 'antd';
 import { AimOutlined, CheckOutlined, ClearOutlined, ScissorOutlined } from '@ant-design/icons';
 import { removeBackground } from '@imgly/background-removal';
@@ -111,7 +111,7 @@ export default function SubjectExtractionPanel({ file, onChange }: SubjectExtrac
     selection.current = null;
   };
 
-  return <Card className="subject-extraction" bordered={false} title={<Space><ScissorOutlined />宠物主体扣取</Space>}>
+  return <Card className="subject-extraction" variant="borderless" title={<Space><ScissorOutlined />宠物主体扣取</Space>}>
     {contextHolder}
     <Typography.Paragraph type="secondary">先把宠物从原图中提取出来，再提交资源。AI 模式自动去除背景，手动模式按框选区域裁剪。</Typography.Paragraph>
     <Segmented block value={mode} onChange={(value) => setMode(value as ExtractionMode)} options={[{ label: 'AI 扣取', value: 'ai' }, { label: '手动扣取', value: 'manual' }]} />

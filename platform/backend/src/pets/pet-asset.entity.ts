@@ -12,6 +12,10 @@ import { User } from '../users/user.entity';
 
 export type AssetStatus = 'pending' | 'approved' | 'rejected';
 
+/** 宠物资源形态：image=单张图片（含 GIF 动图），pack=多图模型包（zip），
+ * live2d=Live2D 模型包（zip 含 model3.json），model3d=3D 模型（glb/gltf） */
+export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
+
 @Entity('pet_assets')
 export class PetAsset {
   @PrimaryGeneratedColumn('uuid')
@@ -22,6 +26,10 @@ export class PetAsset {
 
   @Column({ type: 'text', nullable: true })
   description: string | null;
+
+  @Index()
+  @Column({ type: 'enum', enum: ['image', 'pack', 'live2d', 'model3d'], default: 'image' })
+  format: PetFormat;
 
   @Column({ name: 'author_id', type: 'uuid' })
   authorId: string;
@@ -38,6 +46,10 @@ export class PetAsset {
 
   @Column({ name: 'preview_url', type: 'varchar', length: 255, nullable: true })
   previewUrl: string | null;
+
+  /** 可选背景场景图（与主体分开的独立文件，桌宠窗口背景） */
+  @Column({ name: 'background_url', type: 'varchar', length: 255, nullable: true })
+  backgroundUrl: string | null;
 
   @Column({ name: 'file_url', type: 'varchar', length: 255 })
   fileUrl: string;

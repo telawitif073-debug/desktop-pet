@@ -5,9 +5,10 @@ import { PetsService } from './pets.service';
 import { PetsController } from './pets.controller';
 import { ReviewsModule } from '../reviews/reviews.module';
 import { StorageModule } from '../uploads/storage.module';
+import { ActionsModule } from '../actions/actions.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PetAsset]), ReviewsModule, StorageModule],
+  imports: [TypeOrmModule.forFeature([PetAsset]), ReviewsModule, StorageModule, ActionsModule],
   providers: [PetsService],
   controllers: [PetsController],
   exports: [PetsService],

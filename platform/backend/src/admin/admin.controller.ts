@@ -35,12 +35,12 @@ export class AdminController {
     id: string,
     status: 'approved' | 'rejected',
   ) {
+    // 动作随宠物审核，无独立审核入口
     if (type !== 'pet' && type !== 'agent') {
       throw new BadRequestException('资源类型必须是 pet 或 agent');
     }
 
-    return type === 'pet'
-      ? this.petsService.updateStatus(id, status)
-      : this.agentsService.updateStatus(id, status);
+    if (type === 'pet') return this.petsService.updateStatus(id, status);
+    return this.agentsService.updateStatus(id, status);
   }
 }

@@ -81,4 +81,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onPetActionsChanged: createListener('pet:actions-changed'),
   onPlayAction: createListener('pet:play-action'),
   onToggleActions: createListener('pet:toggle-actions'),
+  onAgentMessage: createListener('pet:agent-message'),
 });

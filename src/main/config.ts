@@ -61,15 +61,26 @@ export interface PetActionTransform {
   keyframes: PetActionKeyframe[];
 }
 
-/** 宠物动作：kind=transform 为程序化变换动画（AI 生成），kind=frames 为帧序列（手动上传图片） */
+/** 宠物资源形态：image=单张图片（含 GIF），pack=多图帧序列包，live2d=Live2D 模型包，model3d=3D 模型（glb/gltf） */
+export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
+
+/** 宠物动作：kind=transform 为程序化变换动画（AI 生成），kind=frames 为帧序列（手动/宠物资源包附带），
+ * kind=clip 为 Live2D/3D 模型内置动画 clip（仅模型宠物可用）。
+ * petAssetId 标记动作属于哪个宠物资源（动作随宠物，不可跨宠物使用） */
 export interface PetAction {
   id: string;
   name: string;
-  kind: 'transform' | 'frames';
-  source: 'ai' | 'manual';
+  kind: 'transform' | 'frames' | 'clip';
+  source: 'ai' | 'manual' | 'platform';
   transform?: PetActionTransform;
   frameFiles?: string[];
   frameRate?: number;
+  /** kind=clip 时的模型内置动画名称 */
+  clipName?: string;
+  /** 所属宠物资源 id（platform 来源动作） */
+  petAssetId?: string;
+  /** 互动绑定（feed/rest/play），安装时写入 petActionBindings */
+  interaction?: 'none' | 'feed' | 'rest' | 'play';
   createdAt: number;
 }
 
@@ -82,6 +93,20 @@ export interface ActionLLMConfig {
   model?: string;
   baseUrl?: string;
   temperature?: number;
+}
+
+/** 互动功能绑定的动作 id：喂食/休息/玩耍触发时优先播放绑定的资源库动作，未绑定回退同名动作 */
+export interface PetActionBindings {
+  feed?: string;
+  rest?: string;
+  play?: string;
+}
+
+/** 智能体主动对话配置：定时以气泡发起聊天（仅唤醒时段 8-22 点），状态低值时提醒 */
+export interface AgentProactiveConfig {
+  enabled: boolean;
+  /** 发起间隔（分钟），下限 10 分钟 */
+  intervalMinutes: number;
 }
 
 export interface AppConfig {
@@ -99,13 +124,20 @@ export interface AppConfig {
   petWindow: PetWindowConfig;
   petFeatures: PetFeaturesConfig;
   petActions: PetAction[];
+  petActionBindings?: PetActionBindings;
   llm: LLMConfig;
   platform: PlatformConfig;
   petAssetPath?: string;
   /** 当前安装宠物的资源名称（如"橘猫桌面形象"），供 AI 生成动作时感知宠物形象 */
   petAssetName?: string;
+  /** 当前安装宠物的资源 id（动作随宠物挂靠） */
+  petAssetId?: string;
+  /** 当前安装宠物的资源形态（image/pack/live2d/model3d），渲染端据此选择渲染方式 */
+  petAssetFormat?: PetFormat;
   /** 动作生成专用 AI 覆盖（可选） */
   actionLLM?: ActionLLMConfig;
+  /** 智能体主动对话配置 */
+  agentProactive?: AgentProactiveConfig;
   agentConfigPath?: string;
   installedAgentId?: string;
   installedAgentConfig?: unknown;
@@ -152,6 +184,10 @@ const DEFAULT_CONFIG: AppConfig = {
     refreshToken: '',
     user: null,
   },
+  agentProactive: {
+    enabled: true,
+    intervalMinutes: 30,
+  },
 };
 
 let cachedConfig: AppConfig | null = null;
@@ -174,7 +210,14 @@ export function loadConfig(): AppConfig {
         petWindow: { ...DEFAULT_CONFIG.petWindow, ...(parsed.petWindow || {}) },
         petFeatures: { ...DEFAULT_CONFIG.petFeatures, ...(parsed.petFeatures || {}) },
         petActions: Array.isArray(parsed.petActions) ? (parsed.petActions as PetAction[]) : [],
+        petActionBindings: parsed.petActionBindings && typeof parsed.petActionBindings === 'object'
+          ? (parsed.petActionBindings as PetActionBindings)
+          : {},
         platform: { ...DEFAULT_CONFIG.platform, ...(parsed.platform || {}) },
+        agentProactive: {
+          enabled: parsed.agentProactive?.enabled ?? DEFAULT_CONFIG.agentProactive!.enabled,
+          intervalMinutes: parsed.agentProactive?.intervalMinutes ?? DEFAULT_CONFIG.agentProactive!.intervalMinutes,
+        },
       };
       if (loaded.platform.frontendUrl === 'http://localhost:5173') {
         loaded.platform.frontendUrl = DEFAULT_CONFIG.platform.frontendUrl;
@@ -200,8 +243,15 @@ export function saveConfig(config: Partial<AppConfig>): AppConfig {
     petWindow: { ...current.petWindow, ...(config.petWindow || {}) },
     petFeatures: { ...current.petFeatures, ...(config.petFeatures || {}) },
     petActions: Array.isArray(config.petActions) ? config.petActions : current.petActions,
+    petActionBindings: config.petActionBindings !== undefined
+      ? (config.petActionBindings || {})
+      : current.petActionBindings,
     llm: { ...current.llm, ...(config.llm || {}) },
     platform: { ...current.platform, ...(config.platform || {}) },
+    agentProactive: {
+      enabled: config.agentProactive?.enabled ?? current.agentProactive?.enabled ?? true,
+      intervalMinutes: config.agentProactive?.intervalMinutes ?? current.agentProactive?.intervalMinutes ?? 30,
+    },
   };
   const configPath = getConfigPath();
   try {

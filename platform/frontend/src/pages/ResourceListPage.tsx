@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Card, Empty, Input, Pagination, Select, Skeleton, Space, Tag, Tabs, Typography } from 'antd';
 import { SearchOutlined, DownloadOutlined, StarFilled } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -7,6 +7,8 @@ import type { Asset, AssetType, PageResponse } from '../types';
 import { getErrorMessage } from '../utils';
 
 const typeTabs = [{ key: 'pet', label: '宠物资源' }, { key: 'agent', label: '智能体' }];
+
+const formatLabels: Record<string, string> = { image: '单图', pack: '多图包', live2d: 'Live2D', model3d: '3D 模型' };
 
 export default function ResourceListPage() {
   const [type, setType] = useState<AssetType>('pet');
@@ -27,7 +29,7 @@ export default function ResourceListPage() {
 
   const submitSearch = () => { setPage(1); setSearch(keyword.trim()); };
   const renderCard = (asset: Asset) => <Link to={`/asset/${type}/${asset.id}`} key={asset.id}>
-    <Card hoverable className="asset-card" cover={<div className="asset-cover">{asset.previewUrl ? <img src={assetUrl(asset.previewUrl)} alt="" /> : <div className="cover-letter">{asset.name.slice(0, 1)}</div>}<span className="asset-type">{type === 'pet' ? asset.category || '宠物' : asset.type || '智能体'}</span></div>}>
+    <Card hoverable className="asset-card" cover={<div className="asset-cover">{asset.previewUrl ? <img src={assetUrl(asset.previewUrl)} alt="" /> : <div className="cover-letter">{asset.name.slice(0, 1)}</div>}<span className="asset-type">{type === 'pet' ? (formatLabels[asset.format || ''] || asset.category || '宠物') : asset.type || '智能体'}</span></div>}>
       <div className="asset-card-title"><Typography.Title level={5} ellipsis={{ rows: 1 }}>{asset.name}</Typography.Title><Tag bordered={false} color={asset.status === 'approved' ? 'green' : 'gold'}>{asset.status === 'approved' ? '已发布' : asset.status}</Tag></div>
       <Typography.Paragraph ellipsis={{ rows: 2 }} type="secondary">{asset.description || '暂无描述'}</Typography.Paragraph>
       <div className="asset-meta"><span><StarFilled className="star" /> {asset.rating?.toFixed(1) || '0.0'}</span><span><DownloadOutlined /> {asset.downloads}</span><span>v{asset.version}</span></div>

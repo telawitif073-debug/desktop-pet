@@ -33,10 +33,12 @@ function getActionsDir(): string {
   return path.join(app.getPath('userData'), 'pet-actions');
 }
 
-/** 新增帧序列动作：图片写入 userData/pet-actions/<id>/，元数据写入 config */
+/** 新增帧序列动作：图片写入 userData/pet-actions/<id>/，元数据写入 config。
+ * options.petAssetId 提供时标记为资源库动作（随宠物安装，换宠物时清除） */
 export function addFramesAction(
   name: string,
-  files: Array<{ filename: string; data: Buffer }>
+  files: Array<{ filename: string; data: Buffer }>,
+  options?: { petAssetId?: string; interaction?: 'none' | 'feed' | 'rest' | 'play'; frameRate?: number },
 ): PetAction {
   const trimmedName = name.trim();
   if (!trimmedName) throw new Error('动作名称不能为空');
@@ -67,13 +69,75 @@ export function addFramesAction(
     id,
     name: trimmedName,
     kind: 'frames',
-    source: 'manual',
+    source: options?.petAssetId ? 'platform' : 'manual',
     frameFiles,
-    frameRate: 6,
+    frameRate: options?.frameRate ?? 6,
+    ...(options?.petAssetId ? { petAssetId: options.petAssetId } : {}),
+    ...(options?.interaction && options.interaction !== 'none' ? { interaction: options.interaction } : {}),
     createdAt: Date.now(),
   };
   saveConfig({ petActions: [...config.petActions, action] });
   return action;
+}
+
+/** 注册模型内置动画 clip 动作（Live2D/3D 模型宠物，播放由渲染端按形态驱动） */
+export function addClipAction(
+  name: string,
+  clipName: string,
+  options?: { petAssetId?: string; interaction?: 'none' | 'feed' | 'rest' | 'play' },
+): PetAction {
+  const trimmedName = name.trim();
+  const trimmedClip = clipName.trim();
+  if (!trimmedName) throw new Error('动作名称不能为空');
+  if (!trimmedClip) throw new Error('模型动画 clip 名称不能为空');
+
+  const config = loadConfig();
+  if (config.petActions.length >= PET_ACTIONS_MAX) {
+    throw new Error(`动作数量已达上限（${PET_ACTIONS_MAX} 个），请先删除部分动作`);
+  }
+
+  const action: PetAction = {
+    id: `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name: trimmedName,
+    kind: 'clip',
+    source: 'platform',
+    clipName: trimmedClip,
+    ...(options?.petAssetId ? { petAssetId: options.petAssetId } : {}),
+    ...(options?.interaction && options.interaction !== 'none' ? { interaction: options.interaction } : {}),
+    createdAt: Date.now(),
+  };
+  saveConfig({ petActions: [...config.petActions, action] });
+  return action;
+}
+
+/** 清除资源库动作（换宠物时旧宠物的动作不可复用），并清理关联的互动绑定。
+ * petAssetId 提供时仅清除属于该宠物的动作 */
+export function clearPlatformActions(petAssetId?: string): number {
+  const config = loadConfig();
+  const removed = config.petActions.filter((a) => a.source === 'platform' && (!petAssetId || a.petAssetId === petAssetId));
+  if (!removed.length) return 0;
+
+  for (const action of removed) {
+    if (action.kind === 'frames' && action.frameFiles?.length) {
+      try {
+        fs.rmSync(path.dirname(action.frameFiles[0]), { recursive: true, force: true });
+      } catch (e) {
+        console.error('Failed to remove platform action frames dir:', e);
+      }
+    }
+  }
+
+  const removedIds = new Set(removed.map((a) => a.id));
+  const bindings = { ...(config.petActionBindings || {}) };
+  (Object.keys(bindings) as Array<keyof typeof bindings>).forEach((key) => {
+    const boundId = bindings[key];
+    if (boundId && removedIds.has(boundId)) delete bindings[key];
+  });
+  saveConfig({
+    petActions: config.petActions.filter((a) => a.source !== 'platform'),
+    petActionBindings: bindings,
+  });
+  return removed.length;
 }
 
 /** 获取当前宠物形象信息；若 config 缺少资源名（旧版本安装），从平台反查一次并回写 */
@@ -207,6 +271,7 @@ export async function generateAction(
     '{"loop":true,"duration":1500,"keyframes":[{"t":0,"dx":0,"dy":0,"rotation":0,"scale":1,"view":"front"},{"t":1,"dx":0,"dy":0,"rotation":0,"scale":1,"view":"front"}]}',
     '字段规则：',
     '- loop: 是否循环播放（吃饭/走路/休息等状态动作为 true，打招呼等一次性动作为 false）',
+    '- 一次性动作（loop=false）的末帧必须回到自然站立姿态（dx=0,dy=0,rotation=0,scale=1,view=front），保证动作结束后宠物自然复位',
     '- duration: 单轮时长毫秒，建议 800~3000',
     '- keyframes: 关键帧数组，2~6 个；t 为 0~1 的时间进度（首帧必须 0，末帧必须 1）',
     '- dx/dy: 相对基准位置的像素偏移，范围 -40~40（y 向下为正）',
@@ -228,7 +293,16 @@ export async function generateAction(
   if (keyframes.length < 2) throw new Error('AI 生成的关键帧无效（至少需要 2 个）');
   // 保证首末时间锚点完整，避免插值越界
   keyframes[0].t = 0;
-  keyframes[keyframes.length - 1].t = 1;
+  const lastKeyframe = keyframes[keyframes.length - 1];
+  lastKeyframe.t = 1;
+  // 非循环动作末帧强制归位：结束回到自然站立姿态，保证两个状态间的过渡自然
+  if (parsed.loop === false) {
+    lastKeyframe.dx = 0;
+    lastKeyframe.dy = 0;
+    lastKeyframe.rotation = 0;
+    lastKeyframe.scale = 1;
+    lastKeyframe.view = 'front';
+  }
 
   const transform: PetActionTransform = {
     loop: parsed.loop !== false,

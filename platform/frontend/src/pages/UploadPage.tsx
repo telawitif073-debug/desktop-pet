@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Alert, Button, Card, Form, Input, InputNumber, Radio, Slider, Space, Typography, Upload, message } from 'antd';
-import { CloudUploadOutlined, InboxOutlined } from '@ant-design/icons';
+import { CloudUploadOutlined, DeleteOutlined, InboxOutlined, PlusOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { uploadAsset } from '../api';
-import type { AssetType } from '../types';
+import { uploadAsset, uploadPet } from '../api';
+import type { PetActionUpload } from '../api';
+import type { AssetType, PetFormat } from '../types';
 import { getErrorMessage } from '../utils';
 import SubjectExtractionPanel from '../components/SubjectExtractionPanel';
 import AiPetGeneratorPanel from '../components/AiPetGeneratorPanel';
+import type { AiApplyOptions } from '../components/AiPetGeneratorPanel';
 import type { PetDesign } from '../utils/petCanvas';
 
 const { Dragger } = Upload;
@@ -20,6 +22,15 @@ interface AgentStructuredConfig {
   baseUrl?: string;
 }
 
+/** 宠物附带动作表单项：zip 帧图 或 模型内动画 clip */
+interface PetActionForm {
+  name: string;
+  interaction: 'none' | 'feed' | 'rest' | 'play';
+  mode: 'zip' | 'clip';
+  clipName: string;
+  file: File | null;
+}
+
 export default function UploadPage() {
   const [form] = Form.useForm();
   const [type, setType] = useState<AssetType>('pet');
@@ -28,10 +39,20 @@ export default function UploadPage() {
   const [messageApi, contextHolder] = message.useMessage();
   const navigate = useNavigate();
   const selectedFile = fileList[0]?.originFileObj as File | null;
+  const mainFileExt = selectedFile ? selectedFile.name.slice(selectedFile.name.lastIndexOf('.')).toLowerCase() : '';
+  // ---- 宠物形态与附带动作（动作随宠物上传，不可跨宠物）----
+  const [petFormat, setPetFormat] = useState<'auto' | PetFormat>('auto');
+  const [previewList, setPreviewList] = useState<UploadFile[]>([]);
+  const [actions, setActions] = useState<PetActionForm[]>([]);
+  const previewFile = previewList[0]?.originFileObj as File | null;
 
   const setSelectedFile = (file: File | null) => {
     setFileList(file ? [{ uid: `${Date.now()}`, name: file.name, status: 'done', originFileObj: file as UploadFile['originFileObj'] }] : []);
   };
+
+  const addAction = () => setActions((prev) => [...prev, { name: '', interaction: 'none', mode: 'zip', clipName: '', file: null }]);
+  const removeAction = (index: number) => setActions((prev) => prev.filter((_, i) => i !== index));
+  const patchAction = (index: number, patch: Partial<PetActionForm>) => setActions((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
 
   // ---- 智能体细化配置（结构化模式）----
   const [configMode, setConfigMode] = useState<'structured' | 'raw'>('structured');
@@ -74,22 +95,70 @@ export default function UploadPage() {
     }
   };
 
-  const handleApplyAiPet = (file: File, design: PetDesign) => {
+  const handleApplyAiPet = (file: File, design: PetDesign, opts?: AiApplyOptions) => {
     setSelectedFile(file);
+    if (opts?.format) setPetFormat(opts.format);
+    if (opts?.preview) {
+      setPreviewList([{
+        uid: `${Date.now()}`,
+        name: opts.preview.name,
+        status: 'done',
+        originFileObj: opts.preview as unknown as UploadFile['originFileObj'],
+      }]);
+    }
     form.setFieldsValue({
       name: design.name || form.getFieldValue('name'),
       description: design.desc || form.getFieldValue('description'),
       category: 'AI 生成',
     });
-    messageApi.success(`已填入「${design.name}」的生成图片，可直接提交审核`);
+    const label = opts?.format === 'live2d' ? 'Live2D 模型包' : opts?.format === 'model3d' ? '3D 模型' : '生成图片';
+    messageApi.success(`已填入「${design.name}」的${label}${opts?.preview ? '与预览图' : ''}，可直接提交审核`);
   };
 
   const submit = async (values: Record<string, unknown>) => {
-    const resourceType = type;
+    if (type === 'pet') {
+      if (!selectedFile) { messageApi.warning('请先选择资源文件'); return; }
+      if ((mainFileExt === '.zip' || mainFileExt === '.glb' || mainFileExt === '.gltf') && !previewFile) {
+        messageApi.warning('多图包 / Live2D / 3D 模型请上传一张预览图，便于商店展示');
+        return;
+      }
+      for (const [index, action] of actions.entries()) {
+        if (!action.name.trim()) { messageApi.warning(`第 ${index + 1} 个动作未填写名称`); return; }
+        if (action.mode === 'zip' && !action.file) { messageApi.warning(`动作「${action.name || `动作${index + 1}`}」缺少帧图 zip 压缩包`); return; }
+        if (action.mode === 'clip' && !action.clipName.trim()) { messageApi.warning(`动作「${action.name}」请填写模型动画 clip 名称`); return; }
+      }
+      setLoading(true);
+      try {
+        await uploadPet(
+          {
+            ...values,
+            tags: String(values.tags || '').split(',').map((item) => item.trim()).filter(Boolean),
+            ...(petFormat === 'auto' ? {} : { format: petFormat }),
+          },
+          selectedFile,
+          previewFile,
+          actions.map((action): PetActionUpload => ({
+            name: action.name.trim(),
+            interaction: action.interaction,
+            ...(action.mode === 'clip' ? { clipName: action.clipName.trim() } : {}),
+            file: action.file ?? undefined,
+          })),
+        );
+        messageApi.success('资源已提交，等待管理员审核');
+        navigate('/profile');
+      } catch (err) {
+        messageApi.error(getErrorMessage(err));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // ---- 智能体 ----
     let file = selectedFile;
     let configSchema: unknown;
 
-    if (resourceType === 'agent' && configMode === 'structured') {
+    if (configMode === 'structured') {
       // 结构化模式：由表单自动生成配置 JSON 作为资源文件，无需手动上传
       const finalConfig: AgentStructuredConfig = {
         ...structuredConfig,
@@ -101,21 +170,17 @@ export default function UploadPage() {
       }
       file = new File([JSON.stringify(finalConfig, null, 2)], `${finalConfig.name || 'agent'}.agent.json`, { type: 'application/json' });
       configSchema = finalConfig;
-    } else if (resourceType === 'agent' && configMode === 'raw') {
+    } else {
       if (!file) { messageApi.warning('请先选择智能体配置 JSON 文件'); return; }
       if (rawParseError || !rawConfig) { messageApi.error('配置文件不是合法 JSON，无法提交'); return; }
       configSchema = rawConfig;
-    } else if (!file) {
-      messageApi.warning('请先选择资源文件');
-      return;
     }
 
     setLoading(true);
     try {
-      await uploadAsset(resourceType, {
+      await uploadAsset('agent', {
         ...values,
-        tags: resourceType === 'pet' ? String(values.tags || '').split(',').map((item) => item.trim()).filter(Boolean) : undefined,
-        dependencies: resourceType === 'agent' ? String(values.dependencies || '').split(',').map((item) => item.trim()).filter(Boolean) : undefined,
+        dependencies: String(values.dependencies || '').split(',').map((item) => item.trim()).filter(Boolean),
         configSchema,
       }, file as File);
       messageApi.success('资源已提交，等待管理员审核');
@@ -192,7 +257,7 @@ export default function UploadPage() {
         <Typography.Paragraph>填写清晰的说明，审核通过后它会出现在公共资源库中。</Typography.Paragraph>
       </div>
       {contextHolder}
-      <Card className="form-card" bordered={false}>
+      <Card className="form-card" variant="borderless">
         <Form form={form} layout="vertical" onFinish={submit} requiredMark={false}>
           <Form.Item label="资源类型">
             <Radio.Group value={type} onChange={(event) => { setType(event.target.value); setFileList([]); }}>
@@ -211,14 +276,95 @@ export default function UploadPage() {
               <AiPetGeneratorPanel onApply={handleApplyAiPet} />
               <Form.Item name="category" label="分类"><Input placeholder="图片、动画或 3D" /></Form.Item>
               <Form.Item name="tags" label="标签"><Input placeholder="用逗号分隔，例如：猫, 可爱, 动画" /></Form.Item>
+              <Form.Item label="宠物形态" tooltip="“自动识别”按文件后缀判断：zip=多图包、glb/gltf=3D 模型、其余=单图（含 GIF）。Live2D 模型包同为 zip，需手动选择">
+                <Radio.Group value={petFormat} onChange={(event) => setPetFormat(event.target.value)}>
+                  <Radio.Button value="auto">自动识别</Radio.Button>
+                  <Radio.Button value="image">单图 / GIF</Radio.Button>
+                  <Radio.Button value="pack">多图包</Radio.Button>
+                  <Radio.Button value="live2d">Live2D</Radio.Button>
+                  <Radio.Button value="model3d">3D 模型</Radio.Button>
+                </Radio.Group>
+              </Form.Item>
               <Form.Item label="资源文件" required>
                 <Dragger maxCount={1} fileList={fileList} beforeUpload={() => false} onChange={({ fileList: next }) => setFileList(next)}>
                   <p className="ant-upload-drag-icon"><InboxOutlined /></p>
                   <p>点击或拖拽文件到这里</p>
-                  <Typography.Text type="secondary">支持图片、压缩包、JSON、TXT 等格式</Typography.Text>
+                  <Typography.Text type="secondary">单图（png/jpg/gif/webp）、多图包 zip（帧序列）、Live2D 模型 zip（含 model3.json）、3D 模型 glb/gltf</Typography.Text>
+                </Dragger>
+              </Form.Item>
+              <Form.Item label="预览图" required={mainFileExt === '.zip' || mainFileExt === '.glb' || mainFileExt === '.gltf'} tooltip="多图包 / Live2D / 3D 模型必须提供预览图；单图默认使用原图">
+                <Dragger maxCount={1} accept="image/*" fileList={previewList} beforeUpload={() => false} onChange={({ fileList: next }) => setPreviewList(next)}>
+                  <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                  <p>点击或拖拽预览图到这里</p>
+                  <Typography.Text type="secondary">商店列表与详情展示用</Typography.Text>
                 </Dragger>
               </Form.Item>
               <SubjectExtractionPanel file={selectedFile} onChange={setSelectedFile} />
+              <Card
+                size="small"
+                style={{ marginBottom: 24 }}
+                title="附带动作（可选，随宠物上传）"
+                extra={<Button size="small" icon={<PlusOutlined />} onClick={addAction}>添加动作</Button>}
+              >
+                {actions.length === 0 ? (
+                  <Typography.Text type="secondary">
+                    动作随宠物安装，不可跨宠物使用。普通动作上传帧图 zip（1~30 张，按文件名排序播放）；模型宠物可直接填写模型内动画 clip 名称。最多 15 个。
+                  </Typography.Text>
+                ) : (
+                  actions.map((action, index) => (
+                    <Card
+                      key={index}
+                      type="inner"
+                      size="small"
+                      style={{ marginBottom: 8 }}
+                      title={`动作 ${index + 1}`}
+                      extra={<Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeAction(index)} />}
+                    >
+                      <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                        <Input
+                          placeholder="动作名称，例如：吃饭"
+                          value={action.name}
+                          onChange={(event) => patchAction(index, { name: event.target.value })}
+                          maxLength={30}
+                          allowClear
+                        />
+                        <Space wrap>
+                          <Radio.Group size="small" buttonStyle="solid" value={action.interaction} onChange={(event) => patchAction(index, { interaction: event.target.value })}>
+                            <Radio.Button value="none">不绑定</Radio.Button>
+                            <Radio.Button value="feed">喂食</Radio.Button>
+                            <Radio.Button value="rest">休息</Radio.Button>
+                            <Radio.Button value="play">玩耍</Radio.Button>
+                          </Radio.Group>
+                          <Radio.Group size="small" buttonStyle="solid" value={action.mode} onChange={(event) => patchAction(index, { mode: event.target.value })}>
+                            <Radio.Button value="zip">帧图 zip</Radio.Button>
+                            <Radio.Button value="clip">模型 clip</Radio.Button>
+                          </Radio.Group>
+                        </Space>
+                        {action.mode === 'zip' ? (
+                          <Dragger
+                            maxCount={1}
+                            accept=".zip,application/zip,application/x-zip-compressed"
+                            fileList={action.file ? [{ uid: `${index}`, name: action.file.name, status: 'done' } as UploadFile] : []}
+                            beforeUpload={() => false}
+                            onChange={({ fileList: next }) => patchAction(index, { file: (next[0]?.originFileObj as File | undefined) ?? null })}
+                          >
+                            <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                            <p>点击或拖拽帧图 zip 到这里</p>
+                            <Typography.Text type="secondary">例如：frame-01.png、frame-02.png ...（按文件名顺序播放）</Typography.Text>
+                          </Dragger>
+                        ) : (
+                          <Input
+                            placeholder="模型内动画 clip 名称，例如：mtn_idle_01"
+                            value={action.clipName}
+                            onChange={(event) => patchAction(index, { clipName: event.target.value })}
+                            allowClear
+                          />
+                        )}
+                      </Space>
+                    </Card>
+                  ))
+                )}
+              </Card>
             </>
           ) : (
             <>

@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
+import { GifSprite, GifSource } from 'pixi.js/gif';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import petImg from './assets/pet.png';
+import coreJsUrl from './assets/live2dcubismcore.min.js?url';
 import { usePetStore } from './store/petStore';
 import { useChatStore } from './store/chatStore';
 import ChatPanel from './components/ChatPanel';
@@ -23,6 +27,25 @@ interface PetFeatures {
 }
 const DEFAULT_FEATURES: PetFeatures = { feedEnabled: true, restEnabled: true, playEnabled: true, affectionEnabled: true };
 
+// Cubism Core（Live2D 官方运行时）：需在加载 Live2D 模型前以 <script> 注入全局 window.Live2DCubismCore
+let cubismCorePromise: Promise<void> | null = null;
+const loadCubismCore = (): Promise<void> => {
+  if ((window as unknown as { Live2DCubismCore?: unknown }).Live2DCubismCore) return Promise.resolve();
+  if (!cubismCorePromise) {
+    cubismCorePromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = coreJsUrl;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        cubismCorePromise = null;
+        reject(new Error('Cubism Core 加载失败'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return cubismCorePromise;
+};
+
 const App = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef({ hunger: 80, mood: 80, energy: 80, affection: 50 });
@@ -31,6 +54,8 @@ const App = () => {
   const [actionsOpen, setActionsOpen] = useState(false);
   // 动作系统：列表 ref（播放查找）+ 播放函数 ref（由 initPixi effect 注入，需访问 Pixi 实例）
   const petActionsRef = useRef<PetAction[]>([]);
+  // 互动功能绑定的动作 id（资源库动作上传时可绑定喂食/休息/玩耍），随动作列表一起刷新
+  const bindingsRef = useRef<{ feed?: string; rest?: string; play?: string }>({});
   const playActionRef = useRef<((id: string) => void) | null>(null);
   // 当前播放中的动作 id + 立即停止回调：删除动作时用于中断播放并复位宠物
   const playingActionIdRef = useRef<string | null>(null);
@@ -77,6 +102,21 @@ const App = () => {
   useEffect(() => {
     const cleanup = window.electronAPI?.onPetAssetChanged(() => setAssetVersion((v) => v + 1));
     return cleanup;
+  }, []);
+
+  // 智能体主动发起的对话：气泡展示 10s 后自动消失（同时已写入聊天历史）
+  const [agentMessage, setAgentMessage] = useState<string | null>(null);
+  const agentMsgTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onAgentMessage((text) => {
+      setAgentMessage(text);
+      if (agentMsgTimerRef.current) window.clearTimeout(agentMsgTimerRef.current);
+      agentMsgTimerRef.current = window.setTimeout(() => setAgentMessage(null), 10_000);
+    });
+    return () => {
+      cleanup?.();
+      if (agentMsgTimerRef.current) window.clearTimeout(agentMsgTimerRef.current);
+    };
   }, []);
 
   // 整页点击穿透：仅宠物本体（像素级命中）与 data-interactive 元素可交互
@@ -193,12 +233,13 @@ const App = () => {
     }
   }, []);
 
-  // 动作列表加载 + 变更监听（删除正在播放的动作时立即停止并复位宠物）
+  // 动作列表加载 + 变更监听（删除正在播放的动作时立即停止并复位宠物；同步互动绑定供自动播放使用）
   useEffect(() => {
     const load = () => {
       window.electronAPI?.config.get().then((c) => {
         const list = (c?.petActions as PetAction[]) || [];
         petActionsRef.current = list;
+        bindingsRef.current = c?.petActionBindings || {};
         const playing = playingActionIdRef.current;
         if (playing && !list.some((a) => a.id === playing)) stopActionRef.current?.();
       }).catch(() => {});
@@ -218,18 +259,22 @@ const App = () => {
     };
   }, [handleToggleActions]);
 
-  // 互动时自动播放同名动作（喂食→吃饭、休息→休息、玩耍→玩耍；未创建则跳过）
-  const autoPlayAction = useCallback((name: string) => {
-    const action = petActionsRef.current.find((a) => a.name === name);
+  // 互动时自动播放动作：优先播放在资源库中绑定给该功能的动作，未绑定回退同名动作（喂食→吃饭、休息→休息、玩耍→玩耍）
+  const autoPlayAction = useCallback((kind: 'feed' | 'rest' | 'play') => {
+    const actions = petActionsRef.current;
+    const boundId = bindingsRef.current[kind];
+    const bound = boundId ? actions.find((a) => a.id === boundId) : undefined;
+    const fallbackName = kind === 'feed' ? '吃饭' : kind === 'rest' ? '休息' : '玩耍';
+    const action = bound ?? actions.find((a) => a.name === fallbackName);
     if (action) playActionRef.current?.(action.id);
   }, []);
 
   // 右键宠物弹出的原生菜单动作（主进程 Menu 触发）
   useEffect(() => {
     const cleanup = window.electronAPI?.onPetContextAction((action) => {
-      if (action === 'feed') { feed(); autoPlayAction('吃饭'); }
-      else if (action === 'play') { play(); autoPlayAction('玩耍'); }
-      else if (action === 'rest') { rest(); autoPlayAction('休息'); }
+      if (action === 'feed') { feed(); autoPlayAction('feed'); }
+      else if (action === 'play') { play(); autoPlayAction('play'); }
+      else if (action === 'rest') { rest(); autoPlayAction('rest'); }
       else if (action === 'open-store') window.electronAPI?.platform.openStore();
       else if (action === 'toggle-chat') handleToggleChat(!chatOpenRef.current);
     });
@@ -247,27 +292,67 @@ const App = () => {
     // 三视图纹理：由宠物原图程序化派生（front=原图、side=水平压缩模拟转身、back=水平镜像）
     let viewTextures: { front: PIXI.Texture; side: PIXI.Texture; back: PIXI.Texture } | null = null;
     // 动作播放状态（effect 局部：Pixi 重建后旧播放自然失效）
+    // transition：启动/结束的补间动画（150ms 启动淡入、200ms 结束回归自然姿态）
+    type TransitionState = {
+      kind: 'in' | 'out';
+      start: number;
+      duration: number;
+      from: { x: number; y: number; rotation: number; scale: number; texture?: PIXI.Texture };
+      to: { x: number; y: number; rotation: number; scale: number; texture?: PIXI.Texture };
+      afterOut?: () => void;
+    };
     let transformPlay: { action: PetAction; start: number; baseX: number; baseY: number; fit: number } | null = null;
-    let framesSprite: PIXI.AnimatedSprite | null = null;
+    let transition: TransitionState | null = null;
+    // 帧序列/GIF 动作精灵（AnimatedSprite 或 GifSprite，二者均为 Sprite 子类）
+    let actionSprite: PIXI.AnimatedSprite | GifSprite | null = null;
 
+    // 启动/结束过渡：补间插值 x/y/rotation/scale/texture，让两个状态间不跳变
+    const startTransition = (state: Omit<TransitionState, 'start'>) => {
+      transition = { ...state, start: Date.now() };
+    };
+    const startTransformIn = (action: PetAction) => {
+      if (!pet) return;
+      // 启动 150ms 从自然姿态补到首关键帧
+      const kfs = action.transform?.keyframes;
+      const firstKf = kfs?.[0];
+      if (!firstKf) return;
+      startTransition({
+        kind: 'in',
+        duration: 150,
+        from: { x: pet.x, y: pet.y, rotation: pet.rotation, scale: pet.scale.x },
+        to: { x: transformPlay!.baseX + firstKf.dx, y: transformPlay!.baseY + firstKf.dy, rotation: firstKf.rotation, scale: transformPlay!.fit * firstKf.scale },
+      });
+    };
     const stopTransform = () => {
       if (transformPlay && pet) {
-        pet.x = transformPlay.baseX;
-        pet.y = transformPlay.baseY;
-        pet.rotation = 0;
-        pet.scale.set(transformPlay.fit);
-        if (viewTextures) pet.texture = viewTextures.front;
+        // 结束 200ms 回归自然姿态（非循环动作末帧已归位，循环动作直接回基准）
+        const targetX = transformPlay.baseX;
+        const targetY = transformPlay.baseY;
+        const targetScale = transformPlay.fit;
+        startTransition({
+          kind: 'out',
+          duration: 200,
+          from: { x: pet.x, y: pet.y, rotation: pet.rotation, scale: pet.scale.x },
+          to: { x: targetX, y: targetY, rotation: 0, scale: targetScale },
+        });
       }
       transformPlay = null;
       if (playingActionIdRef) playingActionIdRef.current = null;
     };
 
-    const stopFrames = () => {
-      if (framesSprite) {
-        framesSprite.stop();
-        framesSprite.destroy();
-        framesSprite = null;
+    // 播放结束清理：销毁动作精灵并恢复本体显示
+    const removeActionSprite = (spr: PIXI.AnimatedSprite | GifSprite, actionId?: string) => {
+      spr.stop();
+      spr.destroy();
+      if (actionSprite === spr) actionSprite = null;
+      if (pet) pet.visible = true;
+      if (playingActionIdRef && (!actionId || playingActionIdRef.current === actionId)) {
+        playingActionIdRef.current = null;
       }
+    };
+
+    const stopActionSprite = () => {
+      if (actionSprite) removeActionSprite(actionSprite);
       if (pet) pet.visible = true;
       if (playingActionIdRef) playingActionIdRef.current = null;
     };
@@ -275,7 +360,7 @@ const App = () => {
     const playAction = (action: PetAction) => {
       if (!app || !pet) return;
       stopTransform();
-      stopFrames();
+      stopActionSprite();
 
       if (action.kind === 'transform' && action.transform) {
         transformPlay = {
@@ -286,13 +371,50 @@ const App = () => {
           fit: pet.scale.x,
         };
         if (playingActionIdRef) playingActionIdRef.current = action.id;
+        // 启动过渡：150ms 从当前姿态平滑补到首关键帧，避免状态间跳变
+        startTransformIn(action);
         return;
       }
 
-      // 帧序列动作：petaction:// 自定义协议加载本地帧图（http origin 无法直接读磁盘文件）
+      // 帧序列动作：petaction:// 自定义协议加载本地帧图（http origin 无法直接读磁盘文件）。
+      // URL path 段携带真实文件名，供 pixi 解析器按扩展名选择 loader（.gif → GifSource）
       if (action.kind === 'frames' && action.frameFiles?.length) {
-        const urls = action.frameFiles.map((p) => `petaction://local/?p=${encodeURIComponent(p)}`);
-        Promise.all(urls.map((u) => PIXI.Assets.load(u)))
+        const toUrl = (p: string) => {
+          const name = p.split(/[\\/]/).pop() || 'frame.png';
+          return `petaction://local/${encodeURIComponent(name)}?p=${encodeURIComponent(p)}`;
+        };
+
+        // 单张 GIF：GifSprite 循环播放 3 轮后自动结束
+        if (action.frameFiles.length === 1 && /\.gif$/i.test(action.frameFiles[0])) {
+          PIXI.Assets.load(toUrl(action.frameFiles[0]))
+            .then((loaded) => {
+              if (!app || !pet || isCancelled) return;
+              pet.visible = false;
+              const spr = new GifSprite({ source: loaded as GifSource, loop: true, autoPlay: true });
+              spr.anchor.set(0.5);
+              const fit = Math.min((width - 60) / spr.width, (height - 60) / spr.height);
+              spr.scale.set(fit);
+              spr.x = width / 2;
+              spr.y = height / 2;
+              let loops = 0;
+              spr.onLoop = () => {
+                loops += 1;
+                if (loops >= 3) removeActionSprite(spr, action.id);
+              };
+              app.stage.addChild(spr);
+              actionSprite = spr;
+              if (playingActionIdRef) playingActionIdRef.current = action.id;
+            })
+            .catch(() => { /* GIF 加载失败时保持静态宠物 */ });
+          return;
+        }
+
+        Promise.all(action.frameFiles.map((p) => PIXI.Assets.load(toUrl(p)).then((res) => {
+          // 帧序列混入 gif 时取其首帧纹理，避免 AnimatedSprite 收到 GifSource
+          const maybe = res as { textures?: unknown };
+          if (maybe && Array.isArray(maybe.textures) && maybe.textures.length) return maybe.textures[0] as PIXI.Texture;
+          return res as PIXI.Texture;
+        })))
           .then((textures) => {
             if (!app || !pet || isCancelled) return;
             pet.visible = false;
@@ -305,14 +427,9 @@ const App = () => {
             // animationSpeed 单位：每 tick(60fps) 推进的帧数
             spr.animationSpeed = (action.frameRate ?? 6) / 60;
             spr.loop = false;
-            spr.onComplete = () => {
-              spr.destroy();
-              if (framesSprite === spr) framesSprite = null;
-              if (pet) pet.visible = true;
-              if (playingActionIdRef?.current === action.id) playingActionIdRef.current = null;
-            };
+            spr.onComplete = () => removeActionSprite(spr, action.id);
             app.stage.addChild(spr);
-            framesSprite = spr;
+            actionSprite = spr;
             if (playingActionIdRef) playingActionIdRef.current = action.id;
             spr.gotoAndPlay(0);
           })
@@ -323,8 +440,8 @@ const App = () => {
       const found = petActionsRef.current.find((a) => a.id === id);
       if (found) playAction(found);
     };
-    // 删除动作时立即中断播放（stopTransform + stopFrames 覆盖两种动作类型）
-    stopActionRef.current = () => { stopTransform(); stopFrames(); };
+    // 删除动作时立即中断播放（stopTransform + stopActionSprite 覆盖各动作类型）
+    stopActionRef.current = () => { stopTransform(); stopActionSprite(); };
 
     const initPixi = async () => {
       const newApp = new PIXI.Application();
@@ -345,59 +462,74 @@ const App = () => {
       app.canvas.style.pointerEvents = 'none';
 
       const installedPet = await window.electronAPI?.platform.getInstalledPet();
-      const texture = await PIXI.Assets.load(installedPet?.dataUrl ?? petImg);
-      pet = new PIXI.Sprite(texture);
+      const sourceUrl = installedPet?.dataUrl ?? petImg;
+      // GIF 主图：pixi 的 GifAsset 按 data:image/gif 前缀识别，加载结果为 GifSource（多帧动画）
+      const isGifMain = typeof sourceUrl === 'string' && sourceUrl.startsWith('data:image/gif');
+      let texture: PIXI.Texture | null = null;
+      if (isGifMain) {
+        pet = new GifSprite({ source: await PIXI.Assets.load<GifSource>(sourceUrl), loop: true, autoPlay: true });
+      } else {
+        const tex = await PIXI.Assets.load(sourceUrl);
+        texture = tex;
+        pet = new PIXI.Sprite(tex);
+      }
       pet.anchor.set(0.5);
       // 等比缩放保证宠物完整显示（四周留白 30px，避免大图溢出画布被裁切）
       const pad = 30;
-      const fit = Math.min((width - pad * 2) / texture.width, (height - pad * 2) / texture.height);
+      const natW = pet.width;
+      const natH = pet.height;
+      const fit = Math.min((width - pad * 2) / natW, (height - pad * 2) / natH);
       pet.scale.set(fit);
       pet.x = width / 2;
       pet.y = height / 2;
       app.stage.addChild(pet);
 
       // 像素级命中测试：sprite 实际矩形 + 纹理 alpha 图（整页穿透，仅宠物本体不透明像素可交互）
-      const spriteW = texture.width * fit;
-      const spriteH = texture.height * fit;
+      const spriteW = natW * fit;
+      const spriteH = natH * fit;
       hitRectRef.current = { left: width / 2 - spriteW / 2, top: height / 2 - spriteH / 2, w: spriteW, h: spriteH };
       try {
-        const source = (texture.source as { resource?: CanvasImageSource }).resource;
-        if (source) {
-          const c = document.createElement('canvas');
-          c.width = texture.width;
-          c.height = texture.height;
-          const ctx = c.getContext('2d', { willReadFrequently: true });
-          if (ctx) {
-            ctx.drawImage(source, 0, 0);
-            hitAlphaRef.current = {
-              data: ctx.getImageData(0, 0, texture.width, texture.height).data,
-              w: texture.width,
-              h: texture.height,
+        // 三视图仅静态图宠物可派生（GIF 逐帧改写纹理，切换静态视图会破坏播放）
+        const tex = texture;
+        if (tex) {
+          const source = (tex.source as { resource?: CanvasImageSource }).resource;
+          if (source) {
+            const c = document.createElement('canvas');
+            c.width = tex.width;
+            c.height = tex.height;
+            const ctx = c.getContext('2d', { willReadFrequently: true });
+            if (ctx) {
+              ctx.drawImage(source, 0, 0);
+              hitAlphaRef.current = {
+                data: ctx.getImageData(0, 0, tex.width, tex.height).data,
+                w: tex.width,
+                h: tex.height,
+              };
+            }
+            // 程序化派生三视图：side=水平压缩模拟侧身，back=水平镜像模拟背面
+            const makeView = (apply: (c2d: CanvasRenderingContext2D, w: number, h: number) => void) => {
+              const vc = document.createElement('canvas');
+              vc.width = tex.width;
+              vc.height = tex.height;
+              const vctx = vc.getContext('2d');
+              if (!vctx) throw new Error('no 2d context');
+              apply(vctx, vc.width, vc.height);
+              vctx.drawImage(source, 0, 0);
+              return PIXI.Texture.from(vc);
+            };
+            viewTextures = {
+              front: tex,
+              side: makeView((c2d, w) => {
+                c2d.translate(w / 2, 0);
+                c2d.scale(0.72, 1);
+                c2d.translate(-w / 2, 0);
+              }),
+              back: makeView((c2d, w) => {
+                c2d.translate(w, 0);
+                c2d.scale(-1, 1);
+              }),
             };
           }
-          // 程序化派生三视图：side=水平压缩模拟侧身，back=水平镜像模拟背面
-          const makeView = (apply: (c2d: CanvasRenderingContext2D, w: number, h: number) => void) => {
-            const vc = document.createElement('canvas');
-            vc.width = texture.width;
-            vc.height = texture.height;
-            const vctx = vc.getContext('2d');
-            if (!vctx) throw new Error('no 2d context');
-            apply(vctx, vc.width, vc.height);
-            vctx.drawImage(source, 0, 0);
-            return PIXI.Texture.from(vc);
-          };
-          viewTextures = {
-            front: texture,
-            side: makeView((c2d, w) => {
-              c2d.translate(w / 2, 0);
-              c2d.scale(0.72, 1);
-              c2d.translate(-w / 2, 0);
-            }),
-            back: makeView((c2d, w) => {
-              c2d.translate(w, 0);
-              c2d.scale(-1, 1);
-            }),
-          };
         }
       } catch { /* 纹理源不可绘制时退化为矩形命中（三视图不可用则不切换） */ }
 
@@ -405,6 +537,25 @@ const App = () => {
         if (!pet) return;
         const { energy, mood, hunger } = stateRef.current;
         pet.tint = hunger < 30 ? 0xaaaaaa : 0xffffff;
+
+        // 状态过渡补间进行中：插值 x/y/rotation/scale，让姿态平滑衔接不跳变
+        if (transition) {
+          const f = Math.min(1, (Date.now() - transition.start) / transition.duration);
+          const ease = f * (2 - f); // easeOutQuad
+          pet.x = transition.from.x + (transition.to.x - transition.from.x) * ease;
+          pet.y = transition.from.y + (transition.to.y - transition.from.y) * ease;
+          pet.rotation = transition.from.rotation + (transition.to.rotation - transition.from.rotation) * ease;
+          pet.scale.set(transition.from.scale + (transition.to.scale - transition.from.scale) * ease);
+          if (f >= 1) {
+            const done = transition;
+            transition = null;
+            // 回归完成后切回正面视图
+            if (done.kind === 'out' && viewTextures && pet.texture !== viewTextures.front) {
+              pet.texture = viewTextures.front;
+            }
+          }
+          return;
+        }
 
         // 变换动画播放中：按关键帧插值，不叠加待机浮动
         if (transformPlay) {
@@ -443,8 +594,8 @@ const App = () => {
           return;
         }
 
-        // 帧序列播放中：隐藏本体，交给 AnimatedSprite，不做浮动
-        if (framesSprite) return;
+        // 帧序列/GIF 播放中：隐藏本体，交给动作精灵，不做浮动
+        if (actionSprite) return;
 
         // 待机浮动
         const floatAmplitude = Math.min(10, 10 + (energy / 100) * 15);
@@ -454,7 +605,490 @@ const App = () => {
       });
     };
 
-    initPixi();
+    // ---- three.js 3D 宠物（petAssetFormat === 'model3d'）：与 Pixi 渲染二选一 ----
+    let cleanupThree: (() => void) | null = null;
+    const initThree = async () => {
+      const installedPet = await window.electronAPI?.platform.getInstalledPet();
+      const modelPath = installedPet?.path;
+      if (!modelPath || isCancelled) return;
+      const fileName = modelPath.split(/[\\/]/).pop() || 'model.glb';
+      const dir = modelPath.slice(0, Math.max(modelPath.lastIndexOf('\\'), modelPath.lastIndexOf('/')));
+
+      const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(width, height);
+      renderer.setClearColor(0x000000, 0);
+      renderer.domElement.style.pointerEvents = 'none';
+      if (isCancelled) { renderer.dispose(); return; }
+      container.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+      camera.position.set(0, 0, 5);
+      scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
+      keyLight.position.set(2, 3, 4);
+      scene.add(keyLight);
+      const root = new THREE.Group();
+      scene.add(root);
+
+      // GLTF 外部资源（.bin/纹理）相对 URI 解析后丢失 ?p= 参数：
+      // URLModifier 按 petaction://local/<相对路径> 拼回模型目录内的绝对路径
+      const manager = new THREE.LoadingManager();
+      manager.setURLModifier((url) => {
+        if (!url.startsWith('petaction://') || url.includes('?p=')) return url;
+        const rel = decodeURIComponent(url.slice('petaction://local/'.length));
+        const name = rel.split('/').pop() || rel;
+        const abs = `${dir}/${rel}`;
+        return `petaction://local/${encodeURIComponent(name)}?p=${encodeURIComponent(abs)}`;
+      });
+      const loader = new GLTFLoader(manager);
+
+      let mixer: THREE.AnimationMixer | null = null;
+      let idleAction: THREE.AnimationAction | null = null;
+      let oneShot: THREE.AnimationAction | null = null; // 一次性 clip 动作（播完冻结，渐隐回 idle）
+      let oneShotEndAt = 0; // 播放截止时间戳（0 = 无待完成动作）
+      let oneShotActive = false; // 播放中（含冻结期）：抑制待机浮动
+      const animations: THREE.AnimationClip[] = [];
+      // 透视相机在 z=5、fov45 下的可视世界高度，用于像素 ↔ 世界单位换算
+      const pxToWorld = (2 * 5 * Math.tan((45 / 2) * (Math.PI / 180))) / height;
+
+      // 回到 idle：一次性动作保持冻结姿态，idle 淡入覆盖形成过渡
+      const backToIdle = () => {
+        oneShotActive = false;
+        if (idleAction) {
+          idleAction.reset();
+          idleAction.setEffectiveWeight(0);
+          idleAction.play();
+          idleAction.fadeIn(0.3);
+        }
+        playingActionIdRef.current = null;
+      };
+
+      try {
+        const gltf = await loader.loadAsync(
+          `petaction://local/${encodeURIComponent(fileName)}?p=${encodeURIComponent(modelPath)}`
+        );
+        if (isCancelled) { renderer.dispose(); return; }
+        const model = gltf.scene;
+        root.add(model);
+
+        // 等比缩放居中：包围盒最长边映射到画布高度（四周留白 30px）
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z) || 1;
+        const visibleH = 2 * 5 * Math.tan((45 / 2) * (Math.PI / 180));
+        const modelScale = (visibleH * ((height - 60) / height)) / maxDim;
+        model.scale.setScalar(modelScale);
+        model.position.set(-center.x * modelScale, -center.y * modelScale, -center.z * modelScale);
+
+        // 动画：idle/待机命名优先，否则取第一个；无动画则静态模型
+        animations.push(...(gltf.animations || []));
+        if (animations.length) {
+          mixer = new THREE.AnimationMixer(model);
+          const idleClip = animations.find((c) => /idle|待机|stand/i.test(c.name)) || animations[0];
+          idleAction = mixer.clipAction(idleClip);
+          idleAction.play();
+        }
+
+        // 命中矩形：缩放居中后的包围盒 8 角投影到画布像素（3D 无像素图，矩形命中）
+        const wMin = new THREE.Vector3().subVectors(box.min, center).multiplyScalar(modelScale);
+        const wMax = new THREE.Vector3().subVectors(box.max, center).multiplyScalar(modelScale);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const x of [wMin.x, wMax.x]) {
+          for (const y of [wMin.y, wMax.y]) {
+            for (const z of [wMin.z, wMax.z]) {
+              const p = new THREE.Vector3(x, y, z).project(camera);
+              const px = (p.x * 0.5 + 0.5) * width;
+              const py = (-p.y * 0.5 + 0.5) * height;
+              if (px < minX) minX = px;
+              if (px > maxX) maxX = px;
+              if (py < minY) minY = py;
+              if (py > maxY) maxY = py;
+            }
+          }
+        }
+        hitRectRef.current = { left: minX, top: minY, w: maxX - minX, h: maxY - minY };
+        hitAlphaRef.current = null;
+      } catch {
+        // 模型加载失败：销毁渲染器（窗口保持透明，不影响其他功能）
+        renderer.dispose();
+        return;
+      }
+
+      // 渲染循环：mixer 更新 + 一次性动作完成检测 + 待机浮动（与 2D 同公式，命中偏移一致）
+      let rafId = 0;
+      let prev = performance.now();
+      const loop = () => {
+        rafId = requestAnimationFrame(loop);
+        if (isCancelled) return;
+        const now = performance.now();
+        const delta = Math.min(0.1, (now - prev) / 1000);
+        prev = now;
+        mixer?.update(delta);
+        if (oneShotActive && oneShotEndAt && now >= oneShotEndAt) {
+          oneShotEndAt = 0;
+          backToIdle();
+        }
+        if (!oneShotActive) {
+          const { energy } = stateRef.current;
+          const amp = Math.min(10, 10 + (energy / 100) * 15);
+          const speed = 0.5 + (energy / 100) * 1.5;
+          root.position.y = Math.sin(now / (1000 / speed)) * amp * pxToWorld;
+        }
+        renderer.render(scene, camera);
+      };
+      loop();
+
+      cleanupThree = () => {
+        cancelAnimationFrame(rafId);
+        mixer?.stopAllAction();
+        mixer = null;
+        renderer.dispose();
+        renderer.forceContextLoss();
+        if (renderer.domElement.parentElement === container) container.removeChild(renderer.domElement);
+      };
+
+      // clip 动作：0.3s 淡入播放（LoopOnce 一次），播完冻结再淡回 idle；
+      // frames/transform 为 2D 覆盖动画，模型宠物下不支持，忽略
+      playActionRef.current = (id: string) => {
+        const action = petActionsRef.current.find((a) => a.id === id);
+        if (!action || action.kind !== 'clip' || !action.clipName || !mixer || !idleAction) return;
+        const clip = animations.find((c) => c.name === action.clipName)
+          || animations.find((c) => c.name.includes(action.clipName || ''));
+        if (!clip) return;
+        if (oneShot) { oneShot.stop(); oneShot = null; }
+        const next = mixer.clipAction(clip);
+        next.reset();
+        next.setLoop(THREE.LoopOnce, 1);
+        next.clampWhenFinished = true;
+        next.setEffectiveWeight(0);
+        next.play();
+        next.fadeIn(0.3);
+        idleAction.fadeOut(0.3);
+        oneShot = next;
+        oneShotEndAt = performance.now() + clip.duration * 1000;
+        oneShotActive = true;
+        playingActionIdRef.current = action.id;
+      };
+      stopActionRef.current = () => {
+        if (oneShot) { oneShot.stop(); oneShot = null; }
+        oneShotEndAt = 0;
+        backToIdle();
+      };
+    };
+
+    // ---- Live2D 宠物（petAssetFormat === 'live2d'）：@jannchie/pixi-live2d-display（Pixi v8） ----
+    // live2d-lite 分层部件描述（AI 生成的轻量 Live2D 包，无 moc3）
+    type LitePartMotion = {
+      wag?: { amp: number; speed: number };
+      breath?: { amp: number; speed: number };
+      tilt?: { amp: number; speed: number };
+      blink?: { interval: number };
+    };
+    interface LitePart {
+      id: string;
+      file: string;
+      z: number;
+      parent?: string;
+      pivot?: { x: number; y: number };
+      motion?: LitePartMotion;
+    }
+    interface LiteModelJson {
+      format: string;
+      version: number;
+      size: { width: number; height: number };
+      model?: { sway?: { amp: number; speed: number } };
+      parts: LitePart[];
+    }
+
+    const initLive2DLite = async (litePath: string) => {
+      const fileName = litePath.split(/[\\/]/).pop() || 'live2d-lite.json';
+      const dir = litePath.slice(0, Math.max(litePath.lastIndexOf('\\'), litePath.lastIndexOf('/')));
+      const toUrl = (rel: string) => {
+        const name = rel.split(/[\\/]/).pop() || rel;
+        return `petaction://local/${encodeURIComponent(name)}?p=${encodeURIComponent(`${dir}/${rel}`)}`;
+      };
+
+      const newApp = new PIXI.Application();
+      await newApp.init({ width, height, backgroundAlpha: 0, antialias: true });
+      if (isCancelled) {
+        newApp.destroy(true);
+        return;
+      }
+      app = newApp;
+      container.appendChild(app.canvas as HTMLCanvasElement);
+      app.canvas.style.pointerEvents = 'none';
+
+      try {
+        const res = await fetch(toUrl(fileName));
+        if (!res.ok) throw new Error('live2d-lite.json 加载失败');
+        const lite = (await res.json()) as LiteModelJson;
+        if (isCancelled) return;
+        if (!lite || !Array.isArray(lite.parts) || !lite.parts.length) throw new Error('live2d-lite.json 无部件');
+
+        // 根容器：以模型中心为轴（transform 动作围绕中心旋转/缩放），等比缩放留白 30px
+        const root = new PIXI.Container();
+        const modelW = lite.size?.width || 300;
+        const modelH = lite.size?.height || 300;
+        const fit = Math.min((width - 60) / modelW, (height - 60) / modelH);
+        root.pivot.set(modelW / 2, modelH / 2);
+        root.scale.set(fit);
+        root.position.set(width / 2, height / 2);
+        app.stage.addChild(root);
+
+        // 部件装载：按 z 序 addChild（渲染顺序=添加顺序）。
+        // 耳/眼挂独立"头部轴"容器以跟随头部倾角，同时不破坏 z 序；眼内层精灵另以眼心为轴眨眼。
+        const headPart = lite.parts.find((p) => p.id === 'head');
+        const headPivot = headPart?.pivot ?? { x: modelW / 2, y: modelH / 2 };
+        const ordered = [...lite.parts].sort((a, b) => a.z - b.z);
+        const nodes: Array<{ part: LitePart; obj: PIXI.Container; inner: PIXI.Sprite | null }> = [];
+        for (const part of ordered) {
+          const tex = await PIXI.Assets.load<PIXI.Texture>(toUrl(part.file));
+          if (isCancelled) return;
+          const sprite = new PIXI.Sprite(tex);
+          const px = part.pivot?.x ?? 0;
+          const py = part.pivot?.y ?? 0;
+          sprite.pivot.set(px, py);
+          sprite.position.set(px, py);
+          if (part.parent === 'head') {
+            const wrap = new PIXI.Container();
+            wrap.pivot.set(headPivot.x, headPivot.y);
+            wrap.position.set(headPivot.x, headPivot.y);
+            wrap.addChild(sprite);
+            app.stage.addChild(wrap);
+            nodes.push({ part, obj: wrap, inner: sprite });
+          } else {
+            app.stage.addChild(sprite);
+            nodes.push({ part, obj: sprite, inner: null });
+          }
+        }
+
+        // 命中矩形：模型包围盒（静态估算，轻摆幅度像素级可忽略）
+        const b = root.getBounds();
+        hitRectRef.current = { left: b.minX, top: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY };
+        hitAlphaRef.current = null;
+
+        // ---- 待机动画 + transform/frames 动作（与平台预览公式一致）----
+        let liteTransform: { action: PetAction; start: number } | null = null;
+        let liteReturn: { start: number; rot: number; scale: number; dx: number; dy: number } | null = null;
+        let liteFrames: PIXI.AnimatedSprite | null = null;
+        const swayMotion = lite.model?.sway;
+
+        const removeLiteFrames = () => {
+          if (!liteFrames) return;
+          liteFrames.stop();
+          liteFrames.destroy();
+          liteFrames = null;
+          root.visible = true;
+          if (playingActionIdRef) playingActionIdRef.current = null;
+        };
+        const stopLiteTransform = () => {
+          if (liteTransform) {
+            liteReturn = { start: Date.now(), rot: root.rotation, scale: root.scale.x, dx: root.position.x - width / 2, dy: root.position.y - height / 2 };
+          }
+          liteTransform = null;
+        };
+        const resetLiteRoot = () => {
+          root.rotation = 0;
+          root.scale.set(fit);
+          root.position.set(width / 2, height / 2);
+        };
+
+        app.ticker.add(() => {
+          const t = app ? app.ticker.lastTime / 1000 : 0;
+          // 回归补间：transform 结束后 200ms easeOut 回自然姿态
+          if (liteReturn) {
+            const f = Math.min(1, (Date.now() - liteReturn.start) / 200);
+            const ease = f * (2 - f);
+            root.rotation = liteReturn.rot * (1 - ease);
+            const s = liteReturn.scale + (fit - liteReturn.scale) * ease;
+            root.scale.set(s);
+            root.position.set(width / 2 + liteReturn.dx * (1 - ease), height / 2 + liteReturn.dy * (1 - ease));
+            if (f >= 1) { liteReturn = null; resetLiteRoot(); }
+            return;
+          }
+          // transform 动作：关键帧插值（与 Pixi 本体逻辑一致）
+          if (liteTransform) {
+            const transform = liteTransform.action.transform;
+            if (!transform) { stopLiteTransform(); return; }
+            const elapsed = Date.now() - liteTransform.start;
+            if (!transform.loop && elapsed >= transform.duration) { stopLiteTransform(); return; }
+            const kt = (elapsed % transform.duration) / transform.duration;
+            const kfs = transform.keyframes;
+            let cur = kfs[0];
+            let next = kfs[kfs.length - 1];
+            for (let i = 0; i < kfs.length - 1; i++) {
+              if (kt >= kfs[i].t && kt <= kfs[i + 1].t) { cur = kfs[i]; next = kfs[i + 1]; break; }
+            }
+            const span = next.t - cur.t || 1;
+            const f = Math.min(1, Math.max(0, (kt - cur.t) / span));
+            const lerp = (a: number, b: number) => a + (b - a) * f;
+            root.position.set(width / 2 + lerp(cur.dx, next.dx) * fit, height / 2 + lerp(cur.dy, next.dy) * fit);
+            root.rotation = lerp(cur.rotation, next.rotation);
+            root.scale.set(fit * lerp(cur.scale, next.scale));
+            return;
+          }
+          // 帧序列动作播放中：隐藏本体，交给动作精灵
+          if (liteFrames) return;
+
+          // 待机：呼吸（身体）/ 眨眼（眼）/ 头部轻摆（头+耳+眼）/ 尾巴摆动 / 整体轻晃
+          for (const { part, obj, inner } of nodes) {
+            const m = part.motion ?? {};
+            if (m.wag) obj.rotation = m.wag.amp * (Math.PI / 180) * Math.sin(Math.PI * m.wag.speed * t);
+            if (m.breath) obj.scale.set(1 + m.breath.amp * 0.6 * Math.sin(2 * Math.PI * m.breath.speed * t), 1 + m.breath.amp * Math.sin(2 * Math.PI * m.breath.speed * t));
+            if (m.tilt) obj.rotation = m.tilt.amp * (Math.PI / 180) * Math.sin(Math.PI * m.tilt.speed * t);
+            if (m.blink && inner) {
+              const phase = t % m.blink.interval;
+              const open = phase < 0.32 ? Math.max(0.08, 1 - Math.sin((Math.PI * phase) / 0.32) * 0.92) : 1;
+              inner.scale.set(1, open);
+            }
+          }
+          if (swayMotion) root.position.x = width / 2 + swayMotion.amp * Math.sin(2 * Math.PI * swayMotion.speed * t) * fit;
+        });
+
+        // clip 动作：lite 包无 motion 组，占位忽略；frames/transform 正常播放
+        playActionRef.current = (id: string) => {
+          const action = petActionsRef.current.find((a) => a.id === id);
+          if (!action) return;
+          if (action.kind === 'clip') return;
+          if (action.kind === 'transform') {
+            removeLiteFrames();
+            liteReturn = null;
+            liteTransform = { action, start: Date.now() };
+            if (playingActionIdRef) playingActionIdRef.current = action.id;
+            return;
+          }
+          // frames：petaction:// 加载帧图，AnimatedSprite 覆盖层
+          if (action.frameFiles?.length) {
+            const toFrameUrl = (p: string) => {
+              const name = p.split(/[\\/]/).pop() || 'frame.png';
+              return `petaction://local/${encodeURIComponent(name)}?p=${encodeURIComponent(p)}`;
+            };
+            Promise.all(action.frameFiles.map((p) => PIXI.Assets.load<PIXI.Texture>(toFrameUrl(p))))
+              .then((textures) => {
+                if (!app || isCancelled) return;
+                removeLiteFrames();
+                root.visible = false;
+                const spr = new PIXI.AnimatedSprite(textures);
+                spr.anchor.set(0.5);
+                const fsprFit = Math.min((width - 60) / spr.width, (height - 60) / spr.height);
+                spr.scale.set(fsprFit);
+                spr.x = width / 2;
+                spr.y = height / 2;
+                spr.animationSpeed = (action.frameRate ?? 6) / 60;
+                spr.loop = false;
+                spr.onComplete = () => removeLiteFrames();
+                app.stage.addChild(spr);
+                liteFrames = spr;
+                if (playingActionIdRef) playingActionIdRef.current = action.id;
+                spr.gotoAndPlay(0);
+              })
+              .catch(() => { /* 帧图加载失败时保持静态宠物 */ });
+          }
+        };
+        stopActionRef.current = () => {
+          liteTransform = null;
+          liteReturn = null;
+          removeLiteFrames();
+          resetLiteRoot();
+        };
+      } catch {
+        app.destroy(true);
+        app = null;
+      }
+    };
+
+    const initLive2D = async () => {
+      const installedPetLite = await window.electronAPI?.platform.getInstalledPet();
+      const litePath = installedPetLite?.path;
+      // AI 生成的轻量 Live2D 包（live2d-lite.json，无 moc3）：走自研轻量渲染器，无需 Cubism Core
+      if (litePath && /live2d-lite\.json$/i.test(litePath)) {
+        await initLive2DLite(litePath);
+        return;
+      }
+      try {
+        await loadCubismCore();
+      } catch {
+        return; // Core 加载失败：窗口保持空白，不影响其他功能
+      }
+      if (isCancelled) return;
+      const { Live2DModel } = await import('@jannchie/pixi-live2d-display/cubism4');
+      if (isCancelled) return;
+
+      const installedPet = await window.electronAPI?.platform.getInstalledPet();
+      const modelPath = installedPet?.path;
+      if (!modelPath || isCancelled) return;
+      const fileName = modelPath.split(/[\\/]/).pop() || 'model.model3.json';
+
+      const newApp = new PIXI.Application();
+      await newApp.init({ width, height, backgroundAlpha: 0, antialias: true });
+      if (isCancelled) {
+        newApp.destroy(true);
+        return;
+      }
+      app = newApp;
+      container.appendChild(app.canvas as HTMLCanvasElement);
+      app.canvas.style.pointerEvents = 'none';
+
+      try {
+        // 相对资源（moc3/纹理/动作文件）由协议 handler 的文件名索引兜底解析
+        const model = await Live2DModel.from(
+          `petaction://local/${encodeURIComponent(fileName)}?p=${encodeURIComponent(modelPath)}`,
+          { autoInteract: false }
+        );
+        if (isCancelled) {
+          model.destroy();
+          return;
+        }
+        model.anchor.set(0.5, 0.5);
+        // 等比缩放居中（四周留白 30px）
+        const fit = Math.min((width - 60) / model.width, (height - 60) / model.height);
+        model.scale.set(fit);
+        model.position.set(width / 2, height / 2);
+        app.stage.addChild(model);
+
+        // 命中矩形：模型包围盒（3D/Live2D 无像素图，矩形命中）
+        const b = model.getBounds();
+        hitRectRef.current = { left: b.minX, top: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY };
+        hitAlphaRef.current = null;
+
+        // clip 动作：clipName 为动作组名（可带 "/序号"），FORCE 优先级打断 idle 播放一次，
+        // 播完由 Live2D 内部自动回落 idle 组；frames/transform 为 2D 覆盖动画，Live2D 宠物下忽略
+        playActionRef.current = (id: string) => {
+          const action = petActionsRef.current.find((a) => a.id === id);
+          if (!action || action.kind !== 'clip' || !action.clipName) return;
+          const [group, idxStr] = action.clipName.split('/');
+          const index = idxStr !== undefined ? Number.parseInt(idxStr, 10) : undefined;
+          if (playingActionIdRef) playingActionIdRef.current = action.id;
+          void model
+            .motion(group, Number.isNaN(index) ? undefined : index, 3)
+            .finally(() => {
+              if (playingActionIdRef.current === action.id) playingActionIdRef.current = null;
+            });
+        };
+        stopActionRef.current = () => {
+          if (playingActionIdRef) playingActionIdRef.current = null;
+        };
+      } catch {
+        // 模型加载失败：销毁渲染器
+        app.destroy(true);
+        app = null;
+      }
+    };
+
+    // 宠物形态分流：model3d 走 three.js，live2d 走 Live2D，其余（image/pack/gif）走 Pixi
+    void (async () => {
+      let format: string | undefined;
+      try {
+        format = (await window.electronAPI?.config.get())?.petAssetFormat;
+      } catch { /* 配置读取失败按 2D 处理 */ }
+      if (isCancelled) return;
+      if (format === 'model3d') await initThree();
+      else if (format === 'live2d') await initLive2D();
+      else initPixi();
+    })();
 
     const decayInterval = setInterval(() => {
       const f = featuresRef.current;
@@ -467,6 +1101,7 @@ const App = () => {
       playActionRef.current = null;
       stopActionRef.current = null;
       if (app) app.destroy(true);
+      cleanupThree?.();
     };
   }, [petSettings, assetVersion]);
 
@@ -509,6 +1144,26 @@ const App = () => {
           overflow: 'hidden',
         }}
       >
+        {/* 智能体主动对话气泡（10s 自动消失，可手动关闭） */}
+        {agentMessage && (
+          <div data-interactive style={bubbleStyle}>
+            <span style={{ flex: 1, lineHeight: 1.5 }}>{agentMessage}</span>
+            <button
+              onClick={() => setAgentMessage(null)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: '#999',
+                fontSize: '12px',
+                cursor: 'pointer',
+                padding: '0 2px',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Status display（进度条随对应功能开关显隐：喂食→饱食、休息→精力、玩耍→心情） */}
         {(petFeatures.feedEnabled || petFeatures.playEnabled || petFeatures.restEnabled || petFeatures.affectionEnabled) && (
           <div style={statusStyle}>
@@ -528,7 +1183,7 @@ const App = () => {
             onClick={(e) => {
               e.stopPropagation();
               feed();
-              autoPlayAction('吃饭');
+              autoPlayAction('feed');
             }}
             style={{ ...btnBaseStyle, bottom: 20, right: 5 }}
           >
@@ -541,7 +1196,7 @@ const App = () => {
             onClick={(e) => {
               e.stopPropagation();
               rest();
-              autoPlayAction('休息');
+              autoPlayAction('rest');
             }}
             style={{ ...btnBaseStyle, bottom: 40, right: 5 }}
           >
@@ -554,7 +1209,7 @@ const App = () => {
             onClick={(e) => {
               e.stopPropagation();
               play();
-              autoPlayAction('玩耍');
+              autoPlayAction('play');
             }}
             style={{ ...btnBaseStyle, bottom: 0, right: 5 }}
           >
@@ -577,6 +1232,26 @@ const statusStyle: React.CSSProperties = {
   borderRadius: '3px',
   pointerEvents: 'none',
   zIndex: 20,
+};
+
+// 智能体主动对话气泡：宠物上方居中，白底深字便于阅读
+const bubbleStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 12,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  maxWidth: '90%',
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 4,
+  padding: '8px 10px',
+  background: 'rgba(255,255,255,0.96)',
+  color: '#333',
+  fontSize: '12px',
+  borderRadius: '10px',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+  zIndex: 30,
+  pointerEvents: 'auto',
 };
 
 const btnBaseStyle: React.CSSProperties = {

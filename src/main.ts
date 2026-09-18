@@ -3,12 +3,13 @@ import { pathToFileURL } from 'url';
 import fs from 'fs';
 import path from 'path';
 import { loadConfig, saveConfig, getLLMConfig, type AppConfig } from './main/config';
-import { createLLMService } from './main/llmService';
+import { createLLMService, type ChatMessage } from './main/llmService';
 import {
   ConversationManager,
   type PetStateSnapshot,
 } from './main/conversationManager';
 import { platformClient, type PlatformAssetType } from './main/platformClient';
+import { startAgentProactive } from './main/agentProactive';
 import {
   actionLLMService,
   addFramesAction,
@@ -130,6 +131,29 @@ const createWindow = () => {
 
 // --- IPC Handlers ---
 
+/** 在系统提示后注入可用动作列表：智能体可通过回复末尾的 [动作:名称] 标记控制宠物播放动画 */
+function withActionPrompt(messages: ChatMessage[]): void {
+  const actions = loadConfig().petActions;
+  if (!actions.length) return;
+  const sys = messages.find((m) => m.role === 'system');
+  if (!sys) return;
+  sys.content +=
+    `\n\n你可以控制桌面宠物的动画播放：在回复的最末尾追加 [动作:动作名] 标记即可触发对应动作（标记会被剥离，不会显示给用户）。` +
+    `动作名必须严格从以下列表中选择：${actions.map((a) => a.name).join('、')}。` +
+    `仅当动作与对话内容自然相关时才附带，每条回复最多一个，不需要时不要添加。`;
+}
+
+/** 解析回复末尾的 [动作:名称] 标记：剥离文本并通过 pet:play-action 触发播放，返回剥离后的文本 */
+function extractActionTag(text: string, win: BrowserWindow | null): string {
+  const m = text.match(/\s*\[动作[:：]([^\]]{1,30})\]\s*$/);
+  if (!m || m.index === undefined) return text;
+  const found = loadConfig().petActions.find((a) => a.name === m[1].trim());
+  if (found && win && !win.isDestroyed()) {
+    win.webContents.send('pet:play-action', found.id);
+  }
+  return text.slice(0, m.index).trimEnd();
+}
+
 // Chat: send a message with streaming response
 ipcMain.handle('chat:send', async (event, message: string) => {
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -144,17 +168,31 @@ ipcMain.handle('chat:send', async (event, message: string) => {
 
   try {
     conversationManager.addUserMessage(message);
+    lastUserMessageAt = Date.now();
     const messages = conversationManager.buildMessages();
+    withActionPrompt(messages);
 
+    let streamedTail = '';
     const fullText = await llmService.chat({
       messages,
       onChunk: (chunk) => {
-        win.webContents.send('chat:chunk', chunk);
+        streamedTail += chunk;
+        // 扣留疑似动作标记（"[动" 开头的尾部）不推送，避免标记闪现；完成后以剥离后的全文替换
+        const idx = streamedTail.lastIndexOf('[动');
+        if (idx >= 0) {
+          const safe = streamedTail.slice(0, idx);
+          streamedTail = streamedTail.slice(idx);
+          if (safe) win.webContents.send('chat:chunk', safe);
+        } else {
+          win.webContents.send('chat:chunk', streamedTail);
+          streamedTail = '';
+        }
       },
     });
 
-    conversationManager.addAssistantMessage(fullText);
-    return { success: true, text: fullText };
+    const replyText = extractActionTag(fullText, win);
+    conversationManager.addAssistantMessage(replyText);
+    return { success: true, text: replyText };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: errorMsg };
@@ -183,14 +221,16 @@ ipcMain.handle('chat:greet', async (event) => {
 
   try {
     const messages = conversationManager.buildGreetingMessages();
+    withActionPrompt(messages);
     const fullText = await llmService.chat({
       messages,
       onChunk: (chunk) => {
         win.webContents.send('chat:chunk', chunk);
       },
     });
-    conversationManager.addAssistantMessage(fullText);
-    return { success: true, text: fullText };
+    const replyText = extractActionTag(fullText, win);
+    conversationManager.addAssistantMessage(replyText);
+    return { success: true, text: replyText };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -240,11 +280,13 @@ const notifyPetAssetChanged = () => {
 };
 
 ipcMain.handle('platform:install', async (_event, type: PlatformAssetType, id: string) => {
-  const result = await platformClient.install(type, id);
+  const result = await platformClient.install(type, id) as { actionsCount?: number };
   if (type === 'pet') {
     notifyPetAssetChanged();
-    // 安装新宠物后自动生成配套基础动作（已存在同名则跳过；后台异步，不阻塞安装返回）
-    void autoGenerateBaseActions();
+    // 宠物附带动作已随安装注册（或原本就没有），通知动作面板刷新列表与互动绑定
+    notifyPetActionsChanged();
+    // 宠物未附带动作时才自动生成基础动作（已存在同名则跳过；后台异步，不阻塞安装返回）
+    if (!result.actionsCount) void autoGenerateBaseActions();
   }
   return result;
 });
@@ -536,40 +578,74 @@ ipcMain.on('pet:show-context-menu', () => {
   menu.popup({ window: mainWindow });
 });
 
-// --- Proactive Greeting Timer (8.4) ---
+// --- Agent Proactive Conversation（智能体主动发起对话） ---
 
-let greetingTimer: NodeJS.Timeout | null = null;
+let lastUserMessageAt = 0;
 
-function scheduleNextGreeting() {
-  if (greetingTimer) clearTimeout(greetingTimer);
-
-  // Random interval between 2-4 hours, only during waking hours
-  const hour = new Date().getHours();
-  const isWakingHour = hour >= 8 && hour < 22;
-
-  if (!isWakingHour || !llmService.isConfigured()) {
-    // Check again in 30 minutes
-    greetingTimer = setTimeout(scheduleNextGreeting, 30 * 60 * 1000);
-    return;
-  }
-
-  const interval = (2 + Math.random() * 2) * 60 * 60 * 1000; // 2-4 hours
-  greetingTimer = setTimeout(async () => {
-    if (mainWindow && !mainWindow.isDestroyed() && llmService.isConfigured()) {
-      mainWindow.webContents.send('chat:greeting-trigger', null);
-    }
-    scheduleNextGreeting();
-  }, interval);
+function startProactive() {
+  startAgentProactive({
+    getConfig: () => loadConfig(),
+    isConfigured: () => llmService.isConfigured(),
+    isUserActive: () => Date.now() - lastUserMessageAt < 2 * 60_000,
+    getState: () => currentPetState,
+    getSystemPrompt: () => conversationManager.getSystemPrompt(),
+    getRecentHistory: (n) => conversationManager.getHistory().slice(-n),
+    // 主动对话同样注入动作列表：智能体可在气泡消息中触发动作播放
+    generate: async (messages) => {
+      withActionPrompt(messages);
+      return await llmService.chat({ messages });
+    },
+    deliver: (text) => {
+      const clean = extractActionTag(text, mainWindow);
+      conversationManager.addAssistantMessage(clean);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('pet:agent-message', clean);
+      }
+    },
+  });
 }
 
 app.whenReady().then(() => {
-  // petaction://local/?p=<encoded-abs-path> → 本地动作帧图（仅允许 pet-actions 目录内文件）
+  // petaction://local/<filename>?p=<encoded-abs-path> → 本地资源文件
+  // （动作帧图 / 3D 模型：仅允许 pet-actions 与 pets 两个安装目录内文件；
+  //   path 段携带真实文件名，供 pixi/three 加载器按扩展名选择解析器）
   const actionsDir = path.join(app.getPath('userData'), 'pet-actions');
+  const petsDir = path.join(app.getPath('userData'), 'pets');
+  // 文件名 → 绝对路径索引：Live2D/GLTF 等加载器按模型 URL 解析相对资源时丢失 ?p= 参数，
+  // 按 path 段文件名在白名单目录内兜底查找（懒构建，目录小、开销可忽略）
+  let fileIndex: Map<string, string> | null = null;
+  const buildFileIndex = () => {
+    const map = new Map<string, string>();
+    const walk = (dir: string) => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (!map.has(entry.name)) map.set(entry.name, full);
+      }
+    };
+    walk(actionsDir);
+    walk(petsDir);
+    return map;
+  };
   protocol.handle('petaction', (request) => {
     try {
-      const filePath = decodeURIComponent(new URL(request.url).searchParams.get('p') || '');
-      const normalized = path.normalize(filePath);
-      if (!normalized || !normalized.startsWith(actionsDir)) {
+      const url = new URL(request.url);
+      let normalized = path.normalize(decodeURIComponent(url.searchParams.get('p') || ''));
+      if (!url.searchParams.get('p')) {
+        // 无 ?p=：取 path 段末段文件名兜底解析
+        const name = decodeURIComponent(url.pathname.split('/').pop() || '');
+        fileIndex = fileIndex ?? buildFileIndex();
+        const resolved = fileIndex.get(name);
+        if (!name || !resolved) return new Response('not found', { status: 404 });
+        normalized = resolved;
+      }
+      if (!normalized || !(normalized.startsWith(actionsDir) || normalized.startsWith(petsDir))) {
         return new Response('forbidden', { status: 403 });
       }
       return net.fetch(pathToFileURL(normalized).toString());
@@ -583,14 +659,13 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  // Start proactive greeting scheduler
-  scheduleNextGreeting();
+  // Start agent proactive conversation scheduler
+  startProactive();
 });
 
 // Flush any pending debounced pet state write before exiting
 app.on('before-quit', flushPendingPetStateSave);
 
 app.on('window-all-closed', () => {
-  if (greetingTimer) clearTimeout(greetingTimer);
   if (process.platform !== 'darwin') app.quit();
 });

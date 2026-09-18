@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Alert, Button, Card, Form, Input, Segmented, Typography, message } from 'antd';
 import { LockOutlined, MailOutlined, UserOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -31,7 +31,7 @@ export default function AuthPage({ onAuthenticated }: { onAuthenticated: (user: 
   return <div className="auth-layout">
     {contextHolder}
     <div className="auth-intro"><span className="eyebrow">DESKTOP PET / MARKETPLACE</span><Typography.Title>给陪伴你的宠物，<br /><em>找到新的表达。</em></Typography.Title><Typography.Paragraph>浏览社区精选的宠物外观与智能体，让每一次互动都更贴近你的想象。</Typography.Paragraph></div>
-    <Card className="auth-card" bordered={false}>
+    <Card className="auth-card" variant="borderless">
       <Segmented block value={mode} onChange={(value) => { setMode(value as 'login' | 'register'); setError(''); }} options={[{ label: '登录', value: 'login' }, { label: '注册', value: 'register' }]} />
       <div className="auth-card-heading"><Typography.Title level={3}>{mode === 'login' ? '欢迎回来' : '创建账号'}</Typography.Title><Typography.Text type="secondary">{mode === 'login' ? '登录后即可下载和管理资源' : '加入创作者与宠物爱好者社区'}</Typography.Text></div>
       {error && <Alert className="form-alert" type="error" showIcon message={error} />}

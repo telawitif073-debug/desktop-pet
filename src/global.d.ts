@@ -49,6 +49,7 @@ export interface AppConfig {
     affectionEnabled: boolean;
   };
   petActions: PetAction[];
+  petActionBindings?: { feed?: string; rest?: string; play?: string };
   llm: LLMConfig;
   platform: {
     baseUrl: string;
@@ -59,8 +60,14 @@ export interface AppConfig {
   };
   petAssetPath?: string;
   petAssetName?: string;
+  /** 当前安装宠物资源 id（platform 动作挂靠归属） */
+  petAssetId?: string;
+  /** 宠物形态：单图(含GIF)/多图包/Live2D/3D模型 */
+  petAssetFormat?: 'image' | 'pack' | 'live2d' | 'model3d';
   /** 动作生成专用 AI 覆盖（可选） */
   actionLLM?: { model?: string; baseUrl?: string; temperature?: number };
+  /** 智能体主动对话配置 */
+  agentProactive?: { enabled: boolean; intervalMinutes: number };
   agentConfigPath?: string;
   installedAgentId?: string;
   installedAgentConfig?: unknown;
@@ -77,8 +84,8 @@ export interface ChatMessage {
 export interface PetAction {
   id: string;
   name: string;
-  kind: 'transform' | 'frames';
-  source: 'ai' | 'manual';
+  kind: 'transform' | 'frames' | 'clip';
+  source: 'ai' | 'manual' | 'platform';
   transform?: {
     loop: boolean;
     duration: number;
@@ -86,6 +93,12 @@ export interface PetAction {
   };
   frameFiles?: string[];
   frameRate?: number;
+  /** kind=clip 时的模型内置动画名称 */
+  clipName?: string;
+  /** 所属宠物资源 id（platform 来源动作，随宠物安装/清除） */
+  petAssetId?: string;
+  /** 互动绑定（feed/rest/play） */
+  interaction?: 'none' | 'feed' | 'rest' | 'play';
   createdAt: number;
 }
 
@@ -113,7 +126,7 @@ declare global {
         download: (type: 'pet' | 'agent', id: string) => Promise<unknown>;
         install: (type: 'pet' | 'agent', id: string) => Promise<unknown>;
         uninstall: (type: 'pet' | 'agent', id: string) => Promise<{ success: boolean }>;
-        getInstalledPet: () => Promise<{ path: string; dataUrl: string } | null>;
+        getInstalledPet: () => Promise<{ path: string; dataUrl: string | null } | null>;
         getInstalledAgent: () => Promise<unknown>;
         login: (identifier: string, password: string) => Promise<unknown>;
         logout: () => Promise<{ success: boolean }>;
@@ -158,6 +171,7 @@ declare global {
       onPetActionsChanged: (callback: () => void) => (() => void);
       onPlayAction: (callback: (actionId: string) => void) => (() => void);
       onToggleActions: (callback: () => void) => (() => void);
+      onAgentMessage: (callback: (message: string) => void) => (() => void);
     };
   }
 }

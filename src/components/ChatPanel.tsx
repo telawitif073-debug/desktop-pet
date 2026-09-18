@@ -28,6 +28,8 @@ const SettingsPanel = () => {
     model: config?.llm.model || 'gpt-4o-mini',
     systemPrompt: config?.llm.systemPrompt || '',
     userName: config?.userProfile.name || '',
+    proactiveEnabled: config?.agentProactive?.enabled ?? true,
+    proactiveInterval: config?.agentProactive?.intervalMinutes ?? 30,
   });
 
   // 将自定义提示词（连同模型/接口地址）一键生成自定义智能体，立即生效
@@ -80,6 +82,10 @@ const SettingsPanel = () => {
             },
           }
         : {}),
+      agentProactive: {
+        enabled: form.proactiveEnabled,
+        intervalMinutes: Math.max(10, Number(form.proactiveInterval) || 30),
+      },
     });
     toggleSettings();
   };
@@ -202,6 +208,30 @@ const SettingsPanel = () => {
         rows={3}
         style={{ ...inputStyle, resize: 'none' }}
       />
+
+      {/* 智能体主动发起对话：定时气泡（状态低值提醒），仅唤醒时段 8-22 点 */}
+      <div style={{ marginTop: '12px', padding: '8px 10px', border: '1px solid #444', borderRadius: '4px', background: '#252525' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: '#ddd', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={form.proactiveEnabled}
+            onChange={(e) => setForm({ ...form, proactiveEnabled: e.target.checked })}
+          />
+          允许宠物主动发起对话（气泡消息）
+        </label>
+        {form.proactiveEnabled && (
+          <>
+            <label style={labelStyle}>主动发起间隔（分钟，最小 10）</label>
+            <input
+              type="number"
+              min={10}
+              value={form.proactiveInterval}
+              onChange={(e) => setForm({ ...form, proactiveInterval: Number(e.target.value) })}
+              style={inputStyle}
+            />
+          </>
+        )}
+      </div>
 
       <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
         <button

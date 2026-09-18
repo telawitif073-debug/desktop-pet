@@ -23,7 +23,8 @@ export class DownloadRecord {
   @JoinColumn({ name: 'user_id' })
   user: User | null;
 
-  @Column({ name: 'asset_type', type: 'enum', enum: ['pet', 'agent'] })
+  // PG enum 保留 'action' 值以避免 ALTER TYPE 迁移，新数据不再写入该值（动作随宠物下载）
+  @Column({ name: 'asset_type', type: 'enum', enum: ['pet', 'agent', 'action'] })
   assetType: AssetType;
 
   @Column({ name: 'asset_id', type: 'uuid' })

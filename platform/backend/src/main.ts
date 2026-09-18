@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, ExceptionFilter, Catch, ArgumentsHost, HttpException } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { json } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
 import { AppModule } from './app.module';
@@ -31,9 +32,11 @@ class LogAllExceptionsFilter implements ExceptionFilter {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
 
   app.setGlobalPrefix('api');
+  // JSON body 上限 15MB：抠图智能体回传 dataUrl（1024 图 base64 约 1-2MB）需要超过默认 100kb
+  app.use(json({ limit: '15mb' }));
   app.enableCors({
     origin: [
       'http://localhost:5173',

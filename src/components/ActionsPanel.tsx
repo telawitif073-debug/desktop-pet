@@ -237,7 +237,7 @@ const ActionsPanel = ({ onClose, onPlay }: Props) => {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '13px', color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
               <div style={{ fontSize: '11px', color: '#888' }}>
-                {a.source === 'ai' ? 'AI 生成' : `手动上传（${a.frameFiles?.length || 0} 帧）`} · {a.kind === 'transform' ? '变换动画' : '帧序列'}
+                {a.source === 'ai' ? 'AI 生成' : a.source === 'platform' ? `资源库（${a.frameFiles?.length || 0} 帧）` : `手动上传（${a.frameFiles?.length || 0} 帧）`} · {a.kind === 'transform' ? '变换动画' : '帧序列'}
               </div>
             </div>
             <button type="button" onClick={() => onPlay(a.id)} style={{ ...ghostBtnStyle, padding: '3px 8px' }}>播放</button>
