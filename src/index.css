@@ -30,3 +30,11 @@ html, body, #root {
 button {
   font-family: inherit;
 }
+
+/* 宠物画布定位：默认铺满宠物区；气泡窗口扩展时通过 --bubble-extra 整体下移，
+   使画布底边与窗口底边重合（窗口底边锁定 ⇒ 宠物屏幕位置不变），顶部腾出气泡带 */
+#pet-stage > canvas {
+  position: absolute;
+  left: 0;
+  top: var(--bubble-extra, 0px);
+}

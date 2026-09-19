@@ -45,7 +45,7 @@ interface Window {
     };
     config?: {
       get: () => Promise<{
-        petWindow?: { width: number; height: number; opacity: number };
+        petWindow?: { width: number; height: number; opacity: number; alwaysOnTop?: boolean };
         petFeatures?: { feedEnabled: boolean; restEnabled: boolean; playEnabled: boolean; affectionEnabled: boolean };
         randomMoveEnabled?: boolean;
       } & Record<string, unknown>>;

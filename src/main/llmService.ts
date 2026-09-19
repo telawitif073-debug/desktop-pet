@@ -1,8 +1,12 @@
 import type { LLMConfig } from './config';
 
+/** 视觉消息的图像段（OpenAI vision 兼容格式，透传给 API） */
+export type MessageImage = { type: 'image_url'; image_url: { url: string } };
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  /** 纯文本；附带图像时为多模态数组（text + image_url） */
+  content: string | Array<{ type: 'text'; text: string } | MessageImage>;
 }
 
 export interface ChatOptions {
@@ -20,6 +24,10 @@ async function streamChat(
   config: LLMConfig,
   options: ChatOptions
 ): Promise<string> {
+  // API 全部由用户在客户端配置：未配置档案时给出明确指引而非 401 报错
+  if (!config.apiKey || !config.baseUrl) {
+    throw new Error('尚未配置聊天 API：请打开设置，在「API 配置」中新增并保存');
+  }
   const url = `${config.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const body = JSON.stringify({
     model: config.model,
@@ -89,6 +97,9 @@ async function nonStreamChat(
   config: LLMConfig,
   options: ChatOptions
 ): Promise<string> {
+  if (!config.apiKey || !config.baseUrl) {
+    throw new Error('尚未配置聊天 API：请打开设置，在「API 配置」中新增并保存');
+  }
   const url = `${config.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const body = JSON.stringify({
     model: config.model,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
 import { GifSprite, GifSource } from 'pixi.js/gif';
 import * as THREE from 'three';
@@ -7,7 +7,8 @@ import petImg from './assets/pet.png';
 import coreJsUrl from './assets/live2dcubismcore.min.js?url';
 import { usePetStore } from './store/petStore';
 import { useChatStore } from './store/chatStore';
-import { SpriteAnimator, type SpriteAnimationsConfig } from './renderer/spriteAnimator';
+import { speak } from './renderer/speech';
+import { syncAmbientSenses } from './renderer/ambientSense';
 import ChatPanel from './components/ChatPanel';
 import ActionsPanel from './components/ActionsPanel';
 import type { PetAction } from './global.d';
@@ -31,20 +32,6 @@ const DEFAULT_FEATURES: PetFeatures = { feedEnabled: true, restEnabled: true, pl
 // Cubism Core（Live2D 官方运行时）：需在加载 Live2D 模型前以 <script> 注入全局 window.Live2DCubismCore
 let cubismCorePromise: Promise<void> | null = null;
 
-/** 精灵表动画配置加载：animations.json 与 spritesheet.png 同目录，经 petaction:// 协议读取 */
-async function loadSpriteAnimations(sheetPath?: string | null): Promise<SpriteAnimationsConfig | null> {
-  if (!sheetPath) return null;
-  const dir = sheetPath.slice(0, Math.max(sheetPath.lastIndexOf('\\'), sheetPath.lastIndexOf('/')));
-  try {
-    const res = await fetch(`petaction://local/${encodeURIComponent('animations.json')}?p=${encodeURIComponent(`${dir}/animations.json`)}`);
-    if (!res.ok) return null;
-    const json = (await res.json()) as SpriteAnimationsConfig | null;
-    if (!json || typeof json.frameWidth !== 'number' || typeof json.frameHeight !== 'number' || !json.animations) return null;
-    return json;
-  } catch {
-    return null;
-  }
-}
 const loadCubismCore = (): Promise<void> => {
   if ((window as unknown as { Live2DCubismCore?: unknown }).Live2DCubismCore) return Promise.resolve();
   if (!cubismCorePromise) {
@@ -84,16 +71,36 @@ const App = () => {
   const [petFeatures, setPetFeatures] = useState<PetFeatures>(DEFAULT_FEATURES);
   // decay 定时器内通过 ref 读取，避免闭包过期（开关变更不重建 Pixi 实例）
   const featuresRef = useRef<PetFeatures>(DEFAULT_FEATURES);
-  useEffect(() => { featuresRef.current = petFeatures; }, [petFeatures]);
+  useEffect(() => {
+    featuresRef.current = petFeatures;
+    // 精力系统（休息功能）关闭时精力恒为默认值 80：历史低值不再触发疲劳状态与漫步拒绝
+    if (!petFeatures.restEnabled || !petFeatures.feedEnabled || !petFeatures.playEnabled) {
+      usePetStore.getState().resetVitals({ feed: petFeatures.feedEnabled, play: petFeatures.playEnabled, rest: petFeatures.restEnabled });
+    }
+  }, [petFeatures]);
   // 整页点击穿透：命中测试数据（sprite 矩形 + 可选 alpha 像素图），由 initPixi 在纹理加载后填充
   const ignoreRef = useRef(true);
   const hitRectRef = useRef<{ left: number; top: number; w: number; h: number } | null>(null);
   const hitAlphaRef = useRef<{ data: Uint8ClampedArray; w: number; h: number } | null>(null);
-  /** 精灵表动画驱动（petAssetFormat === 'sprite' 时由 initPixi 注入，五状态切换用） */
-  const spriteAnimatorRef = useRef<SpriteAnimator | null>(null);
+  /** 宠物头顶锚点（容器内坐标，由 hitRect 派生）：消息气泡定位用 */
+  const [headAnchor, setHeadAnchor] = useState<{ x: number; y: number } | null>(null);
+  /** 统一登记命中矩形：同时派生头顶锚点（气泡挂在宠物头顶居中） */
+  const setHitRect = useCallback((rect: { left: number; top: number; w: number; h: number }) => {
+    hitRectRef.current = rect;
+    setHeadAnchor({ x: rect.left + rect.w / 2, y: rect.top });
+  }, []);
 
   const { hunger, mood, energy, affection, lastFeedAt, lastPlayAt, lastRestAt, moving, feed, play, rest, decay, setMoving } = usePetStore();
   const { triggerGreeting } = useChatStore();
+  // 持续感知（麦克风语音对话/摄像头定时看一眼）：按商店设置启停，config 变化实时生效
+  const petSenses = useChatStore((s) => s.config?.petSenses);
+  useEffect(() => {
+    syncAmbientSenses(petSenses ?? undefined);
+  }, [petSenses]);
+  // 启动即加载聊天配置（此前仅打开聊天面板时才加载，导致持续聆听/感知开机不生效）
+  useEffect(() => {
+    void useChatStore.getState().loadConfig();
+  }, []);
 
   useEffect(() => {
     stateRef.current = { hunger, mood, energy, affection, lastFeedAt, lastPlayAt, lastRestAt, moving };
@@ -101,7 +108,7 @@ const App = () => {
     window.electronAPI?.pet.stateUpdate({ hunger, mood, energy, affection });
   }, [hunger, mood, energy, affection, lastFeedAt, lastPlayAt, lastRestAt, moving]);
 
-  // 随机漫步：主进程回报漫步状态（开始/结束/被拖拽或面板中断），驱动 moving 标志与精灵表 moving 动画
+  // 随机漫步：主进程回报漫步状态（开始/结束/被拖拽或面板中断），驱动 moving 标志
   useEffect(() => {
     const cleanup = window.electronAPI?.pet.onWanderState((v) => setMoving(v));
     return cleanup;
@@ -146,10 +153,52 @@ const App = () => {
 
   // 智能体主动发起的对话：气泡展示 10s 后自动消失（同时已写入聊天历史）
   const [agentMessage, setAgentMessage] = useState<string | null>(null);
+  // 气泡窗口扩展：气泡显示期间主进程把窗口向上扩展 extra px（底边锁定，宠物屏幕位置
+  // 不变），画布经 CSS 变量 --bubble-extra 整体下移贴窗口底，顶部腾出的区域放气泡
+  const [bubbleExtra, setBubbleExtra] = useState(0);
+  // 气泡边界钳制：头顶上方空间不足时避免被窗口边缘裁剪
+  const bubbleRef = useRef<HTMLDivElement | null>(null);
+  const [bubblePos, setBubblePos] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = bubbleRef.current;
+    if (!agentMessage || !el || !headAnchor) {
+      setBubblePos(null);
+      return;
+    }
+    const { width, height } = el.getBoundingClientRect();
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    // headAnchor 是画布本地坐标，画布顶部在窗口内偏移 bubbleExtra，需先换算
+    // 首选头顶上方；放不下时整体压到窗口顶部之下（不再向上溢出）
+    const top = Math.max(4, Math.min(bubbleExtra + headAnchor.y - 6 - height, H - height - 4));
+    const left = Math.max(4, Math.min(headAnchor.x - width / 2, W - width - 4));
+    setBubblePos({ top, left });
+  }, [agentMessage, headAnchor, bubbleExtra]);
+  // 气泡显示期间请求窗口扩展；面板展开（窗口已高）或气泡消失时恢复
+  useEffect(() => {
+    const wantsExpand = !!agentMessage && !chatOpen && !actionsOpen;
+    let cancelled = false;
+    window.electronAPI?.pet
+      .setBubbleExpand(wantsExpand)
+      .then((extra) => {
+        if (!cancelled) setBubbleExtra(wantsExpand ? extra || 0 : 0);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [agentMessage, chatOpen, actionsOpen]);
+  // 主进程主动复位扩展（拖拽开始/窗口重排）：画布偏移同步归零
+  useEffect(() => {
+    const cleanup = window.electronAPI?.pet.onBubbleExpandChanged((extra) => setBubbleExtra(extra || 0));
+    return cleanup;
+  }, []);
   const agentMsgTimerRef = useRef<number | null>(null);
   useEffect(() => {
     const cleanup = window.electronAPI?.onAgentMessage((text) => {
       setAgentMessage(text);
+      // 宠物语音：主动消息同步朗读
+      speak(text, useChatStore.getState().config?.speech);
       if (agentMsgTimerRef.current) window.clearTimeout(agentMsgTimerRef.current);
       agentMsgTimerRef.current = window.setTimeout(() => setAgentMessage(null), 10_000);
     });
@@ -178,12 +227,7 @@ const App = () => {
       const canvasRect = canvas.getBoundingClientRect();
       const localX = e.clientX - canvasRect.left;
       const localY = e.clientY - canvasRect.top;
-      const { energy } = stateRef.current;
-      // 与渲染 ticker 同公式：浮动动画实时改变本体纵向位置
-      const amplitude = Math.min(10, 10 + (energy / 100) * 15);
-      const speed = 0.5 + (energy / 100) * 1.5;
-      const offsetY = Math.sin(Date.now() / (1000 / speed)) * amplitude;
-      const top = rect.top + offsetY;
+      const top = rect.top;
       if (localX < rect.left || localX > rect.left + rect.w) return false;
       if (localY < top || localY > top + rect.h) return false;
       const alpha = hitAlphaRef.current;
@@ -329,56 +373,8 @@ const App = () => {
     let app: PIXI.Application | null = null;
     let isCancelled = false;
     let pet: PIXI.Sprite | null = null;
-    // 三视图纹理：由宠物原图程序化派生（front=原图、side=水平压缩模拟转身、back=水平镜像）
-    let viewTextures: { front: PIXI.Texture; side: PIXI.Texture; back: PIXI.Texture } | null = null;
-    // 动作播放状态（effect 局部：Pixi 重建后旧播放自然失效）
-    // transition：启动/结束的补间动画（150ms 启动淡入、200ms 结束回归自然姿态）
-    type TransitionState = {
-      kind: 'in' | 'out';
-      start: number;
-      duration: number;
-      from: { x: number; y: number; rotation: number; scale: number; texture?: PIXI.Texture };
-      to: { x: number; y: number; rotation: number; scale: number; texture?: PIXI.Texture };
-      afterOut?: () => void;
-    };
-    let transformPlay: { action: PetAction; start: number; baseX: number; baseY: number; fit: number } | null = null;
-    let transition: TransitionState | null = null;
     // 帧序列/GIF 动作精灵（AnimatedSprite 或 GifSprite，二者均为 Sprite 子类）
     let actionSprite: PIXI.AnimatedSprite | GifSprite | null = null;
-
-    // 启动/结束过渡：补间插值 x/y/rotation/scale/texture，让两个状态间不跳变
-    const startTransition = (state: Omit<TransitionState, 'start'>) => {
-      transition = { ...state, start: Date.now() };
-    };
-    const startTransformIn = (action: PetAction) => {
-      if (!pet) return;
-      // 启动 150ms 从自然姿态补到首关键帧
-      const kfs = action.transform?.keyframes;
-      const firstKf = kfs?.[0];
-      if (!firstKf) return;
-      startTransition({
-        kind: 'in',
-        duration: 150,
-        from: { x: pet.x, y: pet.y, rotation: pet.rotation, scale: pet.scale.x },
-        to: { x: transformPlay!.baseX + firstKf.dx, y: transformPlay!.baseY + firstKf.dy, rotation: firstKf.rotation, scale: transformPlay!.fit * firstKf.scale },
-      });
-    };
-    const stopTransform = () => {
-      if (transformPlay && pet) {
-        // 结束 200ms 回归自然姿态（非循环动作末帧已归位，循环动作直接回基准）
-        const targetX = transformPlay.baseX;
-        const targetY = transformPlay.baseY;
-        const targetScale = transformPlay.fit;
-        startTransition({
-          kind: 'out',
-          duration: 200,
-          from: { x: pet.x, y: pet.y, rotation: pet.rotation, scale: pet.scale.x },
-          to: { x: targetX, y: targetY, rotation: 0, scale: targetScale },
-        });
-      }
-      transformPlay = null;
-      if (playingActionIdRef) playingActionIdRef.current = null;
-    };
 
     // 播放结束清理：销毁动作精灵并恢复本体显示
     const removeActionSprite = (spr: PIXI.AnimatedSprite | GifSprite, actionId?: string) => {
@@ -399,22 +395,7 @@ const App = () => {
 
     const playAction = (action: PetAction) => {
       if (!app || !pet) return;
-      stopTransform();
       stopActionSprite();
-
-      if (action.kind === 'transform' && action.transform) {
-        transformPlay = {
-          action,
-          start: Date.now(),
-          baseX: width / 2,
-          baseY: height / 2,
-          fit: pet.scale.x,
-        };
-        if (playingActionIdRef) playingActionIdRef.current = action.id;
-        // 启动过渡：150ms 从当前姿态平滑补到首关键帧，避免状态间跳变
-        startTransformIn(action);
-        return;
-      }
 
       // 帧序列动作：petaction:// 自定义协议加载本地帧图（http origin 无法直接读磁盘文件）。
       // URL path 段携带真实文件名，供 pixi 解析器按扩展名选择 loader（.gif → GifSource）
@@ -480,10 +461,10 @@ const App = () => {
       const found = petActionsRef.current.find((a) => a.id === id);
       if (found) playAction(found);
     };
-    // 删除动作时立即中断播放（stopTransform + stopActionSprite 覆盖各动作类型）
-    stopActionRef.current = () => { stopTransform(); stopActionSprite(); };
+    // 删除动作时立即中断播放
+    stopActionRef.current = () => { stopActionSprite(); };
 
-    const initPixi = async (spriteMode = false) => {
+    const initPixi = async () => {
       const newApp = new PIXI.Application();
       await newApp.init({
         width,
@@ -506,26 +487,13 @@ const App = () => {
       // GIF 主图：pixi 的 GifAsset 按 data:image/gif 前缀识别，加载结果为 GifSource（多帧动画）
       const isGifMain = typeof sourceUrl === 'string' && sourceUrl.startsWith('data:image/gif');
       let texture: PIXI.Texture | null = null;
-      let spriteAnimator: SpriteAnimator | null = null;
-      if (spriteMode && typeof sourceUrl === 'string') {
-        // 精灵表宠物：animations.json 与 spritesheet.png 同目录，按行列切帧后由 SpriteAnimator 驱动
-        const cfg = await loadSpriteAnimations(installedPet?.path);
-        const baseTex = await PIXI.Assets.load<PIXI.Texture>(sourceUrl);
-        pet = new PIXI.Sprite();
-        pet.anchor.set(0.5);
-        if (cfg) {
-          spriteAnimator = new SpriteAnimator(pet, baseTex, cfg);
-        } else {
-          pet.texture = baseTex; // 配置缺失：整张表当静态图退化
-        }
-      } else if (isGifMain) {
+      if (isGifMain) {
         pet = new GifSprite({ source: await PIXI.Assets.load<GifSource>(sourceUrl), loop: true, autoPlay: true });
       } else {
         const tex = await PIXI.Assets.load(sourceUrl);
         texture = tex;
         pet = new PIXI.Sprite(tex);
       }
-      spriteAnimatorRef.current = spriteAnimator;
       pet.anchor.set(0.5);
       // 等比缩放保证宠物完整显示（四周留白 30px，避免大图溢出画布被裁切）
       const pad = 30;
@@ -540,9 +508,9 @@ const App = () => {
       // 像素级命中测试：sprite 实际矩形 + 纹理 alpha 图（整页穿透，仅宠物本体不透明像素可交互）
       const spriteW = natW * fit;
       const spriteH = natH * fit;
-      hitRectRef.current = { left: width / 2 - spriteW / 2, top: height / 2 - spriteH / 2, w: spriteW, h: spriteH };
+      setHitRect({ left: width / 2 - spriteW / 2, top: height / 2 - spriteH / 2, w: spriteW, h: spriteH });
       try {
-        // 三视图仅静态图宠物可派生（GIF 逐帧改写纹理，切换静态视图会破坏播放）
+        // alpha 图仅静态图宠物可提取（GIF 逐帧改写纹理，无法静态采样）
         const tex = texture;
         if (tex) {
           const source = (tex.source as { resource?: CanvasImageSource }).resource;
@@ -559,116 +527,14 @@ const App = () => {
                 h: tex.height,
               };
             }
-            // 程序化派生三视图：side=水平压缩模拟侧身，back=水平镜像模拟背面
-            const makeView = (apply: (c2d: CanvasRenderingContext2D, w: number, h: number) => void) => {
-              const vc = document.createElement('canvas');
-              vc.width = tex.width;
-              vc.height = tex.height;
-              const vctx = vc.getContext('2d');
-              if (!vctx) throw new Error('no 2d context');
-              apply(vctx, vc.width, vc.height);
-              vctx.drawImage(source, 0, 0);
-              return PIXI.Texture.from(vc);
-            };
-            viewTextures = {
-              front: tex,
-              side: makeView((c2d, w) => {
-                c2d.translate(w / 2, 0);
-                c2d.scale(0.72, 1);
-                c2d.translate(-w / 2, 0);
-              }),
-              back: makeView((c2d, w) => {
-                c2d.translate(w, 0);
-                c2d.scale(-1, 1);
-              }),
-            };
           }
         }
-      } catch { /* 纹理源不可绘制时退化为矩形命中（三视图不可用则不切换） */ }
+      } catch { /* 纹理源不可绘制时退化为矩形命中 */ }
 
       app.ticker.add(() => {
         if (!pet) return;
-        // 精灵表动画：按当前状态 fps 步进帧纹理（非 1:1 raf）
-        if (spriteAnimator) spriteAnimator.update(newApp.ticker.deltaMS);
-        const { energy, mood, hunger } = stateRef.current;
-        // 五状态自动绑定（手动动作播放中不抢占）：eating(喂食后4s) > playing(玩耍后4s)
-        // > resting(休息后6s 或 精力<20) > moving(漫步) > idle；未收录的状态自动跳过
-        if (spriteAnimator && !playingActionIdRef.current) {
-          const { moving: isMoving, lastFeedAt: fedAt, lastPlayAt: playedAt, lastRestAt: restedAt } = stateRef.current;
-          const now = Date.now();
-          const anim = now - fedAt < 4000 ? 'eating'
-            : now - playedAt < 4000 ? 'playing'
-            : now - restedAt < 6000 || energy < 20 ? 'resting'
-            : isMoving ? 'moving'
-            : 'idle';
-          if (spriteAnimator.has(anim)) spriteAnimator.setAnimation(anim);
-        }
+        const { hunger } = stateRef.current;
         pet.tint = hunger < 30 ? 0xaaaaaa : 0xffffff;
-
-        // 状态过渡补间进行中：插值 x/y/rotation/scale，让姿态平滑衔接不跳变
-        if (transition) {
-          const f = Math.min(1, (Date.now() - transition.start) / transition.duration);
-          const ease = f * (2 - f); // easeOutQuad
-          pet.x = transition.from.x + (transition.to.x - transition.from.x) * ease;
-          pet.y = transition.from.y + (transition.to.y - transition.from.y) * ease;
-          pet.rotation = transition.from.rotation + (transition.to.rotation - transition.from.rotation) * ease;
-          pet.scale.set(transition.from.scale + (transition.to.scale - transition.from.scale) * ease);
-          if (f >= 1) {
-            const done = transition;
-            transition = null;
-            // 回归完成后切回正面视图
-            if (done.kind === 'out' && viewTextures && pet.texture !== viewTextures.front) {
-              pet.texture = viewTextures.front;
-            }
-          }
-          return;
-        }
-
-        // 变换动画播放中：按关键帧插值，不叠加待机浮动
-        if (transformPlay) {
-          const transform = transformPlay.action.transform;
-          if (!transform) { stopTransform(); return; }
-          const elapsed = Date.now() - transformPlay.start;
-          if (!transform.loop && elapsed >= transform.duration) { stopTransform(); return; }
-          const t = (elapsed % transform.duration) / transform.duration;
-          const kfs = transform.keyframes;
-          let cur = kfs[0];
-          let next = kfs[kfs.length - 1];
-          for (let i = 0; i < kfs.length - 1; i++) {
-            if (t >= kfs[i].t && t <= kfs[i + 1].t) {
-              cur = kfs[i];
-              next = kfs[i + 1];
-              break;
-            }
-          }
-          const span = next.t - cur.t || 1;
-          const f = Math.min(1, Math.max(0, (t - cur.t) / span));
-          const lerp = (a: number, b: number) => a + (b - a) * f;
-          pet.x = transformPlay.baseX + lerp(cur.dx, next.dx);
-          pet.y = transformPlay.baseY + lerp(cur.dy, next.dy);
-          pet.rotation = lerp(cur.rotation, next.rotation);
-          pet.scale.set(transformPlay.fit * lerp(cur.scale, next.scale));
-
-          // 三视图切换：取 t 之前最近关键帧的 view（front/side/back）
-          if (viewTextures) {
-            let view = kfs[0].view ?? 'front';
-            for (let i = 0; i < kfs.length; i++) {
-              if (t >= kfs[i].t) view = kfs[i].view ?? 'front';
-            }
-            const target = viewTextures[view];
-            if (pet.texture !== target) pet.texture = target;
-          }
-          return;
-        }
-
-        // 帧序列/GIF 播放中：隐藏本体，交给动作精灵，不做浮动
-        if (actionSprite) return;
-
-        // 待机浮动
-        const floatAmplitude = Math.min(10, 10 + (energy / 100) * 15);
-        const floatSpeed = 0.5 + (energy / 100) * 1.5;
-        pet.y = height / 2 + Math.sin(Date.now() / (1000 / floatSpeed)) * floatAmplitude;
-        pet.rotation = mood > 70 ? Math.sin(Date.now() / 800) * 0.1 : 0;
       });
     };
 
@@ -776,7 +642,7 @@ const App = () => {
             }
           }
         }
-        hitRectRef.current = { left: minX, top: minY, w: maxX - minX, h: maxY - minY };
+        setHitRect({ left: minX, top: minY, w: maxX - minX, h: maxY - minY });
         hitAlphaRef.current = null;
       } catch {
         // 模型加载失败：销毁渲染器（窗口保持透明，不影响其他功能）
@@ -784,7 +650,7 @@ const App = () => {
         return;
       }
 
-      // 渲染循环：mixer 更新 + 一次性动作完成检测 + 待机浮动（与 2D 同公式，命中偏移一致）
+      // 渲染循环：mixer 更新 + 一次性动作完成检测
       let rafId = 0;
       let prev = performance.now();
       const loop = () => {
@@ -797,12 +663,6 @@ const App = () => {
         if (oneShotActive && oneShotEndAt && now >= oneShotEndAt) {
           oneShotEndAt = 0;
           backToIdle();
-        }
-        if (!oneShotActive) {
-          const { energy } = stateRef.current;
-          const amp = Math.min(10, 10 + (energy / 100) * 15);
-          const speed = 0.5 + (energy / 100) * 1.5;
-          root.position.y = Math.sin(now / (1000 / speed)) * amp * pxToWorld;
         }
         renderer.render(scene, camera);
       };
@@ -895,7 +755,7 @@ const App = () => {
         if (isCancelled) return;
         if (!lite || !Array.isArray(lite.parts) || !lite.parts.length) throw new Error('live2d-lite.json 无部件');
 
-        // 根容器：以模型中心为轴（transform 动作围绕中心旋转/缩放），等比缩放留白 30px
+        // 根容器：以模型中心为轴，等比缩放留白 30px
         const root = new PIXI.Container();
         const modelW = lite.size?.width || 300;
         const modelH = lite.size?.height || 300;
@@ -934,12 +794,10 @@ const App = () => {
 
         // 命中矩形：模型包围盒（静态估算，轻摆幅度像素级可忽略）
         const b = root.getBounds();
-        hitRectRef.current = { left: b.minX, top: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY };
+        setHitRect({ left: b.minX, top: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY });
         hitAlphaRef.current = null;
 
-        // ---- 待机动画 + transform/frames 动作（与平台预览公式一致）----
-        let liteTransform: { action: PetAction; start: number } | null = null;
-        let liteReturn: { start: number; rot: number; scale: number; dx: number; dy: number } | null = null;
+        // ---- 待机动画 + frames 动作 ----
         let liteFrames: PIXI.AnimatedSprite | null = null;
         const swayMotion = lite.model?.sway;
 
@@ -951,12 +809,6 @@ const App = () => {
           root.visible = true;
           if (playingActionIdRef) playingActionIdRef.current = null;
         };
-        const stopLiteTransform = () => {
-          if (liteTransform) {
-            liteReturn = { start: Date.now(), rot: root.rotation, scale: root.scale.x, dx: root.position.x - width / 2, dy: root.position.y - height / 2 };
-          }
-          liteTransform = null;
-        };
         const resetLiteRoot = () => {
           root.rotation = 0;
           root.scale.set(fit);
@@ -965,38 +817,6 @@ const App = () => {
 
         app.ticker.add(() => {
           const t = app ? app.ticker.lastTime / 1000 : 0;
-          // 回归补间：transform 结束后 200ms easeOut 回自然姿态
-          if (liteReturn) {
-            const f = Math.min(1, (Date.now() - liteReturn.start) / 200);
-            const ease = f * (2 - f);
-            root.rotation = liteReturn.rot * (1 - ease);
-            const s = liteReturn.scale + (fit - liteReturn.scale) * ease;
-            root.scale.set(s);
-            root.position.set(width / 2 + liteReturn.dx * (1 - ease), height / 2 + liteReturn.dy * (1 - ease));
-            if (f >= 1) { liteReturn = null; resetLiteRoot(); }
-            return;
-          }
-          // transform 动作：关键帧插值（与 Pixi 本体逻辑一致）
-          if (liteTransform) {
-            const transform = liteTransform.action.transform;
-            if (!transform) { stopLiteTransform(); return; }
-            const elapsed = Date.now() - liteTransform.start;
-            if (!transform.loop && elapsed >= transform.duration) { stopLiteTransform(); return; }
-            const kt = (elapsed % transform.duration) / transform.duration;
-            const kfs = transform.keyframes;
-            let cur = kfs[0];
-            let next = kfs[kfs.length - 1];
-            for (let i = 0; i < kfs.length - 1; i++) {
-              if (kt >= kfs[i].t && kt <= kfs[i + 1].t) { cur = kfs[i]; next = kfs[i + 1]; break; }
-            }
-            const span = next.t - cur.t || 1;
-            const f = Math.min(1, Math.max(0, (kt - cur.t) / span));
-            const lerp = (a: number, b: number) => a + (b - a) * f;
-            root.position.set(width / 2 + lerp(cur.dx, next.dx) * fit, height / 2 + lerp(cur.dy, next.dy) * fit);
-            root.rotation = lerp(cur.rotation, next.rotation);
-            root.scale.set(fit * lerp(cur.scale, next.scale));
-            return;
-          }
           // 帧序列动作播放中：隐藏本体，交给动作精灵
           if (liteFrames) return;
 
@@ -1015,18 +835,11 @@ const App = () => {
           if (swayMotion) root.position.x = width / 2 + swayMotion.amp * Math.sin(2 * Math.PI * swayMotion.speed * t) * fit;
         });
 
-        // clip 动作：lite 包无 motion 组，占位忽略；frames/transform 正常播放
+        // clip 动作：lite 包无 motion 组，占位忽略；frames 正常播放
         playActionRef.current = (id: string) => {
           const action = petActionsRef.current.find((a) => a.id === id);
           if (!action) return;
           if (action.kind === 'clip') return;
-          if (action.kind === 'transform') {
-            removeLiteFrames();
-            liteReturn = null;
-            liteTransform = { action, start: Date.now() };
-            if (playingActionIdRef) playingActionIdRef.current = action.id;
-            return;
-          }
           // frames：petaction:// 加载帧图，AnimatedSprite 覆盖层
           if (action.frameFiles?.length) {
             const toFrameUrl = (p: string) => {
@@ -1056,8 +869,6 @@ const App = () => {
           }
         };
         stopActionRef.current = () => {
-          liteTransform = null;
-          liteReturn = null;
           removeLiteFrames();
           resetLiteRoot();
         };
@@ -1118,7 +929,7 @@ const App = () => {
 
         // 命中矩形：模型包围盒（3D/Live2D 无像素图，矩形命中）
         const b = model.getBounds();
-        hitRectRef.current = { left: b.minX, top: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY };
+        setHitRect({ left: b.minX, top: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY });
         hitAlphaRef.current = null;
 
         // clip 动作：clipName 为动作组名（可带 "/序号"），FORCE 优先级打断 idle 播放一次，
@@ -1145,7 +956,7 @@ const App = () => {
       }
     };
 
-    // 宠物形态分流：model3d 走 three.js，live2d 走 Live2D，sprite 走 Pixi 精灵表，其余（image/pack/gif）走 Pixi
+    // 宠物形态分流：model3d 走 three.js，live2d 走 Live2D，其余（image/pack/gif）走 Pixi
     void (async () => {
       let format: string | undefined;
       try {
@@ -1154,13 +965,16 @@ const App = () => {
       if (isCancelled) return;
       if (format === 'model3d') await initThree();
       else if (format === 'live2d') await initLive2D();
-      else if (format === 'sprite') await initPixi(true);
       else initPixi();
     })();
 
     const decayInterval = setInterval(() => {
       const f = featuresRef.current;
       decay({ feed: f.feedEnabled, play: f.playEnabled, rest: f.restEnabled });
+      // 精力系统关闭：精力锁定默认值 80（低精力不再影响休息动画与漫步校验）
+      if (!f.restEnabled || !f.feedEnabled || !f.playEnabled) {
+        usePetStore.getState().resetVitals({ feed: f.feedEnabled, play: f.playEnabled, rest: f.restEnabled });
+      }
     }, 5000);
 
     return () => {
@@ -1203,6 +1017,7 @@ const App = () => {
 
       {/* Pet Area (right side, always visible) */}
       <div
+        id="pet-stage"
         ref={containerRef}
         style={{
           width: petSettings.width,
@@ -1210,11 +1025,20 @@ const App = () => {
           position: 'relative',
           flexShrink: 0,
           overflow: 'hidden',
-        }}
+          // 气泡扩展时画布下移量：canvas 顶部 = 窗口底对齐偏移，宠物屏幕位置不变
+          ['--bubble-extra' as string]: `${bubbleExtra}px`,
+        } as React.CSSProperties}
       >
-        {/* 智能体主动对话气泡（10s 自动消失，可手动关闭） */}
+        {/* 智能体主动对话气泡（10s 自动消失，可手动关闭）：挂在宠物头顶居中，测量后钳制在窗口边界内 */}
         {agentMessage && (
-          <div data-interactive style={bubbleStyle}>
+          <div
+            ref={bubbleRef}
+            data-interactive
+            style={{
+              ...bubbleStyle,
+              ...(bubblePos ? { top: bubblePos.top, left: bubblePos.left, transform: 'none' } : {}),
+            }}
+          >
             <span style={{ flex: 1, lineHeight: 1.5 }}>{agentMessage}</span>
             <button
               onClick={() => setAgentMessage(null)}

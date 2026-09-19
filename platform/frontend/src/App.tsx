@@ -66,11 +66,22 @@ function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, o
 export default function App() {
   const [user, setUser] = useState<User | null>(getStoredUser());
   const [viewMode, setViewMode] = useState<'user' | 'admin'>(() => localStorage.getItem('creator_view_mode') === 'admin' ? 'admin' : 'user');
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!user || !localStorage.getItem('platform_access_token')) return;
     getMe().then(setUser).catch(() => setUser(null));
   }, []);
+
+  // api 拦截器 token 续期失败时派发 platform:logout：同步登录态并回到登录页
+  useEffect(() => {
+    const onForceLogout = () => {
+      setUser(null);
+      navigate('/login', { replace: true });
+    };
+    window.addEventListener('platform:logout', onForceLogout);
+    return () => window.removeEventListener('platform:logout', onForceLogout);
+  }, [navigate]);
 
   const logout = () => {
     clearAuth();

@@ -16,6 +16,8 @@ interface PetState {
   play: () => void;    // 玩耍
   rest: () => void;    // 休息
   decay: (gates?: { feed: boolean; play: boolean; rest: boolean }) => void; // 自然衰减（定时调用），gates 为 false 的项冻结不衰减
+  /** 功能开关关闭时把对应数值锁定回默认 80（幂等，历史低值一并归位）：feed=饥饿 play=心情 rest=精力 */
+  resetVitals: (gates: { feed: boolean; play: boolean; rest: boolean }) => void;
   load: (state: Partial<PetState>) => void; // 加载持久化数据
   setMoving: (v: boolean) => void; // 漫步状态回报（pet:wander-state）
 }
@@ -43,6 +45,7 @@ export const usePetStore = create<PetState>((set) => ({
   moving: false,
 
   feed: () => set((s) => {
+    // 好感度增长与功能开关无关（开关只控制显隐）：喂食固定 +2
     const newState = { ...s, hunger: Math.min(100, s.hunger + 15), affection: Math.min(100, s.affection + 2), lastFeedAt: Date.now() };
     localStorage.setItem('pet-state', JSON.stringify({
       hunger: newState.hunger,
@@ -54,6 +57,7 @@ export const usePetStore = create<PetState>((set) => ({
   }),
 
   play: () => set((s) => {
+    // 好感度增长与功能开关无关（开关只控制显隐）：玩耍固定 +5
     const newState = { ...s, mood: Math.min(100, s.mood + 20), energy: Math.max(0, s.energy - 10), affection: Math.min(100, s.affection + 5), lastPlayAt: Date.now() };
     localStorage.setItem('pet-state', JSON.stringify({
       hunger: newState.hunger,
@@ -92,6 +96,27 @@ export const usePetStore = create<PetState>((set) => ({
         affection: newState.affection,
       }));
     }
+    return newState;
+  }),
+
+  resetVitals: (gates) => set((s) => {
+    const needHunger = !gates.feed && s.hunger !== 80;
+    const needMood = !gates.play && s.mood !== 80;
+    const needEnergy = !gates.rest && s.energy !== 80;
+    // 全部已归位：返回原 state，避免每 5s 触发订阅更新
+    if (!needHunger && !needMood && !needEnergy) return s;
+    const newState = {
+      ...s,
+      hunger: needHunger ? 80 : s.hunger,
+      mood: needMood ? 80 : s.mood,
+      energy: needEnergy ? 80 : s.energy,
+    };
+    localStorage.setItem('pet-state', JSON.stringify({
+      hunger: newState.hunger,
+      mood: newState.mood,
+      energy: newState.energy,
+      affection: newState.affection,
+    }));
     return newState;
   }),
 

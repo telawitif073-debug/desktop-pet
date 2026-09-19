@@ -1,7 +1,14 @@
 export type AssetType = 'pet' | 'agent';
 export type AssetStatus = 'pending' | 'approved' | 'rejected';
 /** 宠物资源形态：image=单张图片（含 GIF），pack=多图模型包，live2d=Live2D 模型包，model3d=3D 模型 */
-export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d' | 'sprite';
+export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
+
+/** 感知能力开关（隐私敏感，默认全关）：对应客户端聊天面板的桌面截屏/语音输入/摄像头拍照 */
+export interface PetSensesSettings {
+  screen: boolean;
+  mic: boolean;
+  camera: boolean;
+}
 
 /** 宠物附带的动作（随宠物上传/安装，不可跨宠物使用） */
 export interface PetActionSummary {
@@ -79,6 +86,8 @@ export interface PetWindowSettings {
   width: number;
   height: number;
   opacity: number;
+  /** 是否置顶显示（默认 true） */
+  alwaysOnTop?: boolean;
 }
 
 // 桌面宠物客户端的宠物互动功能开关（关闭后隐藏对应按钮与进度条）

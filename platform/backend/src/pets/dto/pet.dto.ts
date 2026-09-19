@@ -55,7 +55,7 @@ export class CreatePetDto {
   tags?: string[];
 
   @IsOptional()
-  @IsIn(['image', 'pack', 'live2d', 'model3d', 'sprite'])
+  @IsIn(['image', 'pack', 'live2d', 'model3d'])
   format?: PetFormat;
 
   @IsOptional()

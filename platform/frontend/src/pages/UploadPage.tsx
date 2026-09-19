@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, Button, Card, Form, Input, InputNumber, Radio, Slider, Space, Typography, Upload, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Form, Input, InputNumber, Radio, Slider, Space, Typography, Upload, message } from 'antd';
 import { CloudUploadOutlined, DeleteOutlined, InboxOutlined, PlusOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd';
 import { useNavigate } from 'react-router-dom';
@@ -8,10 +8,17 @@ import type { PetActionUpload } from '../api';
 import type { AssetType, PetFormat } from '../types';
 import { getErrorMessage } from '../utils';
 import SubjectExtractionPanel from '../components/SubjectExtractionPanel';
-import AiPetStudioPanel from '../components/AiPetStudioPanel';
-import type { AiPetApplyPayload } from '../components/AiPetStudioPanel';
 
 const { Dragger } = Upload;
+
+/** 自带语音识别配置（随智能体资源下发，桌面客户端按 OpenAI 兼容格式调用） */
+interface AgentAsrConfig {
+  mode: 'transcribe' | 'chat';
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  language?: string;
+}
 
 interface AgentStructuredConfig {
   name: string;
@@ -19,6 +26,8 @@ interface AgentStructuredConfig {
   temperature: number;
   model?: string;
   baseUrl?: string;
+  /** 自带语音识别（可选）：填写后安装者无需配置语音模型即可对宠物说话 */
+  asr?: AgentAsrConfig;
 }
 
 /** 宠物附带动作表单项：zip 帧图 或 模型内动画 clip */
@@ -64,13 +73,33 @@ export default function UploadPage() {
   const [rawConfig, setRawConfig] = useState<Record<string, unknown> | null>(null);
   const [rawParseError, setRawParseError] = useState('');
 
+  // ---- 自带语音识别（可选，默认关闭）----
+  const [asrEnabled, setAsrEnabled] = useState(false);
+  const [asrMode, setAsrMode] = useState<'transcribe' | 'chat'>('transcribe');
+  const [asrBaseUrl, setAsrBaseUrl] = useState('');
+  const [asrApiKey, setAsrApiKey] = useState('');
+  const [asrModel, setAsrModel] = useState('');
+  const [asrLanguage, setAsrLanguage] = useState('zh');
+
   const structuredConfig: AgentStructuredConfig = useMemo(() => ({
     name: agentName.trim(),
     systemPrompt: systemPrompt.trim(),
     temperature,
     ...(model.trim() ? { model: model.trim() } : {}),
     ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
-  }), [agentName, systemPrompt, temperature, model, baseUrl]);
+    // 自带语音识别：启用且接口地址/模型名齐全才写入，随配置 JSON 下发
+    ...(asrEnabled && asrBaseUrl.trim() && asrModel.trim()
+      ? {
+          asr: {
+            mode: asrMode,
+            baseUrl: asrBaseUrl.trim(),
+            apiKey: asrApiKey.trim(),
+            model: asrModel.trim(),
+            ...(asrMode === 'transcribe' && asrLanguage.trim() ? { language: asrLanguage.trim() } : {}),
+          },
+        }
+      : {}),
+  }), [agentName, systemPrompt, temperature, model, baseUrl, asrEnabled, asrMode, asrBaseUrl, asrApiKey, asrModel, asrLanguage]);
 
   const configPreview = useMemo(() => {
     const config = configMode === 'structured' ? structuredConfig : rawConfig;
@@ -92,25 +121,6 @@ export default function UploadPage() {
       setRawConfig(null);
       setRawParseError('文件不是合法 JSON，请检查格式');
     }
-  };
-
-  /** AI 生成结果填入表单：zip（精灵表或 Live2D 模型包）+ 预览图，形态随生成路径 */
-  const handleApplyAiPet = (payload: AiPetApplyPayload) => {
-    setSelectedFile(payload.file);
-    setPetFormat(payload.format);
-    if (payload.preview) {
-      setPreviewList([{
-        uid: `${Date.now()}`,
-        name: payload.preview.name,
-        status: 'done',
-        originFileObj: payload.preview as unknown as UploadFile['originFileObj'],
-      }]);
-    }
-    form.setFieldsValue({
-      name: payload.name || form.getFieldValue('name'),
-      category: 'AI 生成',
-    });
-    messageApi.success(`已填入「${payload.name}」的${payload.format === 'live2d' ? 'Live2D 模型' : '精灵表'}与预览图，可直接提交审核`);
   };
 
   const submit = async (values: Record<string, unknown>) => {
@@ -219,6 +229,39 @@ export default function UploadPage() {
           <Form.Item label="指定接口地址（可选）" tooltip="留空则使用桌面客户端里配置的全局 API 地址">
             <Input placeholder="例如：https://api.deepseek.com/v1" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} allowClear />
           </Form.Item>
+          <Form.Item label="自带语音识别（可选）" tooltip="勾选后，安装这个智能体的人不用下载语音模型包，对着宠物说话就能被它听懂" style={{ marginBottom: asrEnabled ? 0 : 24 }}>
+            <Checkbox checked={asrEnabled} onChange={(event) => setAsrEnabled(event.target.checked)}>
+              让这个智能体自带语音识别
+            </Checkbox>
+          </Form.Item>
+          {asrEnabled && (
+            <>
+              <Form.Item label="识别方式">
+                <Radio.Group value={asrMode} onChange={(event) => setAsrMode(event.target.value)}>
+                  <Radio value="transcribe">语音转写接口（如 whisper-1）</Radio>
+                  <Radio value="chat">能听音频的聊天模型（如 gpt-4o-audio）</Radio>
+                </Radio.Group>
+              </Form.Item>
+              <Form.Item label="识别接口地址" required>
+                <Input placeholder="例如：https://api.openai.com/v1" value={asrBaseUrl} onChange={(event) => setAsrBaseUrl(event.target.value)} allowClear />
+              </Form.Item>
+              <Form.Item label="识别 API Key" tooltip="会随资源一起分发；安装者也可以在客户端里替换成自己的 Key">
+                <Input.Password placeholder="sk-..." value={asrApiKey} onChange={(event) => setAsrApiKey(event.target.value)} allowClear />
+              </Form.Item>
+              <Form.Item label="识别模型名" required>
+                <Input placeholder={asrMode === 'chat' ? 'gpt-4o-audio' : 'whisper-1'} value={asrModel} onChange={(event) => setAsrModel(event.target.value)} allowClear />
+              </Form.Item>
+              {asrMode === 'transcribe' && (
+                <Form.Item label="语言（可选）">
+                  <Input placeholder="zh（默认中文）" value={asrLanguage} onChange={(event) => setAsrLanguage(event.target.value)} allowClear />
+                </Form.Item>
+              )}
+              <Alert type="info" showIcon style={{ marginBottom: 16 }}
+                message="自带语音识别说明"
+                description="勾选后，安装这个智能体的人不用下载语音模型包，对着宠物说话就能被它听懂。需要填一个支持语音识别的接口地址；Key 会随资源下发，安装者可在客户端替换成自己的。"
+              />
+            </>
+          )}
           <Alert type="info" showIcon style={{ marginBottom: 16 }}
             message="提交时将自动生成配置 JSON 作为资源文件，无需手动上传文件"
             description="安装后：系统提示词立即生效，温度/模型/接口地址会覆盖客户端手动配置。"
@@ -230,7 +273,7 @@ export default function UploadPage() {
             <Dragger maxCount={1} accept=".json,application/json,text/plain" fileList={fileList} beforeUpload={() => false} onChange={({ fileList: next }) => { setFileList(next); const f = next[0]?.originFileObj as File | undefined; if (f) handleRawFile(f); else { setRawConfig(null); setRawParseError(''); } }}>
               <p className="ant-upload-drag-icon"><InboxOutlined /></p>
               <p>点击或拖拽配置 JSON 到这里</p>
-              <Typography.Text type="secondary">顶层需为对象，可包含 name / systemPrompt / temperature / model / baseUrl</Typography.Text>
+              <Typography.Text type="secondary">顶层需为对象，可包含 name / systemPrompt / temperature / model / baseUrl / asr</Typography.Text>
             </Dragger>
           </Form.Item>
           {rawParseError && <Alert type="error" showIcon style={{ marginBottom: 16 }} message="配置文件解析失败" description={rawParseError} />}
@@ -271,7 +314,6 @@ export default function UploadPage() {
           </Form.Item>
           {type === 'pet' ? (
             <>
-              <AiPetStudioPanel onApply={handleApplyAiPet} />
               <Form.Item name="category" label="分类"><Input placeholder="图片、动画或 3D" /></Form.Item>
               <Form.Item name="tags" label="标签"><Input placeholder="用逗号分隔，例如：猫, 可爱, 动画" /></Form.Item>
               <Form.Item label="宠物形态" tooltip="“自动识别”按文件后缀判断：zip=多图包、glb/gltf=3D 模型、其余=单图（含 GIF）。Live2D 模型包同为 zip，需手动选择">
@@ -281,7 +323,6 @@ export default function UploadPage() {
                   <Radio.Button value="pack">多图包</Radio.Button>
                   <Radio.Button value="live2d">Live2D</Radio.Button>
                   <Radio.Button value="model3d">3D 模型</Radio.Button>
-                  <Radio.Button value="sprite">精灵表</Radio.Button>
                 </Radio.Group>
               </Form.Item>
               <Form.Item label="资源文件" required>

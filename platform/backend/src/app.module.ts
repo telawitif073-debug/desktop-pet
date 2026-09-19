@@ -8,7 +8,6 @@ import { AgentsModule } from './agents/agents.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AdminModule } from './admin/admin.module';
-import { AiModule } from './ai/ai.module';
 import { ActionsModule } from './actions/actions.module';
 
 @Module({
@@ -34,7 +33,6 @@ import { ActionsModule } from './actions/actions.module';
     UploadsModule,
     ReviewsModule,
     AdminModule,
-    AiModule,
     ActionsModule,
   ],
 })

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { AppConfig, LLMConfig, UserProfile } from './config';
+import { getLLMConfig } from './config';
 import type { ChatMessage } from './llmService';
 
 const MAX_HISTORY = 20;
@@ -43,7 +44,8 @@ function buildSystemPrompt(
   config: AppConfig,
   petState: PetStateSnapshot
 ): string {
-  const userConfig = config.llm;
+  // 生效 LLM 配置来自用户配置的激活档案（无默认 API）
+  const userConfig = getLLMConfig();
   const userName = config.userProfile.name || '主人';
 
   const basePrompt = `你是一个可爱的桌面宠物，正在陪伴用户${userName}。

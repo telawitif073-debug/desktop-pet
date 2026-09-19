@@ -14,13 +14,57 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/** 正在进行的 refreshToken 续期（并发 401 共享同一次刷新，避免重复请求） */
+let refreshing: Promise<string | null> | null = null;
+
+function refreshAccessToken(): Promise<string | null> {
+  if (!refreshing) {
+    refreshing = (async () => {
+      const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+      if (!refreshToken) return null;
+      try {
+        // 用独立 axios 调用，避免走本拦截器形成递归
+        const response = await axios.post<AuthResponse>(
+          `${api.defaults.baseURL || '/api'}/auth/refresh`,
+          { refreshToken },
+        );
+        saveAuth(response.data);
+        return response.data.accessToken;
+      } catch {
+        return null;
+      }
+    })().finally(() => {
+      refreshing = null;
+    });
+  }
+  return refreshing;
+}
+
+function forceLogout() {
+  clearAuth();
+  window.dispatchEvent(new Event('platform:logout'));
+}
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
-      window.dispatchEvent(new Event('platform:logout'));
+  async (error) => {
+    const status: number | undefined = error.response?.status;
+    const url: string = error.config?.url || '';
+    const isAuthEndpoint = /\/auth\/(login|register|refresh)$/.test(url);
+    if (status === 401 && error.config) {
+      if (isAuthEndpoint) {
+        // 登录/刷新自身失败：按未登录处理
+        forceLogout();
+      } else if (!(error.config as { _retried?: boolean })._retried) {
+        // 业务请求 401：先用 refreshToken 无感续期并重试一次
+        (error.config as { _retried?: boolean })._retried = true;
+        const newToken = await refreshAccessToken();
+        if (newToken) {
+          error.config.headers.Authorization = `Bearer ${newToken}`;
+          return api.request(error.config);
+        }
+        forceLogout();
+      }
     }
     return Promise.reject(error);
   },
@@ -170,54 +214,3 @@ export async function uploadPet(
   return response.data;
 }
 
-/** ============ AI 生成宠物（精灵表流水线） ============ */
-
-/** GET /ai/meta：画风列表 + 各能力 Key 配置状态 */
-export interface AiGenMeta {
-  styles: Array<{ id: string; label: string }>;
-  capabilities: { cogview: boolean; seedream: boolean; wanVideo: boolean; live2d: boolean; promptAgent: boolean };
-}
-
-export async function getAiGenMeta() {
-  const response = await api.get<AiGenMeta>('/ai/meta');
-  return response.data;
-}
-
-/** AI 生成任务进度（精灵表 / Live2D 共用，后端内存 JobStore，进程重启即失效） */
-export interface SpriteJobView {
-  id: string;
-  status: 'running' | 'done' | 'failed';
-  stage: 'base' | 'video' | 'frames' | 'assemble' | 'layers' | 'rig' | 'pack';
-  done: number;
-  total: number;
-  /** 当前处理的状态名或阶段说明 */
-  current?: string;
-  error?: string;
-  result?: {
-    kind: 'sprite' | 'live2d';
-    name: string;
-    /** sprite：精灵表 PNG dataUrl（1536×1280，6列×5行，每格 256×256） */
-    sheetDataUrl?: string;
-    animations?: Record<string, unknown>;
-    /** live2d：模型文件族 zip dataUrl（model3.json + moc3 + physics3 + idle.motion3 + cdi3 + 纹理） */
-    zipDataUrl?: string;
-    previewDataUrl: string;
-  };
-}
-
-/** 发起精灵表生成（异步），返回 jobId */
-export async function startSpritePet(description: string, style?: string) {
-  const response = await api.post<{ jobId: string }>('/ai/sprite-pet', { description, style });
-  return response.data;
-}
-
-/** 发起 Live2D 生成（异步，需后端本机部署 See-through + PSD2Live），返回 jobId */
-export async function startLive2dPet(description: string, style?: string) {
-  const response = await api.post<{ jobId: string }>('/ai/live2d-pet', { description, style });
-  return response.data;
-}
-
-export async function getSpriteJob(id: string) {
-  const response = await api.get<SpriteJobView>(`/ai/jobs/${id}`);
-  return response.data;
-}

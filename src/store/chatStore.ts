@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type { ChatMessage, AppConfig } from '../global.d';
+import { speak } from '../renderer/speech';
+import { resolveSenseImages, PERMISSION_HINTS } from '../renderer/senseIntent';
 
 interface ChatStore {
   messages: ChatMessage[];
@@ -9,7 +11,10 @@ interface ChatStore {
   config: AppConfig | null;
   showSettings: boolean;
 
-  sendMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, images?: string[]) => Promise<void>;
+  /** 只清空对话框显示：后台聊天历史（持久化文件与 LLM 上下文）完整保留 */
+  clearScreen: () => void;
+  /** 清空对话框 + 后台聊天记录（chat-history.json 与 LLM 上下文） */
   clearMessages: () => Promise<void>;
   loadHistory: () => Promise<void>;
   loadConfig: () => Promise<void>;
@@ -46,8 +51,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
-  sendMessage: async (text: string) => {
-    if (!text.trim() || get().isLoading) return;
+  sendMessage: async (text: string, images?: string[]) => {
+    if ((!text.trim() && !images?.length) || get().isLoading) return;
+    // 感知意图：「看桌面/拍我」类请求自动抓图随消息发送；权限未开显示引导提示（本地气泡，不入历史）
+    const sense = await resolveSenseImages(text, get().config?.petSenses);
+    if (sense.hint) {
+      set({ messages: [...get().messages, { id: generateId(), role: 'assistant', content: PERMISSION_HINTS[sense.hint] }] });
+      return;
+    }
+    if (sense.error) {
+      set({ messages: [...get().messages, { id: generateId(), role: 'assistant', content: `没成功看到：${sense.error}` }] });
+      return;
+    }
+    const allImages = [...(images ?? []), ...sense.images];
 
     const userMsg: ChatMessage = {
       id: generateId(),
@@ -80,7 +96,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
 
     try {
-      const result = await window.electronAPI?.chat.send(text.trim());
+      const result = await window.electronAPI?.chat.send(text.trim(), allImages.length ? allImages : undefined);
 
       if (!result?.success) {
         set((state) => ({
@@ -90,12 +106,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           error: result?.error || '发送失败',
         }));
       } else {
+        const finalText = result.text || '';
         // Final text from result (in case streaming missed some chunks)
         set((state) => ({
           messages: state.messages.map((m) =>
-            m.id === streamingMessageId ? { ...m, content: result.text || m.content, streaming: false } : m
+            m.id === streamingMessageId ? { ...m, content: finalText || m.content, streaming: false } : m
           ),
         }));
+        // 宠物语音：回复完成后朗读（配置在设置面板，enabled=false 时静默）
+        if (finalText) speak(finalText, get().config?.speech);
       }
     } catch (err) {
       set((state) => ({
@@ -109,6 +128,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       streamingContent = '';
       set({ isLoading: false, isStreaming: false });
     }
+  },
+
+  clearScreen: () => {
+    // 不调 IPC：主进程聊天历史与 LLM 上下文全部保留，仅清界面显示
+    set({ messages: [], error: null });
   },
 
   clearMessages: async () => {
@@ -166,11 +190,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ),
         }));
       } else {
+        const finalText = result.text || '';
         set((state) => ({
           messages: state.messages.map((m) =>
-            m.id === streamingMessageId ? { ...m, content: result.text || m.content, streaming: false } : m
+            m.id === streamingMessageId ? { ...m, content: finalText || m.content, streaming: false } : m
           ),
         }));
+        // 宠物语音：问候语同样朗读
+        if (finalText) speak(finalText, get().config?.speech);
       }
     } catch {
       set((state) => ({

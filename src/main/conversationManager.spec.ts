@@ -1,6 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConversationManager, type PetStateSnapshot } from './conversationManager';
 import type { AppConfig } from './config';
+
+// conversationManager 从 getLLMConfig() 取生效 LLM 配置（API 全部由用户档案驱动），
+// mock 掉以避免读真实 %APPDATA% 配置
+const configMocks = vi.hoisted(() => ({ getLLMConfig: vi.fn() }));
+vi.mock('./config', () => ({ getLLMConfig: configMocks.getLLMConfig }));
+
+const mockLLM = {
+  provider: 'openai',
+  apiKey: 'test-key',
+  baseUrl: 'https://api.test/v1',
+  model: 'base-model',
+  systemPrompt: '',
+};
+
+beforeEach(() => {
+  configMocks.getLLMConfig.mockReset();
+  configMocks.getLLMConfig.mockReturnValue({ ...mockLLM });
+});
 
 const petState: PetStateSnapshot = { hunger: 80, mood: 80, energy: 80, affection: 50 };
 
@@ -20,13 +38,6 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
       affectionEnabled: true,
     },
     petActions: [],
-    llm: {
-      provider: 'openai',
-      apiKey: 'test-key',
-      baseUrl: 'https://api.test/v1',
-      model: 'base-model',
-      systemPrompt: '',
-    },
     platform: { baseUrl: '', frontendUrl: '', accessToken: '', refreshToken: '', user: null },
     ...over,
   };
@@ -48,15 +59,9 @@ describe('conversationManager 智能体提示词', () => {
   });
 
   it('智能体提示词排在用户自定义提示词之前', () => {
+    configMocks.getLLMConfig.mockReturnValue({ ...mockLLM, systemPrompt: '自定义提示词内容' });
     const manager = makeManager(
       makeConfig({
-        llm: {
-          provider: 'openai',
-          apiKey: 'k',
-          baseUrl: 'u',
-          model: 'm',
-          systemPrompt: '自定义提示词内容',
-        },
         installedAgentConfig: { systemPrompt: '智能体提示词内容' },
       })
     );

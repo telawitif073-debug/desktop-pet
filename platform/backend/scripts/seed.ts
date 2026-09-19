@@ -92,6 +92,33 @@ async function main() {
       }),
     );
     console.log('seeded sample agent asset');
+
+    // 自带语音识别的示例：安装后无需下载语音模型包即可对宠物说话（Key 留空，安装者在客户端填自己的）
+    await agentsRepo.save(
+      agentsRepo.create({
+        name: '语音陪伴智能体（自带语音识别）',
+        description: '自带语音识别的示例智能体，安装后不用下载语音模型包就能和它说话。首次使用请在聊天设置里替换成自己的识别 Key。',
+        authorId: admin.id,
+        type: 'chat',
+        configSchema: {
+          name: '语音陪伴小助手',
+          systemPrompt: '你是桌面宠物的语音陪伴助手，回答口语化、简短，适合朗读。',
+          temperature: 0.7,
+          asr: {
+            mode: 'transcribe',
+            baseUrl: 'https://api.openai.com/v1',
+            apiKey: '',
+            model: 'whisper-1',
+            language: 'zh',
+          },
+        },
+        dependencies: [],
+        fileUrl: '/uploads/sample-voice-agent-config.json',
+        version: '1.0.0',
+        status: 'approved',
+      }),
+    );
+    console.log('seeded sample voice agent asset');
   }
 
   await dataSource.destroy();
