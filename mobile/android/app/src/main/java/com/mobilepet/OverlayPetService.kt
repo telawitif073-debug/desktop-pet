@@ -195,21 +195,9 @@ class OverlayPetService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!dragging) {
-                        // 视为点击：直接把事件转发给 WebView 内部
-                        val downEvent = MotionEvent.obtain(
-                            downTime, event.eventTime,
-                            MotionEvent.ACTION_DOWN,
-                            event.x, event.y, 0
-                        )
-                        v.dispatchTouchEvent(downEvent)
-                        val upEvent = MotionEvent.obtain(
-                            event.eventTime, event.eventTime,
-                            MotionEvent.ACTION_UP,
-                            event.x, event.y, 0
-                        )
-                        v.dispatchTouchEvent(upEvent)
-                        downEvent.recycle()
-                        upEvent.recycle()
+                        // 未拖动：返回 false，让 WebView 按原始事件流正常收到完整点击。
+                        // 切勿在这里手动 dispatchTouchEvent 重发：会重入本监听器造成
+                        // 无限递归（StackOverflowError 进程崩溃，悬浮窗宠物直接消失）。
                         return@setOnTouchListener false
                     }
                 }

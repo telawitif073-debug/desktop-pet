@@ -42,7 +42,15 @@ while ($true) {
         } catch { $ok = $false }
     }
     if (-not $ok) {
-        Write-Log 'tunnel down, re-registering...'
+        # 二次确认：单次超时可能是网络抖动，避免误杀隧道导致公链频繁换址
+        Start-Sleep -Seconds 10
+        try {
+            $r2 = Invoke-WebRequest -Uri "$url/api/app-update" -UseBasicParsing -TimeoutSec 8
+            $ok = ($r2.StatusCode -eq 200)
+        } catch { $ok = $false }
+    }
+    if (-not $ok) {
+        Write-Log 'tunnel down (double-checked), re-registering...'
         Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
         Remove-Item "$share\cf-err.log" -Force -ErrorAction SilentlyContinue
@@ -57,10 +65,11 @@ while ($true) {
             try {
                 # 快速隧道地址固定为 4 段词组（如 knights-changelog-arcade-sri），
                 # 排除注册 API 域名 api.trycloudflare.com 等误匹配
-                $m = Select-String -Path "$share\cf-err.log" -Pattern 'https://[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+\.trycloudflare\.com' -AllMatches |
+                # @() 强制数组：单一匹配时 PS 会退化为标量字符串，$m[0] 会变成首字母
+                $m = @(Select-String -Path "$share\cf-err.log" -Pattern 'https://[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+\.trycloudflare\.com' -AllMatches |
                     ForEach-Object { $_.Matches.Value } |
-                    Select-Object -Unique
-                if ($m) { $new = $m[0]; break }
+                    Select-Object -Unique)
+                if ($m.Count -gt 0 -and $m[0] -match '^https://') { $new = $m[0]; break }
             } catch {}
         }
         if ($new) {
