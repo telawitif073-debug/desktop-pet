@@ -1,10 +1,39 @@
-# 隧道看门狗：每 60s 检查隧道；断线则重启 cloudflared 并把新地址同步进 app-update.json
+﻿# 隧道看门狗 v2：每 60s 体检公网隧道；断线自动重连 cloudflared；
+# 任何时候发现 app-update.json 的 apkUrl 与当前隧道不一致都自动修正。
+# 所有动作写 dist-share\watchdog.log，不再静默吞错。
 $ErrorActionPreference = 'Continue'
 $share = 'e:\desktop-pet\dist-share'
 $manifest = 'e:\desktop-pet\platform\backend\app-update.json'
+$log = Join-Path $share 'watchdog.log'
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+function Write-Log($msg) {
+    $line = ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg)
+    Write-Output $line
+    try { [System.IO.File]::AppendAllText($log, $line + "`r`n", $utf8NoBom) } catch {}
+}
+
+# 把清单 apkUrl 对齐到指定隧道；返回 synced / noop / error:...
+function Sync-Manifest($tunnel) {
+    try {
+        $j = [System.IO.File]::ReadAllText($manifest) | ConvertFrom-Json
+        $want = "$tunnel/MobilePet-1.0.apk"
+        if ($j.apkUrl -eq $want) { return 'noop' }
+        $j.apkUrl = $want
+        $out = $j | ConvertTo-Json -Depth 4
+        [System.IO.File]::WriteAllText($manifest, $out, $utf8NoBom)
+        $back = ([System.IO.File]::ReadAllText($manifest) | ConvertFrom-Json).apkUrl
+        if ($back -ne $want) { return "error:readback-mismatch($back)" }
+        return 'synced'
+    } catch {
+        return ('error:' + $_.Exception.Message)
+    }
+}
+
+Write-Log 'watchdog v2 started'
 while ($true) {
     $url = ''
-    try { $url = (Get-Content "$share\tunnel-url.txt" -Raw).Trim() } catch {}
+    try { $url = ([System.IO.File]::ReadAllText("$share\tunnel-url.txt")).Trim() } catch {}
     $ok = $false
     if ($url -match '^https://') {
         try {
@@ -13,7 +42,7 @@ while ($true) {
         } catch { $ok = $false }
     }
     if (-not $ok) {
-        Write-Output ("[{0}] tunnel down, re-registering..." -f (Get-Date -Format 'HH:mm:ss'))
+        Write-Log 'tunnel down, re-registering...'
         Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
         Remove-Item "$share\cf-err.log" -Force -ErrorAction SilentlyContinue
@@ -35,16 +64,16 @@ while ($true) {
             } catch {}
         }
         if ($new) {
-            Set-Content -Path "$share\tunnel-url.txt" -Value $new
-            try {
-                $j = Get-Content $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
-                $j.apkUrl = "$new/MobilePet-1.0.apk"
-                $j | ConvertTo-Json -Depth 4 | Set-Content -Path $manifest -Encoding UTF8
-            } catch {}
-            Write-Output ("[{0}] new tunnel: {1}" -f (Get-Date -Format 'HH:mm:ss'), $new)
+            [System.IO.File]::WriteAllText("$share\tunnel-url.txt", $new, $utf8NoBom)
+            $res = Sync-Manifest $new
+            Write-Log ("new tunnel: {0} (manifest: {1})" -f $new, $res)
         } else {
-            Write-Output ("[{0}] register failed, retry next round" -f (Get-Date -Format 'HH:mm:ss'))
+            Write-Log 'register failed, retry next round'
         }
+    } else {
+        # 隧道健康时也对账：兜住手工改动或上次同步失败造成的漂移
+        $res = Sync-Manifest $url
+        if ($res -ne 'noop') { Write-Log ("reconcile manifest: {0}" -f $res) }
     }
     Start-Sleep -Seconds 60
 }

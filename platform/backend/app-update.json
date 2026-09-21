@@ -1,7 +1,7 @@
 {
-  "versionCode": 13,
-  "versionName": "1.2.9",
-  "minVersionCode": 4,
-  "apkUrl": "https://independently-seminars-calling-vocals.trycloudflare.com/MobilePet-1.0.apk",
-  "notes": "1. 修复悬浮窗宠物拖动方向相反的问题（向上拖动时不再往下跑）\n2. 服务器图片路径修复，宠物形象正常加载"
+    "versionCode":  17,
+    "versionName":  "1.3.3",
+    "minVersionCode":  4,
+    "apkUrl":  "https://assistant-surrounding-survive-portrait.trycloudflare.com/MobilePet-1.0.apk",
+    "notes":  "1. 发起新版本下载时自动取消并清除其他版本的下载任务、文件与通知\n2. 同版本重复点击只保留一个下载任务"
 }

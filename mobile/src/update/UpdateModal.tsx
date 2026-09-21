@@ -1,7 +1,7 @@
 /** 游戏式更新面板：发现新版本 → 面板内进度条下载 → 自动拉起系统安装器 */
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { downloadAndInstall, guideInstallPermission, installPendingApk, subscribeUpdateProgress } from '../native/Update';
+import { downloadAndInstall, guideInstallPermission, installPendingApk, subscribeUpdateFinished, subscribeUpdateProgress } from '../native/Update';
 import { useAppStore } from '../store/appStore';
 import { APP_VERSION_NAME } from './checkUpdate';
 
@@ -30,6 +30,20 @@ export default function UpdateModal(): React.JSX.Element | null {
 
   useEffect(() => () => unsubRef.current?.(), []);
 
+  // 下载结束（系统 DownloadManager 完成后原生自动拉起安装器）
+  const finishedRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    finishedRef.current = subscribeUpdateFinished(({ ok, message }) => {
+      if (ok) {
+        setPhase('done');
+      } else {
+        setPhase('error');
+        setError(message || '下载失败，请重试');
+      }
+    });
+    return () => finishedRef.current?.();
+  }, []);
+
   if (!updateInfo || !panelVisible) return null;
 
   const forced = updateInfo.forced;
@@ -49,10 +63,15 @@ export default function UpdateModal(): React.JSX.Element | null {
       if (p.total > 0) setTotal(p.total);
     });
     try {
-      const result = await downloadAndInstall(updateInfo.apkUrl);
+      const result = await downloadAndInstall(updateInfo.apkUrl, updateInfo.versionName);
       if (result === 'permission') {
         setPhase('idle');
         guideInstallPermission();
+        return;
+      }
+      if (result === 'busy' || result === 'started') {
+        // 系统级后台下载进行中：进度条继续走，完成时由 PetUpdateFinished 事件收尾
+        setPhase('downloading');
         return;
       }
       setPhase('done');

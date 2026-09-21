@@ -8,6 +8,7 @@
  */
 import { NativeModules, Platform } from 'react-native';
 import { assetUrl } from '../api/platform';
+import { normalizeFileUrl } from '../pet/petFiles';
 import { useAppStore, type PetAssetRef } from '../store/appStore';
 
 const { OverlayPet } = NativeModules;
@@ -52,9 +53,12 @@ export function buildOverlayUrl(asset: PetAssetRef | null): string {
     // 后续平台补 /pets/:id/manifest 接口后即可直接生效，无需改这里
     qs.set('manifest', `${base}/api/pets/${asset.id}/manifest`);
   } else if (asset.format === 'live2d' || asset.format === 'model3d') {
-    qs.set('model', assetUrl(asset.fileUrl));
+    qs.set('model', assetUrl(normalizeFileUrl(asset.fileUrl)));
+  } else if (asset.localPath) {
+    // 本地缓存优先：离线/换服务器都显示（Service 已开启 allowFileAccess）
+    qs.set('src', `file://${asset.localPath}`);
   } else {
-    qs.set('src', assetUrl(asset.fileUrl));
+    qs.set('src', assetUrl(normalizeFileUrl(asset.fileUrl)));
   }
   return `file:///android_asset/overlay.html?${qs.toString()}`;
 }
