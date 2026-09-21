@@ -1,0 +1,7 @@
+{
+  "versionCode": 13,
+  "versionName": "1.2.9",
+  "minVersionCode": 4,
+  "apkUrl": "https://independently-seminars-calling-vocals.trycloudflare.com/MobilePet-1.0.apk",
+  "notes": "1. 修复悬浮窗宠物拖动方向相反的问题（向上拖动时不再往下跑）\n2. 服务器图片路径修复，宠物形象正常加载"
+}

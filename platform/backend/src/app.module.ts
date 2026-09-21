@@ -9,6 +9,8 @@ import { UploadsModule } from './uploads/uploads.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AdminModule } from './admin/admin.module';
 import { ActionsModule } from './actions/actions.module';
+import { SyncModule } from './sync/sync.module';
+import { AppUpdateModule } from './app-update/app-update.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { ActionsModule } from './actions/actions.module';
     ReviewsModule,
     AdminModule,
     ActionsModule,
+    SyncModule,
+    AppUpdateModule,
   ],
 })
 export class AppModule {}

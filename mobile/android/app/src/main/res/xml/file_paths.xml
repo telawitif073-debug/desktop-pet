@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PetUpdateModule 下载的更新包所在目录（getExternalFilesDir / filesDir） -->
+<paths>
+    <external-files-path name="external_updates" path="." />
+    <files-path name="internal_updates" path="." />
+</paths>

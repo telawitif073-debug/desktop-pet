@@ -98,3 +98,10 @@ platform/frontend/dist/
 platform/backend/uploads/*
 !platform/backend/uploads/sample-agent-config.json
 !platform/backend/uploads/sample-pet-asset.txt
+
+# 本地工具链与发布产物（体积大、机器相关，不入库）
+android-sdk/
+jdk17/
+cloudflared.exe
+dist-share/*
+!dist-share/server.js

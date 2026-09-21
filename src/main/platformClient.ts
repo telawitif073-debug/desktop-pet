@@ -141,6 +141,28 @@ export class PlatformClient {
     return { success: true };
   }
 
+  // --- 用户数据云同步（/api/sync/*，LLM Key 由服务端 AES 加密落库） ---
+  /** kind 用下划线（客户端内部标识），服务端路由用连字符（REST 惯例） */
+  private syncPath(kind: 'config' | 'pet_state' | 'chat_history'): string {
+    return `/sync/${kind === 'pet_state' ? 'pet-state' : kind === 'chat_history' ? 'chat-history' : 'config'}`;
+  }
+
+  async syncGet(kind: 'config' | 'pet_state' | 'chat_history') {
+    const response = await axios.get(apiUrl(this.config.platform.baseUrl, this.syncPath(kind)), {
+      headers: this.headers,
+    });
+    return response.data as { data: unknown; updatedAt: string | null };
+  }
+
+  async syncPut(kind: 'config' | 'pet_state' | 'chat_history', data: unknown) {
+    const response = await axios.put(
+      apiUrl(this.config.platform.baseUrl, this.syncPath(kind)),
+      { data },
+      { headers: this.headers },
+    );
+    return response.data as { updatedAt: string };
+  }
+
   async download(type: PlatformAssetType, id: string) {
     assertAssetType(type);
     const detail = await this.getDetail(type, id);

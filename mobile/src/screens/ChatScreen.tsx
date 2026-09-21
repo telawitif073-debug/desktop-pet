@@ -1,0 +1,450 @@
+/** 聊天页：直连用户 LLM 档案（云同步），历史走 /sync/chat-history 与桌面共享；含档案管理与清空确认 */
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  PermissionsAndroid,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { isConfigured, requestChat } from '../chat/llm';
+import { scheduleUpload } from '../api/sync';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAppStore } from '../store/appStore';
+import { isSpeechAvailable, speak, startListening, stopListening, stopSpeak, subscribeVoice } from '../native/Voice';
+import type { ChatMsg, LlmProfile } from '../types';
+
+/** DeepSeek 手机端风格的思考过程卡片：灰色圆角卡 + 「已深度思考（用时 X 秒）」折叠头 + 展开正文 */
+function ThinkCard({ reasoning, seconds }: { reasoning: string; seconds?: number }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <View style={styles.thinkCard}>
+      <Pressable style={styles.thinkHeader} onPress={() => setExpanded((v) => !v)} hitSlop={4}>
+        <Text style={styles.thinkTitle}>
+          已深度思考{typeof seconds === 'number' && seconds > 0 ? `（用时 ${seconds} 秒）` : ''}
+        </Text>
+        <Text style={styles.thinkChevron}>{expanded ? '▾' : '▸'}</Text>
+      </Pressable>
+      {expanded && <Text style={styles.thinkBody}>{reasoning}</Text>}
+    </View>
+  );
+}
+
+function Bubble({ msg }: { msg: ChatMsg }): React.JSX.Element {
+  const mine = msg.role === 'user';
+  if (!mine && msg.reasoning) {
+    // DeepSeek 风格：思考卡片在上，正文白底无气泡
+    return (
+      <View style={styles.bubbleRow}>
+        <View style={styles.assistantBlock}>
+          <ThinkCard reasoning={msg.reasoning} seconds={msg.thinkSeconds} />
+          <Text style={styles.assistantText}>{msg.content}</Text>
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
+      <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
+        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{msg.content}</Text>
+      </View>
+    </View>
+  );
+}
+
+/** 空表单模板 */
+function emptyForm(): { name: string; apiKey: string; baseUrl: string; model: string; systemPrompt: string } {
+  return { name: '', apiKey: '', baseUrl: 'https://api.openai.com/v1', model: '', systemPrompt: '' };
+}
+
+/** API 档案管理：列表切换 / 新增 / 编辑 / 删除，保存后云同步到桌面端 */
+function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () => void }): React.JSX.Element {
+  const insets = useSafeAreaInsets();
+  const profiles = useAppStore((s) => s.llmProfiles);
+  const activeId = useAppStore((s) => s.llmActiveProfileId);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState('');
+  const [form, setForm] = useState(emptyForm());
+
+  const openAdd = (): void => {
+    setEditingId('');
+    setForm(emptyForm());
+    setFormOpen(true);
+  };
+
+  const openEdit = (p: LlmProfile): void => {
+    setEditingId(p.id);
+    setForm({
+      name: p.name,
+      apiKey: p.apiKey,
+      baseUrl: p.baseUrl,
+      model: p.model,
+      systemPrompt: p.systemPrompt ?? '',
+    });
+    setFormOpen(true);
+  };
+
+  const save = (): void => {
+    const name = form.name.trim() || '未命名档案';
+    const baseUrl = form.baseUrl.trim();
+    const model = form.model.trim();
+    if (!baseUrl || !model) {
+      Alert.alert('信息不全', '接口地址与模型为必填项');
+      return;
+    }
+    const store = useAppStore.getState();
+    if (editingId) {
+      const next = store.llmProfiles.map((p) =>
+        p.id === editingId ? { ...p, name, apiKey: form.apiKey.trim(), baseUrl, model, systemPrompt: form.systemPrompt.trim() } : p,
+      );
+      store.patch({ llmProfiles: next });
+    } else {
+      const id = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      const profile: LlmProfile = { id, name, apiKey: form.apiKey.trim(), baseUrl, model, systemPrompt: form.systemPrompt.trim() };
+      store.patch({ llmProfiles: [...store.llmProfiles, profile], llmActiveProfileId: id });
+    }
+    scheduleUpload('config');
+    setFormOpen(false);
+  };
+
+  const remove = (p: LlmProfile): void => {
+    Alert.alert('删除档案', `确定删除「${p.name}」吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => {
+          const store = useAppStore.getState();
+          const next = store.llmProfiles.filter((x) => x.id !== p.id);
+          // 删除当前档案时自动切到剩余第一个（与桌面端一致）
+          store.patch({
+            llmProfiles: next,
+            llmActiveProfileId: store.llmActiveProfileId === p.id ? next[0]?.id ?? '' : store.llmActiveProfileId,
+          });
+          scheduleUpload('config');
+        },
+      },
+    ]);
+  };
+
+  const switchTo = (id: string): void => {
+    useAppStore.getState().patch({ llmActiveProfileId: id });
+    scheduleUpload('config');
+  };
+
+  const field = (label: string, key: keyof ReturnType<typeof emptyForm>, secure = false): React.JSX.Element => (
+    <>
+      <Text style={pm.fieldLabel}>{label}</Text>
+      <TextInput
+        style={pm.field}
+        value={form[key]}
+        onChangeText={(v) => setForm((f) => ({ ...f, [key]: v }))}
+        autoCapitalize="none"
+        autoCorrect={false}
+        secureTextEntry={secure}
+        placeholder={key === 'baseUrl' ? 'https://api.openai.com/v1' : key === 'model' ? 'gpt-4o-mini / glm-4-flash …' : undefined}
+        multiline={key === 'systemPrompt'}
+      />
+    </>
+  );
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={[pm.container, { paddingTop: insets.top + 10, paddingBottom: insets.bottom }]}>
+        <View style={pm.header}>
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Text style={pm.headerBtn}>关闭</Text>
+          </Pressable>
+          <Text style={pm.title}>API 档案管理</Text>
+          <Pressable onPress={openAdd} hitSlop={8}>
+            <Text style={[pm.headerBtn, pm.headerBtnPrimary]}>新增</Text>
+          </Pressable>
+        </View>
+
+        {formOpen ? (
+          <ScrollView style={pm.form} keyboardShouldPersistTaps="handled">
+            {field('名称', 'name')}
+            {field('API Key', 'apiKey', true)}
+            {field('接口地址', 'baseUrl')}
+            {field('模型', 'model')}
+            {field('系统提示词（可选）', 'systemPrompt')}
+            <View style={pm.formBtns}>
+              <Pressable style={[pm.btn, pm.btnGhost]} onPress={() => setFormOpen(false)}>
+                <Text style={pm.btnGhostText}>取消</Text>
+              </Pressable>
+              <Pressable style={[pm.btn, pm.btnPrimary]} onPress={save}>
+                <Text style={pm.btnPrimaryText}>保存</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        ) : (
+          <FlatList
+            style={pm.list}
+            data={profiles}
+            keyExtractor={(p) => p.id}
+            ListEmptyComponent={<Text style={pm.empty}>还没有档案，点右上角「新增」创建一个</Text>}
+            renderItem={({ item }) => {
+              const active = item.id === activeId;
+              return (
+                <Pressable style={[pm.row, active && pm.rowActive]} onPress={() => switchTo(item.id)}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={pm.rowName}>
+                      {item.name}
+                      {active ? '（当前）' : ''}
+                    </Text>
+                    <Text style={pm.rowSub}>{item.model || '未设置模型'}</Text>
+                  </View>
+                  <Pressable style={pm.rowBtn} onPress={() => openEdit(item)} hitSlop={6}>
+                    <Text style={pm.rowBtnText}>编辑</Text>
+                  </Pressable>
+                  <Pressable style={pm.rowBtn} onPress={() => remove(item)} hitSlop={6}>
+                    <Text style={[pm.rowBtnText, pm.rowBtnDanger]}>删除</Text>
+                  </Pressable>
+                </Pressable>
+              );
+            }}
+          />
+        )}
+        <Text style={pm.hint}>修改会自动云同步，桌面端登录同一账号即可共用</Text>
+      </View>
+    </Modal>
+  );
+}
+
+export default function ChatScreen(): React.JSX.Element {
+  const messages = useAppStore((s) => s.messages);
+  const profiles = useAppStore((s) => s.llmProfiles);
+  const activeId = useAppStore((s) => s.llmActiveProfileId);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [managerVisible, setManagerVisible] = useState(false);
+  const [listening, setListening] = useState(false);
+  const listRef = useRef<FlatList<ChatMsg>>(null);
+  const sendRef = useRef<(text?: string) => Promise<void>>(async () => undefined);
+  const insets = useSafeAreaInsets();
+
+  const profile = profiles.find((p) => p.id === activeId) ?? profiles[0] ?? null;
+  const configured = isConfigured();
+
+  // 新消息到达时滚到底部
+  useEffect(() => {
+    if (messages.length) {
+      listRef.current?.scrollToEnd({ animated: true });
+    }
+  }, [messages.length]);
+
+  // 语音识别事件订阅（partial 实时回显，最终结果自动发送）
+  useEffect(() => {
+    return subscribeVoice({
+      onStart: () => setListening(true),
+      onPartial: (t) => setInput(t),
+      onResult: (t) => {
+        setListening(false);
+        const text = t.trim();
+        if (text) void sendRef.current(text);
+      },
+      onError: () => setListening(false),
+    });
+  }, []);
+
+  const send = async (textArg?: string): Promise<void> => {
+    const text = (textArg ?? input).trim();
+    if (!text || sending) return;
+    setInput('');
+    const store = useAppStore.getState();
+    const history: ChatMsg[] = [...store.messages, { role: 'user', content: text }];
+    store.appendMessages([{ role: 'user', content: text }]);
+    setSending(true);
+    const startedAt = Date.now();
+    try {
+      const { content, reasoning } = await requestChat(history);
+      const thinkSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      useAppStore.getState().appendMessages([{ role: 'assistant', content, reasoning, thinkSeconds }]);
+      // 开启朗读时读出回复（错误提示不读，带音色/语速/音调设置）
+      const st = useAppStore.getState();
+      if (st.ttsEnabled) {
+        void speak(content, { rate: st.speechRate, pitch: st.speechPitch, voice: st.speechVoice || undefined });
+      }
+    } catch (e) {
+      useAppStore.getState().appendMessages([
+        { role: 'assistant', content: `出错了：${e instanceof Error ? e.message : String(e)}` },
+      ]);
+    } finally {
+      setSending(false);
+      scheduleUpload('chat_history');
+    }
+  };
+  sendRef.current = send;
+
+  // 按住说话：先请求麦克风权限，开始前停掉 TTS 防自听
+  const micPressIn = async (): Promise<void> => {
+    if (!isSpeechAvailable()) {
+      Alert.alert('功能不可用', '当前设备缺少语音模块');
+      return;
+    }
+    try {
+      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, {
+        title: '麦克风权限',
+        message: '用于按住说话和宠物语音对话',
+        buttonPositive: '允许',
+        buttonNegative: '拒绝',
+      });
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) return;
+      await stopSpeak();
+      await startListening();
+    } catch (e) {
+      Alert.alert('无法开始识别', e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const micPressOut = (): void => {
+    if (listening) void stopListening();
+  };
+
+  // 清空对话：与桌面端一致先确认（可在设置关闭询问；清空即同时清本地并同步清云端）
+  const confirmClear = (): void => {
+    if (!messages.length) return;
+    if (!useAppStore.getState().chatClearConfirm) {
+      useAppStore.getState().clearMessages();
+      scheduleUpload('chat_history');
+      return;
+    }
+    Alert.alert('清空对话', '确定要清空全部对话记录吗？清空后无法恢复。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '清空全部对话记录',
+        style: 'destructive',
+        onPress: () => {
+          useAppStore.getState().clearMessages();
+          scheduleUpload('chat_history');
+        },
+      },
+    ]);
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+        <Pressable style={styles.headerLeft} onPress={() => setManagerVisible(true)} hitSlop={6}>
+          <Text style={styles.headerText} numberOfLines={1}>
+            {configured ? `${profile?.name ?? 'API'} · ${profile?.model ?? ''}` : '未配置聊天 API，点此管理档案'}
+          </Text>
+        </Pressable>
+        <Pressable onPress={confirmClear} hitSlop={12} disabled={!messages.length}>
+          <Text style={[styles.headerAction, !messages.length && styles.headerActionDisabled]}>清空</Text>
+        </Pressable>
+      </View>
+
+      {!profiles.length && (
+        <Pressable style={styles.guide} onPress={() => setManagerVisible(true)}>
+          <Text style={styles.guideText}>
+            还没有 API 档案。点击这里在手机上直接创建，或在桌面端「API 配置」中添加后登录同一账号自动同步。
+          </Text>
+        </Pressable>
+      )}
+
+      <FlatList
+        ref={listRef}
+        style={styles.list}
+        data={messages}
+        keyExtractor={(_, i) => String(i)}
+        renderItem={({ item }) => <Bubble msg={item} />}
+        ListEmptyComponent={<Text style={styles.empty}>和宠物聊点什么吧</Text>}
+      />
+
+      <View style={styles.inputRow}>
+        <Pressable
+          style={[styles.mic, listening && styles.micActive]}
+          onPressIn={() => void micPressIn()}
+          onPressOut={micPressOut}>
+          <Text style={styles.micText}>{listening ? '松开' : '按住'}</Text>
+        </Pressable>
+        <TextInput
+          style={styles.input}
+          placeholder={configured ? '说点什么…' : '先创建 API 档案'}
+          value={input}
+          onChangeText={setInput}
+          multiline
+        />
+        <Pressable style={[styles.send, (!input.trim() || sending) && styles.sendDisabled]} onPress={() => void send()} disabled={sending}>
+          <Text style={styles.sendText}>{sending ? '…' : '发送'}</Text>
+        </Pressable>
+      </View>
+
+      <ProfileManager visible={managerVisible} onClose={() => setManagerVisible(false)} />
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  headerLeft: { flex: 1, marginRight: 10 },
+  headerText: { fontSize: 12, color: '#888' },
+  headerAction: { fontSize: 13, color: '#1C6EF2' },
+  headerActionDisabled: { color: '#CCC' },
+  guide: { backgroundColor: '#FFF7E6', margin: 12, marginBottom: 0, borderRadius: 8, padding: 10 },
+  guideText: { color: '#9A6B00', fontSize: 12, lineHeight: 18 },
+  list: { flex: 1, paddingHorizontal: 12 },
+  empty: { textAlign: 'center', color: '#AAA', marginTop: 40 },
+  bubbleRow: { flexDirection: 'row', marginVertical: 4 },
+  bubbleRowMine: { justifyContent: 'flex-end' },
+  bubble: { maxWidth: '78%', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12 },
+  bubbleMine: { backgroundColor: '#1C6EF2', borderBottomRightRadius: 4 },
+  bubbleTheirs: { backgroundColor: '#F2F3F5', borderBottomLeftRadius: 4 },
+  bubbleText: { fontSize: 15, lineHeight: 21, color: '#333' },
+  bubbleTextMine: { color: '#fff' },
+  // DeepSeek 风格思考卡片
+  assistantBlock: { maxWidth: '86%' },
+  assistantText: { fontSize: 15, lineHeight: 22, color: '#333', marginTop: 8 },
+  thinkCard: { backgroundColor: '#F7F8FA', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  thinkHeader: { flexDirection: 'row', alignItems: 'center' },
+  thinkTitle: { fontSize: 13, fontWeight: '600', color: '#666' },
+  thinkChevron: { fontSize: 12, color: '#AAA', marginLeft: 6 },
+  thinkBody: { fontSize: 12, lineHeight: 19, color: '#888', marginTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#E8E8E8', paddingTop: 8 },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  mic: { backgroundColor: '#F2F3F5', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 11, marginRight: 8 },
+  micActive: { backgroundColor: '#E5484D' },
+  micText: { fontSize: 13, color: '#333' },
+  input: { flex: 1, minHeight: 38, maxHeight: 100, backgroundColor: '#F5F6F8', borderRadius: 8, paddingHorizontal: 10, paddingTop: 9, fontSize: 15 },
+  send: { marginLeft: 8, backgroundColor: '#1C6EF2', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 9 },
+  sendDisabled: { opacity: 0.5 },
+  sendText: { color: '#fff', fontSize: 14 },
+});
+
+const pm = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff', paddingTop: 48 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  title: { fontSize: 16, fontWeight: '700', color: '#333' },
+  headerBtn: { fontSize: 14, color: '#666', paddingHorizontal: 4 },
+  headerBtnPrimary: { color: '#1C6EF2', fontWeight: '600' },
+  list: { flex: 1, padding: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F7F8FA', borderRadius: 10, padding: 12, marginBottom: 8 },
+  rowActive: { borderWidth: 1.5, borderColor: '#1C6EF2', backgroundColor: '#F0F6FF' },
+  rowName: { fontSize: 14, fontWeight: '600', color: '#333' },
+  rowSub: { fontSize: 12, color: '#999', marginTop: 2 },
+  rowBtn: { marginLeft: 12, paddingHorizontal: 6, paddingVertical: 4 },
+  rowBtnText: { fontSize: 13, color: '#1C6EF2' },
+  rowBtnDanger: { color: '#E5484D' },
+  empty: { textAlign: 'center', color: '#AAA', marginTop: 40 },
+  form: { flex: 1, padding: 14 },
+  fieldLabel: { fontSize: 12, color: '#888', marginTop: 10, marginBottom: 4 },
+  field: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, minHeight: 40, textAlignVertical: 'top' },
+  formBtns: { flexDirection: 'row', marginTop: 18, marginBottom: 30 },
+  btn: { flex: 1, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
+  btnGhost: { borderWidth: 1, borderColor: '#DDD', marginRight: 10 },
+  btnGhostText: { color: '#666', fontSize: 14 },
+  btnPrimary: { backgroundColor: '#1C6EF2' },
+  btnPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  hint: { fontSize: 11, color: '#AAA', padding: 12, paddingBottom: 20, textAlign: 'center' },
+});

@@ -42,6 +42,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('asr:transcribe', payload) as Promise<{ ok: boolean; text?: string; error?: string }>,
   },
 
+  // 宠物自我形象识别：渲染端传当前形象画布截图，主进程指纹去重后调多模态 LLM 记住外观
+  self: {
+    recognize: (dataUrl: string) =>
+      ipcRenderer.invoke('self:recognize', dataUrl) as Promise<{
+        ok: boolean;
+        skipped?: boolean;
+        description?: string;
+        error?: string;
+      }>,
+  },
+
   // Config
   config: {
     get: () => ipcRenderer.invoke('config:get'),
@@ -118,4 +129,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onPlayAction: createListener('pet:play-action'),
   onToggleActions: createListener('pet:toggle-actions'),
   onAgentMessage: createListener('pet:agent-message'),
+  // 智能体变更通知：宠物重新「看一眼」自己（导出画布并请求形象识别）
+  onSelfieRequest: createListener('pet:selfie-request'),
 });

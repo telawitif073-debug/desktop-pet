@@ -174,6 +174,32 @@ export class ConversationManager {
     return [...this.history];
   }
 
+  /** 云同步：导出全部历史消息（供上传到平台 /api/sync/chat-history），多模态附图消息（历史中实为纯文本）按 string 过滤 */
+  exportHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
+    return this.history
+      .filter((m): m is ChatMessage & { content: string } => typeof m.content === 'string')
+      .map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+      }));
+  }
+
+  /** 云同步恢复：本地历史为空时用云端数据填充（过滤非法消息），返回是否发生恢复 */
+  restoreFromCloud(messages: unknown): boolean {
+    if (!Array.isArray(messages) || this.history.length > 0) return false;
+    const valid = messages.filter(
+      (m: unknown): m is ChatMessage =>
+        !!m &&
+        typeof m === 'object' &&
+        ((m as ChatMessage).role === 'user' || (m as ChatMessage).role === 'assistant') &&
+        typeof (m as ChatMessage).content === 'string',
+    );
+    if (!valid.length) return false;
+    this.history = valid;
+    this.persist();
+    return true;
+  }
+
   private trimHistory(): void {
     if (this.history.length > MAX_HISTORY * 2) {
       this.history = this.history.slice(-MAX_HISTORY);

@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage {
+    width: 100vw; height: 100vh;
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #pet { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  canvas { max-width: 100%; max-height: 100%; display: block; }
+  #hint {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #888; font: 12px/1.4 -apple-system, "PingFang SC", sans-serif;
+    text-align: center; padding: 8px;
+  }
+  .bounce { animation: bounce 0.5s ease; }
+  @keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="hint">宠物加载中…</div>
+</div>
+
+<script>
+(function () {
+  const stage = document.getElementById('stage');
+  const hint = document.getElementById('hint');
+
+  // 解析 query：src 资源 URL、format 形态、name 显示名、base 平台根（用于相对 URL）
+  const qs = new URLSearchParams(location.search);
+  const src = qs.get('src') || '';
+  const format = qs.get('format') || 'image';
+  const name = qs.get('name') || '小宠';
+  const base = qs.get('base') || '';
+  const manifest = qs.get('manifest') || '';
+  const modelUrl = qs.get('model') || '';
+
+  function absUrl(u) {
+    if (!u) return '';
+    if (/^(https?:|file:|data:)/i.test(u)) return u;
+    if (u.startsWith('/') && base) return base.replace(/\/$/, '') + u;
+    return u;
+  }
+
+  function clearStage() {
+    stage.innerHTML = '';
+  }
+
+  function showHint(text) {
+    clearStage();
+    const el = document.createElement('div');
+    el.id = 'hint';
+    el.textContent = text;
+    stage.appendChild(el);
+  }
+
+  function onPetClick() {
+    stage.classList.remove('bounce');
+    void stage.offsetWidth; // 触发 reflow
+    stage.classList.add('bounce');
+  }
+  stage.addEventListener('click', onPetClick);
+
+  function renderImage(url) {
+    clearStage();
+    const img = document.createElement('img');
+    img.id = 'pet';
+    img.alt = name;
+    img.onload = function () { /* 已渲染 */ };
+    img.onerror = function () { showHint(name + '\n图片加载失败'); };
+    img.src = url;
+    stage.appendChild(img);
+  }
+
+  function renderPack(manifestUrl) {
+    clearStage();
+    const canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 320;
+    stage.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    let frames = [];
+    let idx = 0;
+
+    fetch(absUrl(manifestUrl))
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('manifest HTTP ' + r.status)); })
+      .then(function (list) {
+        if (!Array.isArray(list) || !list.length) throw new Error('manifest 无帧');
+        frames = list.map(absUrl);
+        preload();
+      })
+      .catch(function (e) { showHint(name + '\n帧包加载失败\n' + e.message); });
+
+    const cache = [];
+    function preload() {
+      let loaded = 0;
+      frames.forEach(function (u, i) {
+        const img = new Image();
+        img.onload = function () {
+          cache[i] = img;
+          loaded++;
+          if (loaded === frames.length) start();
+        };
+        img.onerror = function () {
+          loaded++;
+          if (loaded === frames.length) start();
+        };
+        img.src = u;
+      });
+    }
+
+    function start() {
+      const ready = cache.filter(Boolean);
+      if (!ready.length) { showHint(name + '\n帧包为空'); return; }
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setInterval(function () {
+        const img = cache[idx % cache.length];
+        idx++;
+        if (!img) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      }, 120);
+    }
+  }
+
+  function renderLive2D(url) {
+    clearStage();
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
+    stage.appendChild(wrap);
+    const t = document.createElement('div');
+    t.textContent = 'Live2D 加载中…';
+    t.style.color = '#888';
+    t.style.fontSize = '12px';
+    wrap.appendChild(t);
+
+    // 从 unpkg 加载 Pixi v8 + pixi-live2d-display（与桌面端 @jannchie/pixi-live2d-display 对齐）
+    const s1 = document.createElement('script');
+    s1.src = 'https://unpkg.com/pixi.js@8.6.6/dist/pixi.min.js';
+    s1.onload = function () {
+      const s2 = document.createElement('script');
+      s2.src = 'https://unpkg.com/@jannchie/pixi-live2d-display/dist/index.min.js';
+      s2.onload = function () {
+        try {
+          const app = new PIXI.Application({
+            width: 320, height: 320,
+            backgroundAlpha: 0,
+            antialias: true,
+          });
+          wrap.innerHTML = '';
+          wrap.appendChild(app.canvas || app.view);
+          PIXI.live2d.Live2DModel.from(absUrl(url)).then(function (m) {
+            app.stage.addChild(m);
+            const scale = Math.min(320 / m.width, 320 / m.height);
+            m.scale.set(scale);
+            m.x = (320 - m.width) / 2;
+            m.y = (320 - m.height) / 2;
+          }).catch(function (e) { showHint(name + '\nLive2D 加载失败\n' + e.message); });
+        } catch (e) {
+          showHint(name + '\nLive2D 渲染失败\n' + e.message);
+        }
+      };
+      s2.onerror = function () { showHint(name + '\nLive2D 库下载失败\n需联网加载'); };
+      document.body.appendChild(s2);
+    };
+    s1.onerror = function () { showHint(name + '\nPixi 库下载失败\n需联网加载'); };
+    document.body.appendChild(s1);
+  }
+
+  function render3D(url) {
+    clearStage();
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
+    stage.appendChild(wrap);
+    const t = document.createElement('div');
+    t.textContent = '3D 模型加载中…';
+    t.style.color = '#888';
+    t.style.fontSize = '12px';
+    wrap.appendChild(t);
+
+    // three.js + GLTFLoader + AnimationMixer（与桌面端 three.js 渲染对齐）
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/three@0.169.0/build/three.min.js';
+    s.onload = function () {
+      const s2 = document.createElement('script');
+      s2.src = 'https://unpkg.com/three@0.169.0/examples/js/loaders/GLTFLoader.js';
+      s2.onload = function () {
+        try {
+          const scene = new THREE.Scene();
+          const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+          camera.position.set(0, 1.2, 3);
+          camera.lookAt(0, 1, 0);
+          const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+          renderer.setPixelRatio(window.devicePixelRatio);
+          renderer.setSize(320, 320);
+          renderer.setClearColor(0x000000, 0);
+          wrap.innerHTML = '';
+          wrap.appendChild(renderer.domElement);
+          const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+          scene.add(light);
+          const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+          dir.position.set(2, 3, 2);
+          scene.add(dir);
+          let mixer = null;
+          const loader = new THREE.GLTFLoader();
+          loader.load(absUrl(url), function (gltf) {
+            scene.add(gltf.scene);
+            if (gltf.animations && gltf.animations.length) {
+              mixer = new THREE.AnimationMixer(gltf.scene);
+              mixer.clipAction(gltf.animations[0]).play();
+            }
+            animate();
+          }, undefined, function (e) {
+            showHint(name + '\n3D 模型加载失败\n' + (e.message || ''));
+          });
+          const clock = new THREE.Clock();
+          function animate() {
+            requestAnimationFrame(animate);
+            const dt = clock.getDelta();
+            if (mixer) mixer.update(dt);
+            renderer.render(scene, camera);
+          }
+        } catch (e) {
+          showHint(name + '\n3D 渲染失败\n' + e.message);
+        }
+      };
+      s2.onerror = function () { showHint(name + '\nGLTFLoader 下载失败\n需联网加载'); };
+      document.body.appendChild(s2);
+    };
+    s.onerror = function () { showHint(name + '\nthree.js 下载失败\n需联网加载'); };
+    document.body.appendChild(s);
+  }
+
+  // 主分发
+  if (format === 'pack') {
+    if (!manifest) { showHint(name + '\n缺少帧包清单 URL'); return; }
+    renderPack(manifest);
+  } else if (format === 'live2d') {
+    if (!modelUrl && !src) { showHint(name + '\n缺少 Live2D 模型 URL'); return; }
+    renderLive2D(modelUrl || src);
+  } else if (format === 'model3d') {
+    if (!modelUrl && !src) { showHint(name + '\n缺少 3D 模型 URL'); return; }
+    render3D(modelUrl || src);
+  } else {
+    // image / gif
+    if (!src) { showHint(name + '\n缺少图片 URL'); return; }
+    renderImage(absUrl(src));
+  }
+})();
+</script>
+</body>
+</html>

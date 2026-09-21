@@ -9,6 +9,8 @@ import {
   type PetStateSnapshot,
 } from './main/conversationManager';
 import { platformClient, type PlatformAssetType } from './main/platformClient';
+import { ensurePlatformServices } from './main/platformRunner';
+import { pullAfterLogin, scheduleUpload, flushAllOnQuit, bindChatStore } from './main/cloudSync';
 import { edgeSpeak } from './main/tts';
 import { startAgentProactive } from './main/agentProactive';
 import { addFramesAction, removeAction } from './main/petActions';
@@ -54,6 +56,7 @@ const conversationManager = new ConversationManager(
   currentPetState,
   path.join(app.getPath('userData'), 'chat-history.json')
 );
+bindChatStore(conversationManager);
 
 function getWindowPosition(chatMode: boolean) {
   const { workArea } = screen.getPrimaryDisplay();
@@ -193,6 +196,15 @@ function withActionPrompt(messages: ChatMessage[]): void {
     `仅当动作与对话内容自然相关时才附带，每条回复最多一个，不需要时不要添加。`;
 }
 
+/** 注入宠物自我形象描述：更换形象/智能体时识别生成并记住，让宠物在对话中「知道自己长什么样」 */
+function withSelfDescription(messages: ChatMessage[]): void {
+  const desc = loadConfig().petSelfDescription;
+  if (!desc) return;
+  const sys = messages.find((m) => m.role === 'system');
+  if (!sys) return;
+  sys.content += `\n\n你的桌面宠物形象描述（回答外观/形象相关话题时以此为准）：${desc}`;
+}
+
 /** 解析回复末尾的 [动作:名称] 标记：剥离文本并通过 pet:play-action 触发播放，返回剥离后的文本 */
 function extractActionTag(text: string, win: BrowserWindow | null): string {
   const m = text.match(/\s*\[动作[:：]([^\]]{1,30})\]\s*$/);
@@ -221,6 +233,7 @@ ipcMain.handle('chat:send', async (event, message: string, images?: string[]) =>
     lastUserMessageAt = Date.now();
     const messages = conversationManager.buildMessages();
     withActionPrompt(messages);
+    withSelfDescription(messages);
     // 附图：末条 user 消息转为多模态 content（聊天历史仍存纯文本，token 友好）
     if (images?.length) {
       const last = messages[messages.length - 1];
@@ -252,6 +265,7 @@ ipcMain.handle('chat:send', async (event, message: string, images?: string[]) =>
 
     const replyText = extractActionTag(fullText, win);
     conversationManager.addAssistantMessage(replyText);
+    scheduleUpload('chat_history');
     return { success: true, text: replyText };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -262,6 +276,7 @@ ipcMain.handle('chat:send', async (event, message: string, images?: string[]) =>
 // Chat: clear conversation history
 ipcMain.handle('chat:clear', () => {
   conversationManager.clearHistory();
+  scheduleUpload('chat_history');
   return { success: true };
 });
 
@@ -290,6 +305,7 @@ ipcMain.handle('chat:greet', async (event) => {
     });
     const replyText = extractActionTag(fullText, win);
     conversationManager.addAssistantMessage(replyText);
+    scheduleUpload('chat_history');
     return { success: true, text: replyText };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -305,6 +321,10 @@ ipcMain.handle('config:get', () => {
 ipcMain.handle('config:set', (_event, partial: Partial<AppConfig>) => {
   const updated = saveConfig(partial);
   conversationManager.updateConfig(updated);
+  // LLM 配置变更：防抖上传云端（手机端共享）
+  if (partial.llmProfiles || partial.llmActiveProfileId !== undefined) {
+    scheduleUpload('config');
+  }
   // 宠物窗口设置变更：实时应用大小与透明度，并通知渲染进程重绘
   if (partial.petWindow && mainWindow && !mainWindow.isDestroyed()) {
     console.log(`[geo] config:set petWindow=${JSON.stringify(partial.petWindow)}`);
@@ -343,19 +363,35 @@ const notifyPetAssetChanged = () => {
   }
 };
 
+// 智能体变更后让宠物重新「看一眼」自己：渲染端重新导出画布并请求形象识别（指纹含 agentId，未变时主进程跳过）
+const notifySelfieRequest = () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('pet:selfie-request', null);
+  }
+};
+
 ipcMain.handle('platform:install', async (_event, type: PlatformAssetType, id: string) => {
   const result = await platformClient.install(type, id);
   if (type === 'pet') {
     notifyPetAssetChanged();
     // 宠物附带动作已随安装注册，通知动作面板刷新列表与互动绑定
     notifyPetActionsChanged();
+    // 当前宠物引用变更：防抖上传云端（换机登录可自动恢复）
+    scheduleUpload('config');
+  } else if (type === 'agent') {
+    notifySelfieRequest();
   }
   return result;
 });
 
 ipcMain.handle('platform:uninstall', async (_event, type: PlatformAssetType, id: string) => {
   const result = await platformClient.uninstall(type, id);
-  if (type === 'pet') notifyPetAssetChanged();
+  if (type === 'pet') {
+    notifyPetAssetChanged();
+    scheduleUpload('config');
+  } else if (type === 'agent') {
+    notifySelfieRequest();
+  }
   return result;
 });
 
@@ -363,13 +399,86 @@ ipcMain.handle('platform:getInstalledPet', () => platformClient.getInstalledPet(
 
 ipcMain.handle('platform:getInstalledAgent', () => platformClient.getInstalledAgent());
 
-ipcMain.handle('platform:login', (_event, identifier: string, password: string) =>
-  platformClient.login(identifier, password),
-);
+// --- 宠物自我形象识别：渲染端导出当前形象画布，主进程调多模态 LLM 生成描述并记住 ---
+let selfRecognizeFailedNotifiedAt = 0;
+
+/** 形象识别指纹：资产（路径+形态）与智能体任一变化即视为形象可能变化 */
+function selfImageFingerprint(): string {
+  const cfg = loadConfig();
+  return JSON.stringify([cfg.petAssetPath ?? '', cfg.petAssetFormat ?? '', cfg.installedAgentId ?? '']);
+}
+
+ipcMain.handle('self:recognize', async (_event, dataUrl: string) => {
+  const fingerprint = selfImageFingerprint();
+  const cfg = loadConfig();
+  // 指纹未变且描述已存在：跳过（启动重载/面板重开不重复调 LLM）
+  if (cfg.selfImageFingerprint === fingerprint && cfg.petSelfDescription) {
+    return { ok: true, skipped: true };
+  }
+  if (!dataUrl?.startsWith('data:image')) return { ok: false, error: 'BAD_IMAGE' };
+  if (!llmService.isConfigured()) return { ok: false, error: 'NO_LLM' };
+  try {
+    const description = await llmService.chat({
+      messages: [
+        { role: 'system', content: '你是宠物形象描述员，只输出一段简短的外观描述，不要输出任何其他内容。' },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: '这是桌面宠物的当前形象截图。请用不超过 60 字、第三人称描述它的外观（种类/外形、主要颜色、表情与风格），忽略画面空白背景。',
+            },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+    });
+    const text = description.replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!text) throw new Error('empty description');
+    saveConfig({ petSelfDescription: text, selfImageFingerprint: fingerprint });
+    console.log(`[self] 形象识别完成: ${text}`);
+    return { ok: true, description: text };
+  } catch (err) {
+    console.log('[self] 形象识别失败:', err instanceof Error ? err.message : err);
+    // 节流气泡提醒：多为当前模型不支持视觉输入
+    if (Date.now() - selfRecognizeFailedNotifiedAt > 10 * 60 * 1000) {
+      selfRecognizeFailedNotifiedAt = Date.now();
+      deliverAgentMessage('宠物形象识别失败：当前聊天模型可能不支持看图。换用支持视觉的模型后，重新加载页面即可重试');
+    }
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('platform:login', async (_event, identifier: string, password: string) => {
+  const result = await platformClient.login(identifier, password);
+  // 登录成功后拉取云端数据恢复本地缺失部分（LLM 配置/当前宠物/宠物状态/聊天记录）
+  void pullAfterLogin().then((restored) => {
+    if (restored.petReinstalled) {
+      // 换机/重装场景：云端宠物已重新下载安装，通知宠物窗口与动作面板刷新
+      notifyPetAssetChanged();
+      notifyPetActionsChanged();
+    }
+    if (restored.petState) {
+      currentPetState = restored.petState;
+      conversationManager.updatePetState(restored.petState);
+    }
+  });
+  return result;
+});
 
 ipcMain.handle('platform:logout', () => platformClient.logout());
 
-ipcMain.handle('platform:open-store', () => {
+/** 商店启动提示页（拉起平台服务期间展示，避免白屏） */
+function storeStatusPage(title: string, detail: string): string {
+  const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>资源商店</title>
+<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#1e1f22;color:#d6d7d9;font-family:system-ui,'Microsoft YaHei',sans-serif}
+.box{text-align:center}.spin{width:36px;height:36px;margin:0 auto 18px;border:3px solid #4a5568;border-top-color:#4a9eff;border-radius:50%;animation:s .9s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}h2{font-size:17px;font-weight:600;margin:0 0 10px}p{font-size:13px;color:#8b8f96;margin:0}</style></head>
+<body><div class="box"><div class="spin"></div><h2>${title}</h2><p>${detail}</p></div></body></html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+ipcMain.handle('platform:open-store', async () => {
   if (storeWindow && !storeWindow.isDestroyed()) {
     storeWindow.focus();
     return { success: true };
@@ -389,8 +498,18 @@ ipcMain.handle('platform:open-store', () => {
   storeWindow.on('closed', () => {
     storeWindow = null;
   });
-  storeWindow.loadURL(platformConfig.frontendUrl);
-  return { success: true };
+  // 平台三件套（便携 PostgreSQL/后端/前端）未运行时先展示提示页并自动拉起，避免商店空白
+  storeWindow.loadURL(storeStatusPage('正在启动平台服务', '数据库与平台服务启动中，首次约需 10–30 秒…'));
+  const ready = await ensurePlatformServices(app.getAppPath());
+  if (!storeWindow || storeWindow.isDestroyed()) return { success: true };
+  if (ready) {
+    await storeWindow.loadURL(platformConfig.frontendUrl);
+  } else {
+    await storeWindow.loadURL(
+      storeStatusPage('平台服务启动失败', '请检查 platform 目录是否完整，或手动运行 platform\\start-platform.bat 后重开商店')
+    );
+  }
+  return { success: ready };
 });
 
 // Pet state: update (sent from renderer so main can use it in system prompt)
@@ -405,6 +524,7 @@ function schedulePetStateSave() {
   petStateSaveTimer = setTimeout(() => {
     petStateSaveTimer = null;
     saveConfig({ petState: currentPetState });
+    scheduleUpload('pet_state');
   }, PET_STATE_SAVE_DELAY);
 }
 
@@ -413,6 +533,7 @@ function flushPendingPetStateSave() {
   clearTimeout(petStateSaveTimer);
   petStateSaveTimer = null;
   saveConfig({ petState: currentPetState });
+  scheduleUpload('pet_state');
 }
 
 ipcMain.handle('pet:state-update', (_event, state: PetStateSnapshot) => {
@@ -919,6 +1040,7 @@ let lastUserMessageAt = 0;
 function deliverAgentMessage(text: string): void {
   const clean = extractActionTag(text, mainWindow);
   conversationManager.addAssistantMessage(clean);
+  scheduleUpload('chat_history');
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('pet:agent-message', clean);
   }
@@ -1054,8 +1176,11 @@ app.whenReady().then(() => {
   startProactive();
 });
 
-// Flush any pending debounced pet state write before exiting
-app.on('before-quit', flushPendingPetStateSave);
+// Flush pending debounced pet state write and cloud sync uploads before exiting
+app.on('before-quit', () => {
+  flushPendingPetStateSave();
+  flushAllOnQuit();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

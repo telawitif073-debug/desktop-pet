@@ -67,6 +67,8 @@ const App = () => {
   // 当前播放中的动作 id + 立即停止回调：删除动作时用于中断播放并复位宠物
   const playingActionIdRef = useRef<string | null>(null);
   const stopActionRef = useRef<(() => void) | null>(null);
+  // 当前形象导出闭包（三形态初始化就绪后赋值）：自我形象识别用
+  const selfieExportRef = useRef<(() => string | null) | null>(null);
   const [petSettings, setPetSettings] = useState<PetWindowSettings>({ width: 300, height: 300, opacity: 1 });
   const [petFeatures, setPetFeatures] = useState<PetFeatures>(DEFAULT_FEATURES);
   // decay 定时器内通过 ref 读取，避免闭包过期（开关变更不重建 Pixi 实例）
@@ -148,6 +150,17 @@ const App = () => {
   const [assetVersion, setAssetVersion] = useState(0);
   useEffect(() => {
     const cleanup = window.electronAPI?.onPetAssetChanged(() => setAssetVersion((v) => v + 1));
+    return cleanup;
+  }, []);
+
+  // 智能体变更（主进程通知）：宠物重新「看一眼」自己并更新形象记忆（主进程按指纹去重）
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onSelfieRequest(() => {
+      window.setTimeout(() => {
+        const dataUrl = selfieExportRef.current?.();
+        if (dataUrl) void window.electronAPI?.self?.recognize(dataUrl)?.catch?.(() => {});
+      }, 800);
+    });
     return cleanup;
   }, []);
 
@@ -393,6 +406,22 @@ const App = () => {
       if (playingActionIdRef) playingActionIdRef.current = null;
     };
 
+    // 形象就绪后交主进程识别并记住（指纹未变时主进程跳过）；延后给动画首帧留渲染时间
+    const requestSelfRecognize = () => {
+      if (!window.electronAPI?.self?.recognize) return;
+      window.setTimeout(() => {
+        const dataUrl = selfieExportRef.current?.();
+        if (!dataUrl) return;
+        window.electronAPI.self
+          .recognize(dataUrl)
+          .then((res) => {
+            if (res?.ok && !res.skipped) console.log(`[self] 形象已记住: ${res.description}`);
+            else if (res && !res.ok) console.log(`[self] 形象识别失败: ${res.error}`);
+          })
+          .catch(() => { /* 主进程未就绪等场景静默 */ });
+      }, 800);
+    };
+
     const playAction = (action: PetAction) => {
       if (!app || !pet) return;
       stopActionSprite();
@@ -504,6 +533,18 @@ const App = () => {
       pet.x = width / 2;
       pet.y = height / 2;
       app.stage.addChild(pet);
+
+      // 形象导出闭包：Pixi v8 extract 输出透明背景 PNG（不含聊天面板等 DOM）
+      selfieExportRef.current = () => {
+        if (!app) return null;
+        try {
+          const canvas = app.renderer.extract.canvas(app.stage) as HTMLCanvasElement | null;
+          return canvas?.toDataURL('image/png') ?? null;
+        } catch {
+          return null;
+        }
+      };
+      requestSelfRecognize();
 
       // 像素级命中测试：sprite 实际矩形 + 纹理 alpha 图（整页穿透，仅宠物本体不透明像素可交互）
       const spriteW = natW * fit;
@@ -644,6 +685,17 @@ const App = () => {
         }
         setHitRect({ left: minX, top: minY, w: maxX - minX, h: maxY - minY });
         hitAlphaRef.current = null;
+
+        // 形象导出闭包：手动渲染一帧后同步读取像素（规避 preserveDrawingBuffer 空帧问题）
+        selfieExportRef.current = () => {
+          try {
+            renderer.render(scene, camera);
+            return renderer.domElement.toDataURL('image/png');
+          } catch {
+            return null;
+          }
+        };
+        requestSelfRecognize();
       } catch {
         // 模型加载失败：销毁渲染器（窗口保持透明，不影响其他功能）
         renderer.dispose();
@@ -927,6 +979,18 @@ const App = () => {
         model.position.set(width / 2, height / 2);
         app.stage.addChild(model);
 
+        // 形象导出闭包：Live2D 同挂 Pixi stage，与 2D 相同的 extract 途径
+        selfieExportRef.current = () => {
+          if (!app) return null;
+          try {
+            const canvas = app.renderer.extract.canvas(app.stage) as HTMLCanvasElement | null;
+            return canvas?.toDataURL('image/png') ?? null;
+          } catch {
+            return null;
+          }
+        };
+        requestSelfRecognize();
+
         // 命中矩形：模型包围盒（3D/Live2D 无像素图，矩形命中）
         const b = model.getBounds();
         setHitRect({ left: b.minX, top: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY });
@@ -982,6 +1046,7 @@ const App = () => {
       clearInterval(decayInterval);
       playActionRef.current = null;
       stopActionRef.current = null;
+      selfieExportRef.current = null;
       if (app) app.destroy(true);
       cleanupThree?.();
     };

@@ -181,6 +181,10 @@ export interface AppConfig {
   voiceModelSource?: string;
   /** 宠物「听懂说话」来源：本地模型包 / 在线接口 / 智能体自带（详见 VoiceAsrConfig） */
   voiceAsr?: VoiceAsrConfig;
+  /** 宠物自我形象描述（更换形象/智能体时多模态 LLM 识别生成，注入对话 system prompt） */
+  petSelfDescription?: string;
+  /** 上次形象识别的指纹（资产标识+agentId），变化时才重新识别 */
+  selfImageFingerprint?: string;
   agentConfigPath?: string;
   installedAgentId?: string;
   /** 已安装智能体：人设（name/systemPrompt）+ 可选自带语音识别（asr）；聊天 LLM 参数仍一律由用户配置（平台不提供 API） */

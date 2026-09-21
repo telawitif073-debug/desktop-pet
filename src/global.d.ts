@@ -123,6 +123,10 @@ export interface AppConfig {
     /** 智能体自带识别时替换成自己的 Key（可选） */
     agentApiKey?: string;
   };
+  /** 宠物自我形象描述（更换形象/智能体时多模态 LLM 识别生成，注入对话 system prompt） */
+  petSelfDescription?: string;
+  /** 上次形象识别的指纹（资产标识+agentId），变化时才重新识别 */
+  selfImageFingerprint?: string;
   agentConfigPath?: string;
   installedAgentId?: string;
   installedAgentConfig?: unknown;
@@ -183,6 +187,12 @@ declare global {
       asr: {
         transcribe: (payload: { wavBase64: string }) =>
           Promise<{ ok: boolean; text?: string; error?: string }>;
+      };
+
+      // 宠物自我形象识别（更换形象/智能体后识别自己并记住）
+      self: {
+        recognize: (dataUrl: string) =>
+          Promise<{ ok: boolean; skipped?: boolean; description?: string; error?: string }>;
       };
 
       config: {
@@ -259,6 +269,8 @@ declare global {
       onPlayAction: (callback: (actionId: string) => void) => (() => void);
       onToggleActions: (callback: () => void) => (() => void);
       onAgentMessage: (callback: (message: string) => void) => (() => void);
+      /** 智能体变更通知：宠物重新「看一眼」自己（导出画布并请求形象识别） */
+      onSelfieRequest: (callback: () => void) => (() => void);
     };
   }
 }
