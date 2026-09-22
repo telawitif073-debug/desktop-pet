@@ -116,7 +116,9 @@ class OverlayPetService : Service() {
             webChromeClient = WebChromeClient()
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             isClickable = true
-            isFocusable = true
+            // 不参与输入焦点：TYPE_APPLICATION_OVERLAY 永远置顶，若可获焦点会把 IME 绑在
+            // 悬浮窗上，导致宠物应用与其他应用的键盘全部失效（点击互动只走触摸事件，不受影响）
+            isFocusable = false
         }
         webView.loadUrl(htmlUrl)
 
@@ -131,6 +133,7 @@ class OverlayPetService : Service() {
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {

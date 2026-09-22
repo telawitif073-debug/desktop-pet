@@ -10,8 +10,8 @@ import { Alert } from 'react-native';
 import { appliedBundleVersion } from '../native/HotUpdate';
 import { useAppStore } from '../store/appStore';
 
-export const APP_VERSION_CODE = 20;
-export const APP_VERSION_NAME = '1.5.0';
+export const APP_VERSION_CODE = 21;
+export const APP_VERSION_NAME = '1.5.1';
 
 export async function checkAppUpdate(silent = true): Promise<void> {
   try {
