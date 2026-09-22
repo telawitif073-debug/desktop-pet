@@ -63,21 +63,51 @@ function ThinkingDots(): React.JSX.Element {
   );
 }
 
+/** 头像：微信式略圆角方块，自己绿色「我」，助手用宠物名首字（蓝色底） */
+function Avatar({ mine, petName }: { mine: boolean; petName: string }): React.JSX.Element {
+  return (
+    <View style={[styles.avatar, mine ? styles.avatarMine : styles.avatarTheirs]}>
+      <Text style={styles.avatarText}>{mine ? '我' : (petName.trim()[0] ?? '宠')}</Text>
+    </View>
+  );
+}
+
+/** 时间分割线：与上一条间隔 ≥5 分钟时居中显示（格式参考微信：今天只显时分，更早带日期） */
+function TimeSeparator({ ts }: { ts: number }): React.JSX.Element | null {
+  const d = new Date(ts);
+  const now = new Date();
+  const pad = (v: number): string => String(v).padStart(2, '0');
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const sameDay = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now.getTime() - 86400000).toDateString() === d.toDateString();
+  const label = sameDay ? hm : yesterday ? `昨天 ${hm}` : `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+  return (
+    <View style={styles.timeRow}>
+      <Text style={styles.timeText}>{label}</Text>
+    </View>
+  );
+}
+
 function Bubble({ msg }: { msg: ChatMsg }): React.JSX.Element {
   const mine = msg.role === 'user';
+  const petName = useAppStore((s) => s.petName);
   if (mine) {
     return (
       <View style={[styles.bubbleRow, styles.bubbleRowMine]}>
         <View style={[styles.bubble, styles.bubbleMine]}>
           <Text style={styles.bubbleTextMine}>{msg.content}</Text>
         </View>
+        <View style={[styles.triangle, styles.triangleMine]} />
+        <Avatar mine petName={petName} />
       </View>
     );
   }
-  // 助手：统一左侧白色气泡（与用户朝向、颜色区分）；内含思考卡片 + 正文
+  // 助手：头像在左，气泡带指向头像的小三角；内含思考卡片 + 正文
   const showDots = msg.pending && !msg.reasoning && !msg.content;
   return (
     <View style={styles.bubbleRow}>
+      <Avatar mine={false} petName={petName} />
+      <View style={[styles.triangle, styles.triangleTheirs]} />
       <View style={[styles.bubble, styles.bubbleTheirs]}>
         {showDots && <ThinkingDots />}
         {!!msg.reasoning && (
@@ -307,12 +337,12 @@ export default function ChatScreen(): React.JSX.Element {
     const store0 = useAppStore.getState();
     const history: ChatMsg[] = [...store0.messages, { role: 'user', content: text }];
     const assistantId = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const startedAt = Date.now();
     store0.appendMessages([
-      { role: 'user', content: text },
-      { id: assistantId, role: 'assistant', content: '', pending: true },
+      { role: 'user', content: text, ts: startedAt },
+      { id: assistantId, role: 'assistant', content: '', pending: true, ts: Date.now() },
     ]);
     setSending(true);
-    const startedAt = Date.now();
     try {
       const { content, reasoning } = await streamChat(history, {
         onReasoning: (d) =>
@@ -424,7 +454,17 @@ export default function ChatScreen(): React.JSX.Element {
         style={styles.list}
         data={messages}
         keyExtractor={(m, i) => m.id ?? String(i)}
-        renderItem={({ item }) => <Bubble msg={item} />}
+        renderItem={({ item, index }) => {
+          // 微信式时间分割线：首条带时间，或与上一条间隔 ≥5 分钟
+          const prev = index > 0 ? messages[index - 1] : null;
+          const showTime = !!item.ts && (!prev?.ts || item.ts - prev.ts >= 5 * 60 * 1000);
+          return (
+            <>
+              {showTime && item.ts != null && <TimeSeparator ts={item.ts} />}
+              <Bubble msg={item} />
+            </>
+          );
+        }}
         ListEmptyComponent={<Text style={styles.empty}>和宠物聊点什么吧</Text>}
         onContentSizeChange={() => {
           // 首次内容布局完成后才定位到最后一条对话（scrollToEnd 在布局未完成时调用会静默失效）
@@ -477,12 +517,24 @@ const styles = StyleSheet.create({
   guideText: { color: '#9A6B00', fontSize: 12, lineHeight: 18 },
   list: { flex: 1, paddingHorizontal: 12 },
   empty: { textAlign: 'center', color: '#AAA', marginTop: 40 },
-  bubbleRow: { flexDirection: 'row', marginVertical: 5 },
+  bubbleRow: { flexDirection: 'row', marginVertical: 5, alignItems: 'flex-start' },
   bubbleRowMine: { justifyContent: 'flex-end' },
-  bubble: { maxWidth: '80%', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12 },
-  // 微信式：我方绿色气泡右侧，对方白色气泡左侧（带边框在灰底上有区分）
-  bubbleMine: { backgroundColor: '#95EC66', borderBottomRightRadius: 3 },
-  bubbleTheirs: { backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth, borderColor: '#DCDCDC', borderBottomLeftRadius: 3 },
+  bubble: { maxWidth: '76%', borderRadius: 6, paddingVertical: 9, paddingHorizontal: 12 },
+  // 微信式：我方绿色气泡右侧，对方白色气泡左侧（带边框在灰底上有区分），小三角指向头像
+  bubbleMine: { backgroundColor: '#95EC66', marginRight: 5 },
+  bubbleTheirs: { backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth, borderColor: '#DCDCDC', marginLeft: 5 },
+  // 气泡小三角（与气泡同色）
+  triangle: { width: 0, height: 0, marginTop: 12, backgroundColor: 'transparent', borderTopWidth: 5, borderBottomWidth: 5 },
+  triangleMine: { borderLeftWidth: 7, borderTopColor: 'transparent', borderBottomColor: 'transparent', borderLeftColor: '#95EC66' },
+  triangleTheirs: { borderRightWidth: 7, borderTopColor: 'transparent', borderBottomColor: 'transparent', borderRightColor: '#FFFFFF' },
+  // 头像（微信式略圆角方块）
+  avatar: { width: 40, height: 40, borderRadius: 4, justifyContent: 'center', alignItems: 'center' },
+  avatarMine: { backgroundColor: '#07C160' },
+  avatarTheirs: { backgroundColor: '#4A90D9' },
+  avatarText: { fontSize: 16, color: '#fff', fontWeight: '600' },
+  // 时间分割线（微信式居中灰底）
+  timeRow: { alignSelf: 'center', backgroundColor: '#DADADA', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3, marginTop: 8, marginBottom: 4 },
+  timeText: { fontSize: 12, color: '#FFFFFF' },
   bubbleText: { fontSize: 16, lineHeight: 22, color: '#181818' },
   bubbleTextMine: { fontSize: 16, lineHeight: 22, color: '#181818' },
   thinkingText: { fontSize: 15, color: '#999' },

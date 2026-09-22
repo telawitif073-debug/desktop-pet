@@ -25,6 +25,8 @@ export interface ChatMsg {
   id?: string;
   role: 'user' | 'assistant';
   content: string;
+  /** 本机发送时间戳（毫秒；云端同步回来的历史消息可能没有，不参与时间分割线） */
+  ts?: number;
   /** 思考过程（开启显示思考时由模型返回，DeepSeek 风格卡片展示） */
   reasoning?: string;
   /** 思考用时秒数（发送到收到回复的耗时） */
