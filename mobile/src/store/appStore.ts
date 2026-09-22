@@ -47,6 +47,8 @@ interface AppStore {
   /** 已下载到本机的宠物列表（可在宠物页切换/删除） */
   downloadedPets: PetAssetRef[];
   messages: ChatMsg[];
+  /** 历史可用服务器地址（最近优先，最多 5 个）：云端发现源不可达时的兜底探测列表 */
+  knownServers: string[];
   /** 悬浮窗宠物开关（仅 Android 生效，iOS 不支持悬浮窗） */
   overlayEnabled: boolean;
   /** 语音朗读回复开关（TTS 读出助手消息） */
@@ -113,6 +115,7 @@ const PERSIST_KEYS: Array<keyof PersistState> = [
   'petAsset',
   'downloadedPets',
   'messages',
+  'knownServers',
   'overlayEnabled',
   'ttsEnabled',
   'petName',
@@ -152,6 +155,7 @@ export const useAppStore = create<AppStore>((set) => ({
   petAsset: null,
   downloadedPets: [],
   messages: [],
+  knownServers: [],
   overlayEnabled: false,
   ttsEnabled: false,
   petName: '小宠',
@@ -252,6 +256,7 @@ export const useAppStore = create<AppStore>((set) => ({
               ? [data.petAsset]
               : [],
           messages: Array.isArray(data.messages) ? data.messages : [],
+          knownServers: Array.isArray(data.knownServers) ? data.knownServers : [],
           overlayEnabled: data.overlayEnabled ?? false,
           ttsEnabled: data.ttsEnabled ?? false,
           petName: data.petName ?? '小宠',

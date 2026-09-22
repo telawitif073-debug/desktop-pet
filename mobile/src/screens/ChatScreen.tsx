@@ -268,6 +268,7 @@ export default function ChatScreen(): React.JSX.Element {
   const [listening, setListening] = useState(false);
   const listRef = useRef<FlatList<ChatMsg>>(null);
   const sendRef = useRef<(text?: string) => Promise<void>>(async () => undefined);
+  const initialScrollDone = useRef(false);
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
   const kbHeight = useKeyboardHeight();
@@ -425,6 +426,12 @@ export default function ChatScreen(): React.JSX.Element {
         keyExtractor={(m, i) => m.id ?? String(i)}
         renderItem={({ item }) => <Bubble msg={item} />}
         ListEmptyComponent={<Text style={styles.empty}>和宠物聊点什么吧</Text>}
+        onContentSizeChange={() => {
+          // 首次内容布局完成后才定位到最后一条对话（scrollToEnd 在布局未完成时调用会静默失效）
+          if (initialScrollDone.current) return;
+          initialScrollDone.current = true;
+          listRef.current?.scrollToEnd({ animated: false });
+        }}
       />
 
       {/* 输入栏：键盘弹起时底部留白=键盘高度（微信式始终可见），收起时留安全区 */}
