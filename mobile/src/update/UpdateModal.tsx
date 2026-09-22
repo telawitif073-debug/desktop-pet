@@ -100,7 +100,7 @@ export default function UpdateModal(): React.JSX.Element | null {
   };
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={() => phase !== 'downloading' && close()}>
+    <Modal visible transparent animationType="fade" onRequestClose={() => { if (phase !== 'downloading') close(); }}>
       <View style={styles.mask}>
         <View style={styles.panel}>
           <View style={styles.header}>

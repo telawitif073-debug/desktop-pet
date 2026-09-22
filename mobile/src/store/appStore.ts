@@ -83,6 +83,10 @@ interface AppStore {
   rest: () => void;
   decay: () => void;
   appendMessages: (msgs: ChatMsg[]) => void;
+  /** 按消息 id 局部更新（流式结束时清除 pending/streaming 等） */
+  patchMessage: (id: string, partial: Partial<ChatMsg>) => void;
+  /** 流式增量：把 reasoning/content 增量拼接到指定消息 */
+  appendMessageChunk: (id: string, chunk: { reasoningDelta?: string; contentDelta?: string }) => void;
   clearMessages: () => void;
   setOverlayEnabled: (enabled: boolean) => void;
   setTtsEnabled: (enabled: boolean) => void;
@@ -91,7 +95,7 @@ interface AppStore {
 
 type PersistState = Omit<
   AppStore,
-  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'feed' | 'play' | 'rest' | 'decay' | 'appendMessages' | 'clearMessages' | 'setOverlayEnabled' | 'setTtsEnabled' | 'hydrate'
+  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'feed' | 'play' | 'rest' | 'decay' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setOverlayEnabled' | 'setTtsEnabled' | 'hydrate'
 >;
 
 const PERSIST_KEYS: Array<keyof PersistState> = [
@@ -202,6 +206,22 @@ export const useAppStore = create<AppStore>((set) => ({
     })),
 
   appendMessages: (msgs) => set((s) => ({ messages: [...s.messages, ...msgs] })),
+  patchMessage: (id, partial) =>
+    set((s) => ({
+      messages: s.messages.map((m) => (m.id === id ? { ...m, ...partial } : m)),
+    })),
+  appendMessageChunk: (id, chunk) =>
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              reasoning: chunk.reasoningDelta ? (m.reasoning ?? '') + chunk.reasoningDelta : m.reasoning,
+              content: chunk.contentDelta ? m.content + chunk.contentDelta : m.content,
+            }
+          : m,
+      ),
+    })),
   clearMessages: () => set({ messages: [] }),
   setOverlayEnabled: (enabled) => set({ overlayEnabled: enabled }),
   setTtsEnabled: (enabled) => set({ ttsEnabled: enabled }),

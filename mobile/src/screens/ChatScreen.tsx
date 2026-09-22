@@ -1,12 +1,10 @@
-/** 聊天页：直连用户 LLM 档案（云同步），历史走 /sync/chat-history 与桌面共享；含档案管理与清空确认 */
+/** 聊天页：直连用户 LLM 档案（云同步），流式输出（思考过程逐字可见）；含档案管理与清空确认 */
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
-  KeyboardAvoidingView,
   Modal,
   PermissionsAndroid,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,22 +12,36 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { isConfigured, requestChat } from '../chat/llm';
+import { isConfigured, streamChat } from '../chat/llm';
 import { scheduleUpload } from '../api/sync';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '../store/appStore';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { isSpeechAvailable, speak, startListening, stopListening, stopSpeak, subscribeVoice } from '../native/Voice';
 import type { ChatMsg, LlmProfile } from '../types';
 
-/** DeepSeek 手机端风格的思考过程卡片：灰色圆角卡 + 「已深度思考（用时 X 秒）」折叠头 + 展开正文 */
-function ThinkCard({ reasoning, seconds }: { reasoning: string; seconds?: number }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false);
+/** 思考过程卡片：流式时自动展开、头部显示「深度思考中…」；结束后折叠为「已深度思考（用时 X 秒）」 */
+function ThinkCard({
+  reasoning,
+  seconds,
+  streaming,
+}: {
+  reasoning: string;
+  seconds?: number;
+  streaming?: boolean;
+}): React.JSX.Element {
+  const [manual, setManual] = useState<boolean | null>(null);
+  const expanded = manual ?? !!streaming;
+  const title = streaming
+    ? '深度思考中…'
+    : `已深度思考${typeof seconds === 'number' && seconds > 0 ? `（用时 ${seconds} 秒）` : ''}`;
   return (
     <View style={styles.thinkCard}>
-      <Pressable style={styles.thinkHeader} onPress={() => setExpanded((v) => !v)} hitSlop={4}>
-        <Text style={styles.thinkTitle}>
-          已深度思考{typeof seconds === 'number' && seconds > 0 ? `（用时 ${seconds} 秒）` : ''}
-        </Text>
+      <Pressable
+        style={styles.thinkHeader}
+        onPress={() => setManual(!expanded)}
+        hitSlop={4}>
+        <Text style={styles.thinkTitle}>{title}</Text>
         <Text style={styles.thinkChevron}>{expanded ? '▾' : '▸'}</Text>
       </Pressable>
       {expanded && <Text style={styles.thinkBody}>{reasoning}</Text>}
@@ -37,23 +49,46 @@ function ThinkCard({ reasoning, seconds }: { reasoning: string; seconds?: number
   );
 }
 
+/** 「正在思考」过渡提示：动态省略号 */
+function ThinkingDots(): React.JSX.Element {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setN((v) => (v + 1) % 4), 450);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <Text style={styles.thinkingText}>
+      正在思考{'.'.repeat(n)}
+    </Text>
+  );
+}
+
 function Bubble({ msg }: { msg: ChatMsg }): React.JSX.Element {
   const mine = msg.role === 'user';
-  if (!mine && msg.reasoning) {
-    // DeepSeek 风格：思考卡片在上，正文白底无气泡
+  if (mine) {
     return (
-      <View style={styles.bubbleRow}>
-        <View style={styles.assistantBlock}>
-          <ThinkCard reasoning={msg.reasoning} seconds={msg.thinkSeconds} />
-          <Text style={styles.assistantText}>{msg.content}</Text>
+      <View style={[styles.bubbleRow, styles.bubbleRowMine]}>
+        <View style={[styles.bubble, styles.bubbleMine]}>
+          <Text style={styles.bubbleTextMine}>{msg.content}</Text>
         </View>
       </View>
     );
   }
+  // 助手：统一左侧白色气泡（与用户朝向、颜色区分）；内含思考卡片 + 正文
+  const showDots = msg.pending && !msg.reasoning && !msg.content;
   return (
-    <View style={[styles.bubbleRow, mine && styles.bubbleRowMine]}>
-      <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{msg.content}</Text>
+    <View style={styles.bubbleRow}>
+      <View style={[styles.bubble, styles.bubbleTheirs]}>
+        {showDots && <ThinkingDots />}
+        {!!msg.reasoning && (
+          <ThinkCard reasoning={msg.reasoning} seconds={msg.thinkSeconds} streaming={msg.streaming} />
+        )}
+        {!!msg.content && (
+          <Text style={[styles.bubbleText, !!msg.reasoning && styles.contentAfterThink]}>
+            {msg.content}
+            {msg.streaming ? ' ▍' : ''}
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -67,6 +102,7 @@ function emptyForm(): { name: string; apiKey: string; baseUrl: string; model: st
 /** API 档案管理：列表切换 / 新增 / 编辑 / 删除，保存后云同步到桌面端 */
 function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () => void }): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  const kbHeight = useKeyboardHeight();
   const profiles = useAppStore((s) => s.llmProfiles);
   const activeId = useAppStore((s) => s.llmActiveProfileId);
   const [formOpen, setFormOpen] = useState(false);
@@ -157,7 +193,11 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={[pm.container, { paddingTop: insets.top + 10, paddingBottom: insets.bottom }]}>
+      <View
+        style={[
+          pm.container,
+          { paddingTop: insets.top + 10, paddingBottom: (kbHeight > 0 ? kbHeight : insets.bottom) + 6 },
+        ]}>
         <View style={pm.header}>
           <Pressable onPress={onClose} hitSlop={8}>
             <Text style={pm.headerBtn}>关闭</Text>
@@ -228,17 +268,22 @@ export default function ChatScreen(): React.JSX.Element {
   const [listening, setListening] = useState(false);
   const listRef = useRef<FlatList<ChatMsg>>(null);
   const sendRef = useRef<(text?: string) => Promise<void>>(async () => undefined);
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
+  const kbHeight = useKeyboardHeight();
 
   const profile = profiles.find((p) => p.id === activeId) ?? profiles[0] ?? null;
   const configured = isConfigured();
 
-  // 新消息到达时滚到底部
+  // 内容更新（含流式逐字）时节流滚到底部
   useEffect(() => {
-    if (messages.length) {
-      listRef.current?.scrollToEnd({ animated: true });
-    }
-  }, [messages.length]);
+    if (!messages.length) return;
+    if (scrollTimer.current) clearTimeout(scrollTimer.current);
+    scrollTimer.current = setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 120);
+    return () => {
+      if (scrollTimer.current) clearTimeout(scrollTimer.current);
+    };
+  }, [messages]);
 
   // 语音识别事件订阅（partial 实时回显，最终结果自动发送）
   useEffect(() => {
@@ -258,24 +303,45 @@ export default function ChatScreen(): React.JSX.Element {
     const text = (textArg ?? input).trim();
     if (!text || sending) return;
     setInput('');
-    const store = useAppStore.getState();
-    const history: ChatMsg[] = [...store.messages, { role: 'user', content: text }];
-    store.appendMessages([{ role: 'user', content: text }]);
+    const store0 = useAppStore.getState();
+    const history: ChatMsg[] = [...store0.messages, { role: 'user', content: text }];
+    const assistantId = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    store0.appendMessages([
+      { role: 'user', content: text },
+      { id: assistantId, role: 'assistant', content: '', pending: true },
+    ]);
     setSending(true);
     const startedAt = Date.now();
     try {
-      const { content, reasoning } = await requestChat(history);
+      const { content, reasoning } = await streamChat(history, {
+        onReasoning: (d) =>
+          useAppStore.getState().appendMessageChunk(assistantId, { reasoningDelta: d }),
+        onContent: (d) =>
+          useAppStore.getState().appendMessageChunk(assistantId, { contentDelta: d }),
+      });
       const thinkSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
-      useAppStore.getState().appendMessages([{ role: 'assistant', content, reasoning, thinkSeconds }]);
+      // 非流式降级路径不会产生增量：用最终结果回填
+      const cur = useAppStore.getState();
+      const target = cur.messages.find((m) => m.id === assistantId);
+      const patch: Partial<ChatMsg> = {
+        pending: false,
+        streaming: false,
+        thinkSeconds,
+      };
+      if (!target?.content && content) patch.content = content;
+      if (!target?.reasoning && reasoning) patch.reasoning = reasoning;
+      cur.patchMessage(assistantId, patch);
       // 开启朗读时读出回复（错误提示不读，带音色/语速/音调设置）
       const st = useAppStore.getState();
       if (st.ttsEnabled) {
         void speak(content, { rate: st.speechRate, pitch: st.speechPitch, voice: st.speechVoice || undefined });
       }
     } catch (e) {
-      useAppStore.getState().appendMessages([
-        { role: 'assistant', content: `出错了：${e instanceof Error ? e.message : String(e)}` },
-      ]);
+      useAppStore.getState().patchMessage(assistantId, {
+        pending: false,
+        streaming: false,
+        content: `出错了：${e instanceof Error ? e.message : String(e)}`,
+      });
     } finally {
       setSending(false);
       scheduleUpload('chat_history');
@@ -329,11 +395,10 @@ export default function ChatScreen(): React.JSX.Element {
     ]);
   };
 
+  const canSend = !!input.trim() && !sending;
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
+    <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <Pressable style={styles.headerLeft} onPress={() => setManagerVisible(true)} hitSlop={6}>
           <Text style={styles.headerText} numberOfLines={1}>
@@ -357,38 +422,46 @@ export default function ChatScreen(): React.JSX.Element {
         ref={listRef}
         style={styles.list}
         data={messages}
-        keyExtractor={(_, i) => String(i)}
+        keyExtractor={(m, i) => m.id ?? String(i)}
         renderItem={({ item }) => <Bubble msg={item} />}
         ListEmptyComponent={<Text style={styles.empty}>和宠物聊点什么吧</Text>}
       />
 
-      <View style={styles.inputRow}>
-        <Pressable
-          style={[styles.mic, listening && styles.micActive]}
-          onPressIn={() => void micPressIn()}
-          onPressOut={micPressOut}>
-          <Text style={styles.micText}>{listening ? '松开' : '按住'}</Text>
-        </Pressable>
-        <TextInput
-          style={styles.input}
-          placeholder={configured ? '说点什么…' : '先创建 API 档案'}
-          value={input}
-          onChangeText={setInput}
-          multiline
-        />
-        <Pressable style={[styles.send, (!input.trim() || sending) && styles.sendDisabled]} onPress={() => void send()} disabled={sending}>
-          <Text style={styles.sendText}>{sending ? '…' : '发送'}</Text>
-        </Pressable>
+      {/* 输入栏：键盘弹起时底部留白=键盘高度（微信式始终可见），收起时留安全区 */}
+      <View style={[styles.inputWrap, { paddingBottom: kbHeight > 0 ? kbHeight : insets.bottom }]}>
+        <View style={styles.inputRow}>
+          <Pressable
+            style={[styles.mic, listening && styles.micActive]}
+            onPressIn={() => void micPressIn()}
+            onPressOut={micPressOut}>
+            <Text style={styles.micText}>{listening ? '松开' : '按住'}</Text>
+          </Pressable>
+          <TextInput
+            style={styles.input}
+            placeholder={configured ? '说点什么…' : '先创建 API 档案'}
+            placeholderTextColor="#B2B2B2"
+            value={input}
+            onChangeText={setInput}
+            multiline
+          />
+          <Pressable
+            style={styles.sendTextBtn}
+            onPress={() => void send()}
+            disabled={!canSend}
+            hitSlop={6}>
+            <Text style={[styles.sendText, !canSend && styles.sendTextDisabled]}>发送</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ProfileManager visible={managerVisible} onClose={() => setManagerVisible(false)} />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  container: { flex: 1, backgroundColor: '#EDEDED' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#F7F7F7', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#E0E0E0' },
   headerLeft: { flex: 1, marginRight: 10 },
   headerText: { fontSize: 12, color: '#888' },
   headerAction: { fontSize: 13, color: '#1C6EF2' },
@@ -397,29 +470,32 @@ const styles = StyleSheet.create({
   guideText: { color: '#9A6B00', fontSize: 12, lineHeight: 18 },
   list: { flex: 1, paddingHorizontal: 12 },
   empty: { textAlign: 'center', color: '#AAA', marginTop: 40 },
-  bubbleRow: { flexDirection: 'row', marginVertical: 4 },
+  bubbleRow: { flexDirection: 'row', marginVertical: 5 },
   bubbleRowMine: { justifyContent: 'flex-end' },
-  bubble: { maxWidth: '78%', borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12 },
-  bubbleMine: { backgroundColor: '#1C6EF2', borderBottomRightRadius: 4 },
-  bubbleTheirs: { backgroundColor: '#F2F3F5', borderBottomLeftRadius: 4 },
-  bubbleText: { fontSize: 15, lineHeight: 21, color: '#333' },
-  bubbleTextMine: { color: '#fff' },
-  // DeepSeek 风格思考卡片
-  assistantBlock: { maxWidth: '86%' },
-  assistantText: { fontSize: 15, lineHeight: 22, color: '#333', marginTop: 8 },
-  thinkCard: { backgroundColor: '#F7F8FA', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  bubble: { maxWidth: '80%', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12 },
+  // 微信式：我方绿色气泡右侧，对方白色气泡左侧（带边框在灰底上有区分）
+  bubbleMine: { backgroundColor: '#95EC66', borderBottomRightRadius: 3 },
+  bubbleTheirs: { backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth, borderColor: '#DCDCDC', borderBottomLeftRadius: 3 },
+  bubbleText: { fontSize: 16, lineHeight: 22, color: '#181818' },
+  bubbleTextMine: { fontSize: 16, lineHeight: 22, color: '#181818' },
+  thinkingText: { fontSize: 15, color: '#999' },
+  // 思考卡片
+  thinkCard: { backgroundColor: '#F7F8FA', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, borderWidth: StyleSheet.hairlineWidth, borderColor: '#ECECEC' },
   thinkHeader: { flexDirection: 'row', alignItems: 'center' },
-  thinkTitle: { fontSize: 13, fontWeight: '600', color: '#666' },
+  thinkTitle: { fontSize: 13, fontWeight: '600', color: '#5F6368', flex: 1 },
   thinkChevron: { fontSize: 12, color: '#AAA', marginLeft: 6 },
-  thinkBody: { fontSize: 12, lineHeight: 19, color: '#888', marginTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#E8E8E8', paddingTop: 8 },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
-  mic: { backgroundColor: '#F2F3F5', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 11, marginRight: 8 },
-  micActive: { backgroundColor: '#E5484D' },
-  micText: { fontSize: 13, color: '#333' },
-  input: { flex: 1, minHeight: 38, maxHeight: 100, backgroundColor: '#F5F6F8', borderRadius: 8, paddingHorizontal: 10, paddingTop: 9, fontSize: 15 },
-  send: { marginLeft: 8, backgroundColor: '#1C6EF2', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 9 },
-  sendDisabled: { opacity: 0.5 },
-  sendText: { color: '#fff', fontSize: 14 },
+  thinkBody: { fontSize: 12.5, lineHeight: 20, color: '#6B6B6B', marginTop: 7, borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#E5E5E5', paddingTop: 7 },
+  contentAfterThink: { marginTop: 9 },
+  // 微信式输入栏
+  inputWrap: { backgroundColor: '#F7F7F7', borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#DCDCDC' },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingTop: 7 },
+  mic: { backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth, borderColor: '#DCDCDC', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 9, marginRight: 7 },
+  micActive: { backgroundColor: '#FDE2E2', borderColor: '#E5484D' },
+  micText: { fontSize: 13, color: '#555' },
+  input: { flex: 1, minHeight: 38, maxHeight: 100, backgroundColor: '#FFFFFF', borderWidth: StyleSheet.hairlineWidth, borderColor: '#DCDCDC', borderRadius: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 8, fontSize: 16, textAlignVertical: 'center' },
+  sendTextBtn: { marginLeft: 7, paddingHorizontal: 6, paddingVertical: 9 },
+  sendText: { fontSize: 16, color: '#07C160', fontWeight: '600' },
+  sendTextDisabled: { color: '#BBBBBB', fontWeight: '400' },
 });
 
 const pm = StyleSheet.create({

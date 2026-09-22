@@ -7,8 +7,8 @@
 import { Alert } from 'react-native';
 import { useAppStore } from '../store/appStore';
 
-export const APP_VERSION_CODE = 18;
-export const APP_VERSION_NAME = '1.3.4';
+export const APP_VERSION_CODE = 19;
+export const APP_VERSION_NAME = '1.4.0';
 
 export async function checkAppUpdate(silent = true): Promise<void> {
   try {

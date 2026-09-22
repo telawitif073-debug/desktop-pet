@@ -21,12 +21,18 @@ export interface PetState {
 export const DEFAULT_PET_STATE: PetState = { hunger: 80, mood: 80, energy: 80, affection: 50 };
 
 export interface ChatMsg {
+  /** 消息稳定 id（历史消息可能没有，渲染时回退下标） */
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
   /** 思考过程（开启显示思考时由模型返回，DeepSeek 风格卡片展示） */
   reasoning?: string;
   /** 思考用时秒数（发送到收到回复的耗时） */
   thinkSeconds?: number;
+  /** 等待模型响应（展示「正在思考」过渡气泡） */
+  pending?: boolean;
+  /** 流式输出进行中（思考/正文逐字到达） */
+  streaming?: boolean;
 }
 
 /** 聊天人设：来自平台智能体 JSON（installedAgentConfig）或默认 */
