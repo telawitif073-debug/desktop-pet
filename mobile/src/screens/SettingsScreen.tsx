@@ -1,8 +1,12 @@
-/** 设置页：账号、服务器地址、同步、语音朗读、悬浮窗宠物开关 */
+/**
+ * 用户设置（DeepSeek 样式）：分组卡片 + 图标行 + 右侧值/开关/箭头，子功能点击进入二级弹层。
+ * 打开方式：抽屉底部头像或 …（MainShell 传入 visible/onClose）。
+ * 服务器地址已内置隐藏：长按「检查更新」行的版本号可打开调试弹窗。
+ */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { flushAllOnQuit } from '../api/sync';
+import { flushAllOnQuit, scheduleUpload } from '../api/sync';
 import { DEFAULT_BASE_URL, useAppStore } from '../store/appStore';
 import { listVoices, speak } from '../native/Voice';
 import { APP_VERSION_NAME, checkAppUpdate } from '../update/checkUpdate';
@@ -31,33 +35,86 @@ function Stepper({
   onChange: (v: number) => void;
 }): React.JSX.Element {
   return (
-    <View style={styles.stepperRow}>
-      <Text style={styles.row}>{label}</Text>
-      <View style={styles.stepper}>
+    <View style={st.stepperRow}>
+      <Text style={st.rowLabel}>{label}</Text>
+      <View style={st.stepper}>
         <Pressable
-          style={styles.stepperBtn}
+          style={st.stepperBtn}
           onPress={() => onChange(Math.max(min, Math.round((value - step) * 100) / 100))}
           disabled={value <= min}>
-          <Text style={[styles.stepperBtnText, value <= min && { color: '#CCC' }]}>－</Text>
+          <Text style={[st.stepperBtnText, value <= min && { color: '#CCC' }]}>－</Text>
         </Pressable>
-        <Text style={styles.stepperVal}>{value.toFixed(1)}x</Text>
+        <Text style={st.stepperVal}>{value.toFixed(1)}x</Text>
         <Pressable
-          style={styles.stepperBtn}
+          style={st.stepperBtn}
           onPress={() => onChange(Math.min(max, Math.round((value + step) * 100) / 100))}
           disabled={value >= max}>
-          <Text style={[styles.stepperBtnText, value >= max && { color: '#CCC' }]}>＋</Text>
+          <Text style={[st.stepperBtnText, value >= max && { color: '#CCC' }]}>＋</Text>
         </Pressable>
       </View>
     </View>
   );
 }
 
-export default function SettingsScreen(): React.JSX.Element {
-  const user = useAppStore((s) => s.user);
+/** DeepSeek 式设置行：图标 + 标题 + 右侧（值/开关/箭头） */
+function Row({
+  icon,
+  label,
+  value,
+  showArrow,
+  danger,
+  switchValue,
+  onSwitch,
+  onPress,
+  onLongPress,
+  disabled,
+}: {
+  icon: string;
+  label: string;
+  value?: string;
+  showArrow?: boolean;
+  danger?: boolean;
+  switchValue?: boolean;
+  onSwitch?: (next: boolean) => void;
+  onPress?: () => void;
+  onLongPress?: () => void;
+  disabled?: boolean;
+}): React.JSX.Element {
+  return (
+    <Pressable
+      style={[st.row, disabled && st.rowDisabled]}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      disabled={disabled || (!onPress && !onLongPress && !onSwitch)}>
+      <Text style={st.rowIcon}>{icon}</Text>
+      <Text style={[st.rowLabel, danger && st.rowDanger, disabled && st.rowDisabled]}>{label}</Text>
+      {typeof switchValue === 'boolean' && onSwitch ? (
+        <Switch value={switchValue} onValueChange={onSwitch} />
+      ) : (
+        <>
+          {!!value && <Text style={st.rowValue} numberOfLines={1}>{value}</Text>}
+          {showArrow && <Text style={st.rowArrow}>›</Text>}
+        </>
+      )}
+    </Pressable>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <View style={st.section}>
+      <Text style={st.sectionTitle}>{title}</Text>
+      <View style={st.card}>{children}</View>
+    </View>
+  );
+}
+
+export default function SettingsScreen({ visible, onClose }: { visible: boolean; onClose: () => void }): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  const user = useAppStore((s) => s.user);
   const baseUrl = useAppStore((s) => s.baseUrl);
-  const llmCount = useAppStore((s) => s.llmProfiles.length);
-  const installedAgentName = useAppStore((s) => s.installedAgent?.name);
+  const llmProfiles = useAppStore((s) => s.llmProfiles);
+  const llmActiveProfileId = useAppStore((s) => s.llmActiveProfileId);
   const petAsset = useAppStore((s) => s.petAsset);
   const overlayEnabled = useAppStore((s) => s.overlayEnabled);
   const setOverlayEnabled = useAppStore((s) => s.setOverlayEnabled);
@@ -71,24 +128,33 @@ export default function SettingsScreen(): React.JSX.Element {
   const speechPitch = useAppStore((s) => s.speechPitch);
   const speechVoice = useAppStore((s) => s.speechVoice);
   const chatClearConfirm = useAppStore((s) => s.chatClearConfirm);
+  const petStateEnabled = useAppStore((s) => s.petStateEnabled);
+  const moodFromChat = useAppStore((s) => s.moodFromChat);
+  const petSelfDescription = useAppStore((s) => s.petSelfDescription);
 
   const [url, setUrl] = useState(baseUrl);
+  const [serverModal, setServerModal] = useState(false);
   const [overlay, setOverlay] = useState(overlayEnabled);
   const [tts, setTts] = useState(ttsEnabled);
-  const [name, setName] = useState(petName);
-  const [nick, setNick] = useState(userNickname);
   const [busy, setBusy] = useState(false);
   const [voiceModal, setVoiceModal] = useState(false);
+  const [speechModal, setSpeechModal] = useState(false);
   const [voices, setVoices] = useState<Array<{ name: string; label: string }>>([]);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [personaOpen, setPersonaOpen] = useState(false);
+  const [descOpen, setDescOpen] = useState(false);
 
-  // 宠物名字改动后同步输入框显示
+  // 聊天人设 = 当前 API 档案的系统提示词（安装智能体会写入这里，见商店安装逻辑）
+  const activeProfile = llmProfiles.find((p) => p.id === llmActiveProfileId) ?? llmProfiles[0] ?? null;
+  const [persona, setPersona] = useState(activeProfile?.systemPrompt ?? '');
   useEffect(() => {
-    setName(petName);
-  }, [petName]);
+    if (personaOpen) setPersona(activeProfile?.systemPrompt ?? '');
+  }, [personaOpen, activeProfile?.id, activeProfile?.systemPrompt]);
 
+  const [desc, setDesc] = useState(petSelfDescription);
   useEffect(() => {
-    setNick(userNickname);
-  }, [userNickname]);
+    setDesc(petSelfDescription);
+  }, [petSelfDescription]);
 
   // 进设置页时刷新开关显示（权限可能在系统设置中被收回）
   useEffect(() => {
@@ -100,11 +166,6 @@ export default function SettingsScreen(): React.JSX.Element {
   }, [ttsEnabled]);
 
   const overlaySupported = isOverlaySupported();
-  const overlayHint = !overlaySupported
-    ? Platform.OS === 'ios'
-      ? 'iOS 系统不支持悬浮窗，请使用 App 内形态'
-      : '当前环境不支持悬浮窗功能'
-    : '开启后宠物会显示在其他应用上方，可拖动到任意位置；关闭即移除';
 
   /** 清洗用户输入：截取首个合法 URL 起点（兜住 `;` 等误输入前缀），缺 scheme 自动补 https:// */
   function normalizeServerUrl(raw: string): string {
@@ -122,7 +183,6 @@ export default function SettingsScreen(): React.JSX.Element {
     const cleaned = normalizeServerUrl(url);
     setUrl(cleaned);
     useAppStore.getState().setBaseUrl(cleaned);
-    // 保存后立即验证连通性，当场发现拼错/网络不通
     try {
       const res = await fetch(`${cleaned.replace(/\/$/, '')}/app-update`);
       Alert.alert('已保存', res.ok ? '服务器地址已更新，连接正常' : `已保存，但服务器返回 ${res.status}`);
@@ -131,13 +191,37 @@ export default function SettingsScreen(): React.JSX.Element {
     }
   };
 
+  const savePersona = (): void => {
+    if (!activeProfile) {
+      Alert.alert('还没有 API 档案', '先在聊天页顶部创建 API 档案，再回来编辑人设');
+      return;
+    }
+    const trimmed = persona.trim();
+    useAppStore
+      .getState()
+      .patch({ llmProfiles: llmProfiles.map((p) => (p.id === activeProfile.id ? { ...p, systemPrompt: trimmed } : p)) });
+    setPersonaOpen(false);
+    scheduleUpload('config');
+    Alert.alert('已保存', trimmed ? '聊天人设已更新并云同步' : '已清空人设，使用默认宠物人格');
+  };
+
+  const saveDesc = (): void => {
+    const trimmed = desc.trim();
+    useAppStore.getState().patch({ petSelfDescription: trimmed });
+    setDescOpen(false);
+    scheduleUpload('config');
+    Alert.alert('已保存', '宠物自我描述已更新');
+  };
+
   const syncNow = (): void => {
     flushAllOnQuit();
     Alert.alert('已同步', '本地变更已上传到平台');
   };
 
   const logout = (): void => {
-    useAppStore.getState().logout();
+    setAccountOpen(false);
+    onClose();
+    setTimeout(() => useAppStore.getState().logout(), 50);
   };
 
   const toggleOverlay = useCallback(
@@ -156,7 +240,6 @@ export default function SettingsScreen(): React.JSX.Element {
         }
         return;
       }
-      // 开启流程：检查权限 → 缺则引导授权 → 真正启动服务
       setBusy(true);
       try {
         const granted = await checkOverlayPermission();
@@ -192,265 +275,311 @@ export default function SettingsScreen(): React.JSX.Element {
   );
 
   return (
-    <>
-      <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 14, paddingBottom: insets.bottom + 32 }]}>
-      <Text style={styles.section}>账号</Text>
-      <View style={styles.card}>
-        <Text style={styles.row}>用户名：{user?.username ?? '-'}</Text>
-        <Text style={styles.row}>邮箱：{user?.email ?? '-'}</Text>
-        <Pressable style={styles.dangerBtn} onPress={logout}>
-          <Text style={styles.dangerText}>退出登录</Text>
-        </Pressable>
-      </View>
-
-      <Text style={styles.section}>平台服务器</Text>
-      <View style={styles.card}>
-        <TextInput style={styles.input} value={url} onChangeText={setUrl} autoCapitalize="none" placeholder="http://39.105.178.6/api" />
-        <Text style={styles.hint}>
-          默认使用云服务器（7×24 常驻），一般无需手动修改；模拟器可用 http://10.0.2.2:3001/api
-        </Text>
-        <View style={styles.btnPair}>
-          <Pressable style={styles.primaryBtn} onPress={saveUrl}>
-            <Text style={styles.primaryText}>保存地址</Text>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={[st.container, { paddingTop: insets.top + 6 }]}>
+        {/* 头部：返回 + 居中标题 */}
+        <View style={st.header}>
+          <Pressable style={st.backBtn} onPress={onClose} hitSlop={10}>
+            <Text style={st.backText}>‹</Text>
           </Pressable>
+          <Text style={st.headerTitle}>设置</Text>
+          <View style={{ width: 38 }} />
         </View>
-      </View>
 
-      <Text style={styles.section}>数据同步</Text>
-      <View style={styles.card}>
-        <Text style={styles.row}>LLM API 档案：{llmCount} 个</Text>
-        <Text style={styles.row}>聊天人设：{installedAgentName ?? '默认'}</Text>
-        <Text style={styles.hint}>宠物状态与聊天记录每 60 秒自动上传；与桌面端登录同一账号即共享</Text>
-        <Pressable style={styles.primaryBtn} onPress={syncNow}>
-          <Text style={styles.primaryText}>立即同步</Text>
-        </Pressable>
-      </View>
+        <ScrollView contentContainerStyle={[st.content, { paddingBottom: insets.bottom + 40 }]}>
+          <Section title="账户">
+            <Row icon="👤" label="账号管理" value={user?.username ?? '-'} showArrow onPress={() => setAccountOpen(true)} />
+            <View style={st.divider} />
+            <Row icon="🔄" label="数据管理" value="立即同步" showArrow onPress={syncNow} />
+          </Section>
 
-      <Text style={styles.section}>宠物信息</Text>
-      <View style={styles.card}>
-        <Text style={styles.row}>宠物名字</Text>
-        <TextInput
-          style={[styles.input, { marginTop: 8 }]}
-          value={name}
-          onChangeText={(v) => setName(v.slice(0, 12))}
-          placeholder="小宠"
-          maxLength={12}
-        />
-        <Text style={styles.hint}>聊天时会用这个名字称呼宠物；12 字以内，默认「小宠」</Text>
-        <Text style={[styles.row, { marginTop: 14 }]}>智能体怎么称呼你</Text>
-        <TextInput
-          style={[styles.input, { marginTop: 8 }]}
-          value={nick}
-          onChangeText={(v) => setNick(v.slice(0, 12))}
-          placeholder="例如：主人、老板（留空则不指定）"
-          maxLength={12}
-        />
-        <Text style={styles.hint}>设置后智能体回复会用这个称呼叫你</Text>
-        <Pressable
-          style={styles.primaryBtn}
-          onPress={() => {
-            const trimmedName = name.trim() || '小宠';
-            const trimmedNick = nick.trim();
-            useAppStore.getState().patch({ petName: trimmedName, userNickname: trimmedNick });
-            setName(trimmedName);
-            setNick(trimmedNick);
-            Alert.alert('已保存', `宠物名字：${trimmedName}${trimmedNick ? `，称呼你：${trimmedNick}` : ''}`);
-          }}>
-          <Text style={styles.primaryText}>保存</Text>
-        </Pressable>
-      </View>
+          <Section title="聊天">
+            <Row icon="💬" label="聊天人设" value={activeProfile ? activeProfile.name : '未配置'} showArrow onPress={() => setPersonaOpen(true)} />
+            <View style={st.divider} />
+            <Row icon="🧠" label="显示思考过程" switchValue={showThinking} onSwitch={(next) => useAppStore.getState().patch({ showThinking: next })} />
+            <View style={st.divider} />
+            <Row
+              icon="🌐"
+              label="思考过程语言"
+              value={thinkingLang === 'auto' ? '跟随回复' : thinkingLang === 'zh' ? '中文' : 'English'}
+              showArrow
+              disabled={!showThinking}
+              onPress={() =>
+                Alert.alert('思考过程语言', '选择模型内部思考（reasoning）的书写语言，回复语言不受影响', [
+                  { text: '跟随回复', onPress: () => useAppStore.getState().patch({ thinkingLang: 'auto' }) },
+                  { text: '中文', onPress: () => useAppStore.getState().patch({ thinkingLang: 'zh' }) },
+                  { text: 'English', onPress: () => useAppStore.getState().patch({ thinkingLang: 'en' }) },
+                  { text: '取消', style: 'cancel' },
+                ])
+              }
+            />
+            <View style={st.divider} />
+            <Row icon="⚠️" label="清空对话前询问" switchValue={chatClearConfirm} onSwitch={(next) => useAppStore.getState().patch({ chatClearConfirm: next })} />
+          </Section>
 
-      <Text style={styles.section}>聊天</Text>
-      <View style={styles.card}>
-        <View style={styles.switchRow}>
-          <Text style={styles.row}>显示思考过程</Text>
-          <Switch
-            value={showThinking}
-            onValueChange={(next) => useAppStore.getState().patch({ showThinking: next })}
-          />
-        </View>
-        <Text style={styles.hint}>开启后回复前会先展示模型的思考过程（需模型支持；智谱 GLM-4.5 及以上支持，DeepSeek 需把模型改为 deepseek-reasoner，deepseek-chat 无思考过程）</Text>
-        <Pressable
-          style={[styles.switchRow, { marginTop: 12 }]}
-          disabled={!showThinking}
-          onPress={() =>
-            Alert.alert('思考过程语言', '选择模型内部思考（reasoning）的书写语言，回复语言不受影响', [
-              { text: '跟随回复', onPress: () => useAppStore.getState().patch({ thinkingLang: 'auto' }) },
-              { text: '中文', onPress: () => useAppStore.getState().patch({ thinkingLang: 'zh' }) },
-              { text: 'English', onPress: () => useAppStore.getState().patch({ thinkingLang: 'en' }) },
-              { text: '取消', style: 'cancel' },
-            ])
-          }>
-          <Text style={[styles.row, !showThinking && { color: '#CCC' }]}>思考过程语言</Text>
-          <Text style={styles.valueText}>
-            {thinkingLang === 'auto' ? '跟随回复' : thinkingLang === 'zh' ? '中文' : 'English'} ›
-          </Text>
-        </Pressable>
-        <View style={[styles.switchRow, { marginTop: 12 }]}>
-          <Text style={styles.row}>清空对话前询问</Text>
-          <Switch
-            value={chatClearConfirm}
-            onValueChange={(next) => useAppStore.getState().patch({ chatClearConfirm: next })}
-          />
-        </View>
-        <Text style={styles.hint}>关闭后点「清空」直接清空记录，不再弹确认</Text>
-      </View>
+          <Section title="语音">
+            <Row icon="🔊" label="朗读宠物回复" switchValue={tts} onSwitch={(next) => { setTts(next); setTtsEnabled(next); }} />
+            <View style={st.divider} />
+            <Row
+              icon="🎙"
+              label="音色"
+              value={speechVoice ? '已选音色' : '系统默认'}
+              showArrow
+              disabled={!tts}
+              onPress={() => {
+                void listVoices().then((list) => {
+                  setVoices(list);
+                  setVoiceModal(true);
+                });
+              }}
+            />
+            <View style={st.divider} />
+            <Row icon="🎚" label="语速与音调" value={`${speechRate.toFixed(1)}x · ${speechPitch.toFixed(1)}x`} showArrow disabled={!tts} onPress={() => setSpeechModal(true)} />
+          </Section>
 
-      <Text style={styles.section}>语音朗读</Text>
-      <View style={styles.card}>
-        <View style={styles.switchRow}>
-          <Text style={styles.row}>朗读宠物回复</Text>
-          <Switch
-            value={tts}
-            onValueChange={(next) => {
-              setTts(next);
-              setTtsEnabled(next);
-            }}
-          />
-        </View>
-        <Text style={styles.hint}>开启后聊天里宠物的回复会用系统语音读出来；聊天页按住麦克风可以语音输入</Text>
-
-        <View style={styles.switchRow}>
-          <Text style={styles.row}>音色</Text>
-          <Pressable
-            style={styles.voiceBtn}
-            onPress={() => {
-              void listVoices().then((list) => {
-                setVoices(list);
-                setVoiceModal(true);
-              });
-            }}>
-            <Text style={styles.voiceBtnText}>
-              {speechVoice ? voices.find((v) => v.name === speechVoice)?.label ?? '已选音色' : '系统默认'}
+          <Section title="宠物">
+            <Row icon="🐾" label="宠物状态功能" switchValue={petStateEnabled} onSwitch={(next) => useAppStore.getState().setPetStateEnabled(next)} />
+            <View style={st.divider} />
+            <Row icon="❤️" label="心情随对话变化" switchValue={moodFromChat} onSwitch={(next) => useAppStore.getState().setMoodFromChat(next)} />
+            <Text style={st.hint}>开启后智能体聊得开心心情+8，不愉快心情-8；需宠物状态功能开启</Text>
+            <View style={st.divider} />
+            <Row icon="✏️" label="宠物自我描述" value={petSelfDescription ? petAsset?.name ?? '已设置' : '未设置'} showArrow onPress={() => setDescOpen(true)} />
+            <View style={st.divider} />
+            <Row
+              icon="🪟"
+              label="悬浮窗宠物（其他应用上层）"
+              switchValue={overlay}
+              onSwitch={toggleOverlay}
+            />
+            <Text style={st.hint}>
+              {!overlaySupported
+                ? Platform.OS === 'ios'
+                  ? 'iOS 系统不支持悬浮窗，请使用 App 内形态（宠物已常驻聊天页上层）'
+                  : '当前环境不支持悬浮窗功能'
+                : '应用内宠物已常驻聊天页上层；此开关控制退出应用后仍悬浮在其他应用上方'}
             </Text>
-          </Pressable>
-        </View>
-        <Text style={styles.hint}>使用手机系统提供的中文语音；列表为空表示设备只有一个音色</Text>
+          </Section>
 
-        <Stepper
-          label="语速"
-          value={speechRate}
-          min={0.5}
-          max={2.0}
-          step={0.1}
-          onChange={(v) => useAppStore.getState().patch({ speechRate: v })}
-        />
-        <Stepper
-          label="音调"
-          value={speechPitch}
-          min={0.5}
-          max={2.0}
-          step={0.1}
-          onChange={(v) => useAppStore.getState().patch({ speechPitch: v })}
-        />
+          <Section title="关于">
+            <Row
+              icon="ⓘ"
+              label="检查更新"
+              value={APP_VERSION_NAME}
+              showArrow
+              onPress={() => void checkAppUpdate(false)}
+              onLongPress={() => {
+                setUrl(baseUrl);
+                setServerModal(true);
+              }}
+            />
+          </Section>
 
-        <Pressable
-          style={styles.primaryBtn}
-          onPress={() => {
-            const st = useAppStore.getState();
-            void speak('你好，我是你的宠物，很高兴见到你。', {
-              rate: st.speechRate,
-              pitch: st.speechPitch,
-              voice: st.speechVoice || undefined,
-            });
-          }}>
-          <Text style={styles.primaryText}>试听</Text>
-        </Pressable>
-      </View>
+          <View style={st.card}>
+            <Row icon="↪️" label="退出登录" danger onPress={logout} />
+          </View>
+        </ScrollView>
 
-      <Text style={styles.section}>悬浮窗宠物</Text>
-      <View style={styles.card}>
-        <View style={styles.switchRow}>
-          <Text style={styles.row}>在其他应用上方显示宠物</Text>
-          <Switch
-            value={overlay}
-            onValueChange={toggleOverlay}
-            disabled={!overlaySupported || busy}
-          />
-        </View>
-        <Text style={styles.hint}>{overlayHint}</Text>
-        {!petAsset && overlaySupported ? (
-          <Text style={styles.hint}>当前未领养宠物，开启后将显示占位提示</Text>
-        ) : null}
-      </View>
-
-      <Text style={styles.section}>关于</Text>
-      <View style={styles.card}>
-        <Text style={styles.row}>当前版本：{APP_VERSION_NAME}</Text>
-        <Pressable style={styles.primaryBtn} onPress={() => void checkAppUpdate(false)}>
-          <Text style={styles.primaryText}>检查更新</Text>
-        </Pressable>
-        <Text style={styles.hint}>发现新版本时会弹出更新面板，面板内直接下载并自动安装</Text>
-      </View>
-    </ScrollView>
-
-      {/* 音色选择弹窗 */}
-      <Modal visible={voiceModal} transparent animationType="fade" onRequestClose={() => setVoiceModal(false)}>
-        <Pressable style={styles.modalMask} onPress={() => setVoiceModal(false)}>
-          <Pressable style={styles.modalCard} onPress={() => undefined}>
-            <Text style={styles.modalTitle}>选择音色</Text>
-            <ScrollView style={{ maxHeight: 360 }}>
-              <Pressable
-                style={styles.voiceRow}
-                onPress={() => {
-                  useAppStore.getState().patch({ speechVoice: '' });
-                  setVoiceModal(false);
-                }}>
-                <Text style={[styles.voiceRowText, !speechVoice && styles.voiceRowActive]}>系统默认</Text>
-                {!speechVoice && <Text style={styles.voiceRowActive}>✓</Text>}
+        {/* 账号管理二级页 */}
+        <Modal visible={accountOpen} animationType="slide" onRequestClose={() => setAccountOpen(false)}>
+          <View style={[st.container, { paddingTop: insets.top + 6 }]}>
+            <View style={st.header}>
+              <Pressable style={st.backBtn} onPress={() => setAccountOpen(false)} hitSlop={10}>
+                <Text style={st.backText}>‹</Text>
               </Pressable>
-              {voices.map((v) => (
+              <Text style={st.headerTitle}>账号管理</Text>
+              <View style={{ width: 38 }} />
+            </View>
+            <ScrollView contentContainerStyle={st.content}>
+              <Section title="账户">
+                <View style={st.accountBox}>
+                  <Text style={st.accountLabel}>用户名</Text>
+                  <Text style={st.accountValue}>{user?.username ?? '-'}</Text>
+                  <View style={st.divider} />
+                  <Text style={st.accountLabel}>邮箱</Text>
+                  <Text style={st.accountValue}>{user?.email ?? '-'}</Text>
+                </View>
+              </Section>
+              <View style={st.card}>
+                <Row icon="↪️" label="退出登录" danger onPress={logout} />
+              </View>
+            </ScrollView>
+          </View>
+        </Modal>
+
+        {/* 聊天人设编辑 */}
+        <Modal visible={personaOpen} transparent animationType="fade" onRequestClose={() => setPersonaOpen(false)}>
+          <Pressable style={st.modalMask} onPress={() => setPersonaOpen(false)}>
+            <Pressable style={st.modalCard} onPress={() => undefined}>
+              <Text style={st.modalTitle}>聊天人设（系统提示词）</Text>
+              <TextInput
+                style={st.areaInput}
+                value={persona}
+                onChangeText={(v) => setPersona(v.slice(0, 1000))}
+                placeholder="例如：你是一只傲娇的猫娘，说话简短带喵～"
+                maxLength={1000}
+                multiline
+              />
+              <Text style={st.hint}>
+                当前档案「{activeProfile?.name ?? '-'}」的人格主体；从商店安装智能体会覆盖这里。留空则使用默认宠物人格
+              </Text>
+              <View style={st.modalBtns}>
+                <Pressable style={[st.btn, st.btnGhost]} onPress={() => setPersonaOpen(false)}>
+                  <Text style={st.btnGhostText}>取消</Text>
+                </Pressable>
+                <Pressable style={[st.btn, st.btnPrimary]} onPress={savePersona}>
+                  <Text style={st.btnPrimaryText}>保存</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        {/* 宠物自我描述编辑 */}
+        <Modal visible={descOpen} transparent animationType="fade" onRequestClose={() => setDescOpen(false)}>
+          <Pressable style={st.modalMask} onPress={() => setDescOpen(false)}>
+            <Pressable style={st.modalCard} onPress={() => undefined}>
+              <Text style={st.modalTitle}>宠物自我描述</Text>
+              <TextInput
+                style={st.areaInput}
+                value={desc}
+                onChangeText={(v) => setDesc(v.slice(0, 200))}
+                placeholder="例如：一只白色的小猫，性格黏人爱撒娇"
+                maxLength={200}
+                multiline
+              />
+              <Text style={st.hint}>描述宠物的形象与性格，会作为智能体人设的一部分并同步到桌面端</Text>
+              <View style={st.modalBtns}>
+                <Pressable style={[st.btn, st.btnGhost]} onPress={() => setDescOpen(false)}>
+                  <Text style={st.btnGhostText}>取消</Text>
+                </Pressable>
+                <Pressable style={[st.btn, st.btnPrimary]} onPress={saveDesc}>
+                  <Text style={st.btnPrimaryText}>保存</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        {/* 语速与音调 */}
+        <Modal visible={speechModal} transparent animationType="fade" onRequestClose={() => setSpeechModal(false)}>
+          <Pressable style={st.modalMask} onPress={() => setSpeechModal(false)}>
+            <Pressable style={st.modalCard} onPress={() => undefined}>
+              <Text style={st.modalTitle}>语速与音调</Text>
+              <Stepper label="语速" value={speechRate} min={0.5} max={2.0} step={0.1} onChange={(v) => useAppStore.getState().patch({ speechRate: v })} />
+              <Stepper label="音调" value={speechPitch} min={0.5} max={2.0} step={0.1} onChange={(v) => useAppStore.getState().patch({ speechPitch: v })} />
+              <Pressable
+                style={[st.btn, st.btnPrimary, { marginTop: 16 }]}
+                onPress={() => {
+                  const s = useAppStore.getState();
+                  void speak('你好，我是你的宠物，很高兴见到你。', {
+                    rate: s.speechRate,
+                    pitch: s.speechPitch,
+                    voice: s.speechVoice || undefined,
+                  });
+                }}>
+                <Text style={st.btnPrimaryText}>试听</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        {/* 音色选择 */}
+        <Modal visible={voiceModal} transparent animationType="fade" onRequestClose={() => setVoiceModal(false)}>
+          <Pressable style={st.modalMask} onPress={() => setVoiceModal(false)}>
+            <Pressable style={st.modalCard} onPress={() => undefined}>
+              <Text style={st.modalTitle}>选择音色</Text>
+              <ScrollView style={{ maxHeight: 360 }}>
                 <Pressable
-                  key={v.name}
-                  style={styles.voiceRow}
+                  style={st.voiceRow}
                   onPress={() => {
-                    useAppStore.getState().patch({ speechVoice: v.name });
+                    useAppStore.getState().patch({ speechVoice: '' });
                     setVoiceModal(false);
                   }}>
-                  <Text style={[styles.voiceRowText, speechVoice === v.name && styles.voiceRowActive]} numberOfLines={1}>
-                    {v.label}
-                  </Text>
-                  {speechVoice === v.name && <Text style={styles.voiceRowActive}>✓</Text>}
+                  <Text style={[st.voiceRowText, !speechVoice && st.voiceRowActive]}>系统默认</Text>
+                  {!speechVoice && <Text style={st.voiceRowActive}>✓</Text>}
                 </Pressable>
-              ))}
-              {!voices.length && <Text style={styles.hint}>未发现可切换的中文音色</Text>}
-            </ScrollView>
+                {voices.map((v) => (
+                  <Pressable
+                    key={v.name}
+                    style={st.voiceRow}
+                    onPress={() => {
+                      useAppStore.getState().patch({ speechVoice: v.name });
+                      setVoiceModal(false);
+                    }}>
+                    <Text style={[st.voiceRowText, speechVoice === v.name && st.voiceRowActive]} numberOfLines={1}>
+                      {v.label}
+                    </Text>
+                    {speechVoice === v.name && <Text style={st.voiceRowActive}>✓</Text>}
+                  </Pressable>
+                ))}
+                {!voices.length && <Text style={st.hint}>未发现可切换的中文音色</Text>}
+              </ScrollView>
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
-    </>
+        </Modal>
+
+        {/* 服务器地址（隐藏入口：长按检查更新行的版本号） */}
+        <Modal visible={serverModal} transparent animationType="fade" onRequestClose={() => setServerModal(false)}>
+          <Pressable style={st.modalMask} onPress={() => setServerModal(false)}>
+            <Pressable style={st.modalCard} onPress={() => undefined}>
+              <Text style={st.modalTitle}>服务器地址</Text>
+              <TextInput style={st.textInput} value={url} onChangeText={setUrl} autoCapitalize="none" placeholder={DEFAULT_BASE_URL} />
+              <Text style={st.hint}>应用已内置云服务器地址（7×24 常驻），仅调试时修改</Text>
+              <Pressable
+                style={[st.btn, st.btnPrimary, { marginTop: 14 }]}
+                onPress={() => {
+                  setServerModal(false);
+                  void saveUrl();
+                }}>
+                <Text style={st.btnPrimaryText}>保存</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </View>
+    </Modal>
   );
 }
 
-const styles = StyleSheet.create({
+const st = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7F8FA' },
-  content: { padding: 16, paddingBottom: 32 },
-  section: { fontSize: 13, color: '#888', marginTop: 14, marginBottom: 8 },
-  card: { backgroundColor: '#fff', borderRadius: 10, padding: 14 },
-  row: { fontSize: 14, color: '#333', lineHeight: 24 },
-  input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
-  hint: { fontSize: 11, color: '#AAA', marginTop: 6, lineHeight: 17 },
-  primaryBtn: { flex: 1, backgroundColor: '#1C6EF2', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 10 },
-  primaryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  btnPair: { flexDirection: 'row' },
-  secondaryBtn: { flex: 1, backgroundColor: '#F2F3F5', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 10, marginRight: 8 },
-  secondaryText: { color: '#1C6EF2', fontSize: 14, fontWeight: '600' },
-  btnDisabled: { opacity: 0.6 },
-  dangerBtn: { borderWidth: 1, borderColor: '#E5484D', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 12 },
-  dangerText: { color: '#E5484D', fontSize: 14 },
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  valueText: { fontSize: 13, color: '#1C6EF2' },
-  voiceBtn: { borderWidth: 1, borderColor: '#1C6EF2', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  voiceBtnText: { color: '#1C6EF2', fontSize: 13 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingBottom: 8 },
+  backBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  backText: { fontSize: 24, color: '#333', marginTop: -3, fontWeight: '600' },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: '#1A1A1A' },
+  content: { padding: 14, paddingBottom: 40 },
+  section: { marginBottom: 8 },
+  sectionTitle: { fontSize: 12, color: '#9AA0A6', marginBottom: 6, marginLeft: 6 },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 14, paddingHorizontal: 6, paddingVertical: 2 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 10 },
+  rowDisabled: { opacity: 0.45 },
+  rowIcon: { fontSize: 17, width: 30, textAlign: 'center' },
+  rowLabel: { fontSize: 15, color: '#1A1A1A', flex: 1, marginRight: 8 },
+  rowValue: { fontSize: 13, color: '#9AA0A6', maxWidth: '52%' },
+  rowArrow: { fontSize: 17, color: '#C4C7CC', marginLeft: 6 },
+  rowDanger: { color: '#E5484D' },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#F0F1F3', marginLeft: 40 },
+  hint: { fontSize: 11, color: '#A8ADB4', lineHeight: 17, marginTop: 4, marginLeft: 40, marginBottom: 8, marginRight: 8 },
+  accountBox: { paddingVertical: 6 },
+  accountLabel: { fontSize: 12, color: '#9AA0A6', marginTop: 10 },
+  accountValue: { fontSize: 15, color: '#1A1A1A', marginTop: 2, marginBottom: 6 },
+  modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', padding: 28 },
+  modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 18, width: '100%' },
+  modalTitle: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 12 },
+  textInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
+  areaInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, minHeight: 90, textAlignVertical: 'top' },
+  modalBtns: { flexDirection: 'row', marginTop: 14 },
+  btn: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
+  btnGhost: { borderWidth: 1, borderColor: '#DDD', marginRight: 10 },
+  btnGhostText: { color: '#666', fontSize: 14 },
+  btnPrimary: { backgroundColor: '#4D6BFE' },
+  btnPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  voiceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  voiceRowText: { fontSize: 14, color: '#1A1A1A', flex: 1, marginRight: 8 },
+  voiceRowActive: { color: '#4D6BFE', fontWeight: '600' },
   stepperRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
   stepper: { flexDirection: 'row', alignItems: 'center' },
   stepperBtn: { width: 34, height: 30, borderRadius: 8, backgroundColor: '#F0F2F5', alignItems: 'center', justifyContent: 'center' },
   stepperBtnText: { fontSize: 18, color: '#333', lineHeight: 22 },
   stepperVal: { minWidth: 56, textAlign: 'center', fontSize: 14, color: '#333' },
-  modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', padding: 32 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, width: '100%' },
-  modalTitle: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 10 },
-  voiceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
-  voiceRowText: { fontSize: 14, color: '#333', flex: 1, marginRight: 8 },
-  voiceRowActive: { color: '#1C6EF2', fontWeight: '600' },
 });

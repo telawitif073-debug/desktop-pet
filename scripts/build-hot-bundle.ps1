@@ -73,7 +73,8 @@ $update | Add-Member -Force -NotePropertyName bundle -NotePropertyValue ([pscust
 $cloudBase = 'http://39.105.178.6'
 $update.apkUrl = "$cloudBase/MobilePet-1.0.apk"
 $update.bundle.url = "$cloudBase/pet-bundle-$nextVersion.zip"
-$update | ConvertTo-Json -Depth 5 | Set-Content $manifest -Encoding UTF8
+# 写回必须无 BOM（PS 5.1 的 Set-Content -Encoding UTF8 会写 BOM，叠加后二次运行解析失败）
+[System.IO.File]::WriteAllText($manifest, ($update | ConvertTo-Json -Depth 5), $utf8NoBom)
 Write-Host "==> app-update.json 已更新（bundle v$nextVersion，url=$($update.bundle.url)）"
 
 # 清理临时目录

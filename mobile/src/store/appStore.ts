@@ -42,6 +42,10 @@ interface AppStore {
   petState: PetState;
   /** 是否已从云端拉取过宠物状态（本地默认值与真实状态的区分标记） */
   petStateReady: boolean;
+  /** 宠物状态功能开关：关闭时隐藏状态条，饥饿/心情/精力固定 80 不再衰减；好感度仍累积但不显示 */
+  petStateEnabled: boolean;
+  /** 心情与对话关联：开启后按智能体回复的情绪自动增减心情值（需 petStateEnabled 开启） */
+  moodFromChat: boolean;
   // 本地数据
   petAsset: PetAssetRef | null;
   /** 已下载到本机的宠物列表（可在宠物页切换/删除） */
@@ -68,7 +72,7 @@ interface AppStore {
   /** 清空对话前是否询问（对齐桌面端「清空对话前询问」开关） */
   chatClearConfirm: boolean;
   /** 检测到的新版本信息（安静模式：只显示顶部横幅，点击才打开更新面板；不持久化） */
-  updateAvailable: { versionName: string; notes: string; apkUrl: string; forced: boolean } | null;
+  updateAvailable: { versionCode: number; versionName: string; notes: string; apkUrl: string; forced: boolean } | null;
   /** 检测到的热更新（JS Bundle，无需重装 APK，重启生效；不持久化） */
   updateHot: { version: number; url: string; notes: string } | null;
   /** 更新面板是否打开（强制更新时自动打开且不可关闭） */
@@ -84,11 +88,21 @@ interface AppStore {
   play: () => void;
   rest: () => void;
   decay: () => void;
+  /** 互动功能开关变更：关闭时把饥饿/心情/精力归位 80（幂等） */
+  setPetStateEnabled: (next: boolean) => void;
+  /** 心情随对话开关 */
+  setMoodFromChat: (next: boolean) => void;
+  /** 心情增减（对话情绪联动，clamp 0-100） */
+  adjustMood: (delta: number) => void;
+  /** 好感度增减（聊天/互动实装：不受开关影响，开关只控制显隐） */
+  addAffection: (delta: number) => void;
   appendMessages: (msgs: ChatMsg[]) => void;
   /** 按消息 id 局部更新（流式结束时清除 pending/streaming 等） */
   patchMessage: (id: string, partial: Partial<ChatMsg>) => void;
   /** 流式增量：把 reasoning/content 增量拼接到指定消息 */
   appendMessageChunk: (id: string, chunk: { reasoningDelta?: string; contentDelta?: string }) => void;
+  /** 按消息 id 从列表移除（互动回应失败时静默丢弃占位消息） */
+  removeMessage: (id: string) => void;
   clearMessages: () => void;
   setOverlayEnabled: (enabled: boolean) => void;
   setTtsEnabled: (enabled: boolean) => void;
@@ -97,7 +111,7 @@ interface AppStore {
 
 type PersistState = Omit<
   AppStore,
-  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'feed' | 'play' | 'rest' | 'decay' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setOverlayEnabled' | 'setTtsEnabled' | 'hydrate'
+  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'feed' | 'play' | 'rest' | 'decay' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setOverlayEnabled' | 'setTtsEnabled' | 'hydrate' | 'setMoodFromChat' | 'adjustMood' | 'setPetStateEnabled' | 'addAffection' | 'removeMessage'
 >;
 
 const PERSIST_KEYS: Array<keyof PersistState> = [
@@ -110,6 +124,8 @@ const PERSIST_KEYS: Array<keyof PersistState> = [
   'installedAgent',
   'petState',
   'petStateReady',
+  'petStateEnabled',
+  'moodFromChat',
   'petAsset',
   'downloadedPets',
   'messages',
@@ -127,6 +143,36 @@ const PERSIST_KEYS: Array<keyof PersistState> = [
 ];
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * 消息消毒：持久化/云端数据里可能残留流式中断的脏状态
+ * （pending/streaming 卡死、纯空白思考/正文的高空气泡），统一清洗：
+ * 空白 assistant 消息直接丢弃，其余剥离 pending/streaming 只留成品。
+ */
+export function sanitizeMessages(list: unknown): ChatMsg[] {
+  if (!Array.isArray(list)) return [];
+  const out: ChatMsg[] = [];
+  for (const m of list as ChatMsg[]) {
+    if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
+    const content = typeof m.content === 'string' ? m.content : '';
+    if (m.role === 'user') {
+      if (!content.trim()) continue;
+      out.push({ id: m.id, role: 'user', content });
+      continue;
+    }
+    const reasoning = typeof m.reasoning === 'string' ? m.reasoning : '';
+    if (!content.trim() && !reasoning.trim()) continue;
+    out.push({
+      id: m.id,
+      role: 'assistant',
+      content,
+      ...(reasoning.trim() ? { reasoning } : {}),
+      ...(typeof m.thinkSeconds === 'number' && m.thinkSeconds > 0 ? { thinkSeconds: m.thinkSeconds } : {}),
+      ...(m.error ? { error: true } : {}),
+    });
+  }
+  return out;
+}
 
 function persistSoon(state: AppStore): void {
   if (!state.hydrated) return;
@@ -149,6 +195,8 @@ export const useAppStore = create<AppStore>((set) => ({
   installedAgent: null,
   petState: { ...DEFAULT_PET_STATE },
   petStateReady: false,
+  petStateEnabled: true,
+  moodFromChat: true,
   petAsset: null,
   downloadedPets: [],
   messages: [],
@@ -172,12 +220,12 @@ export const useAppStore = create<AppStore>((set) => ({
   setBaseUrl: (url) => set({ baseUrl: url.replace(/\s+/g, '').replace(/\/$/, '') }),
   patch: (partial) => set(partial),
 
-  // 数值规则与桌面端 petStore 完全一致
+  // 数值规则与桌面端 petStore 一致；功能开关关闭时对应项冻结（好感度增长与开关无关）
   feed: () =>
     set((s) => ({
       petState: {
         ...s.petState,
-        hunger: Math.min(100, s.petState.hunger + 15),
+        ...(s.petStateEnabled ? { hunger: Math.min(100, s.petState.hunger + 15) } : {}),
         affection: Math.min(100, s.petState.affection + 2),
       },
     })),
@@ -185,8 +233,9 @@ export const useAppStore = create<AppStore>((set) => ({
     set((s) => ({
       petState: {
         ...s.petState,
-        mood: Math.min(100, s.petState.mood + 20),
-        energy: Math.max(0, s.petState.energy - 10),
+        ...(s.petStateEnabled
+          ? { mood: Math.min(100, s.petState.mood + 20), energy: Math.max(0, s.petState.energy - 10) }
+          : {}),
         affection: Math.min(100, s.petState.affection + 5),
       },
     })),
@@ -194,18 +243,37 @@ export const useAppStore = create<AppStore>((set) => ({
     set((s) => ({
       petState: {
         ...s.petState,
-        energy: Math.min(100, s.petState.energy + 30),
-        hunger: Math.max(0, s.petState.hunger - 5),
+        ...(s.petStateEnabled
+          ? { energy: Math.min(100, s.petState.energy + 30), hunger: Math.max(0, s.petState.hunger - 5) }
+          : {}),
       },
     })),
   decay: () =>
+    set((s) => {
+      if (!s.petStateEnabled) return s; // 开关关闭：三项固定 80 不衰减（返回原 state 避免无效订阅更新）
+      return {
+        petState: {
+          ...s.petState,
+          hunger: Math.max(0, s.petState.hunger - 0.5),
+          mood: Math.max(0, s.petState.mood - 0.2),
+          energy: Math.max(0, s.petState.energy - 0.1),
+        },
+      };
+    }),
+  setPetStateEnabled: (next) =>
     set((s) => ({
-      petState: {
-        ...s.petState,
-        hunger: Math.max(0, s.petState.hunger - 0.5),
-        mood: Math.max(0, s.petState.mood - 0.2),
-        energy: Math.max(0, s.petState.energy - 0.1),
-      },
+      petStateEnabled: next,
+      // 关闭时三项立即归位 80（与桌面端 resetVitals 一致），开启时维持 80 起步
+      petState: next ? s.petState : { ...s.petState, hunger: 80, mood: 80, energy: 80 },
+    })),
+  addAffection: (delta) =>
+    set((s) => ({
+      petState: { ...s.petState, affection: Math.min(100, Math.max(0, s.petState.affection + delta)) },
+    })),
+  setMoodFromChat: (next) => set({ moodFromChat: next }),
+  adjustMood: (delta) =>
+    set((s) => ({
+      petState: { ...s.petState, mood: Math.min(100, Math.max(0, s.petState.mood + delta)) },
     })),
 
   appendMessages: (msgs) => set((s) => ({ messages: [...s.messages, ...msgs] })),
@@ -226,6 +294,7 @@ export const useAppStore = create<AppStore>((set) => ({
       ),
     })),
   clearMessages: () => set({ messages: [] }),
+  removeMessage: (id) => set((s) => ({ messages: s.messages.filter((m) => m.id !== id) })),
   setOverlayEnabled: (enabled) => set({ overlayEnabled: enabled }),
   setTtsEnabled: (enabled) => set({ ttsEnabled: enabled }),
 
@@ -246,14 +315,16 @@ export const useAppStore = create<AppStore>((set) => ({
           installedAgent: data.installedAgent ?? null,
           petState: { ...DEFAULT_PET_STATE, ...(data.petState ?? {}) },
           petStateReady: data.petStateReady ?? false,
+          petStateEnabled: data.petStateEnabled ?? true,
+          moodFromChat: data.moodFromChat ?? true,
           petAsset: data.petAsset ?? null,
-          // 旧版本只有 petAsset：迁移为已下载列表的初始成员
-          downloadedPets: Array.isArray(data.downloadedPets)
-            ? data.downloadedPets
-            : data.petAsset
-              ? [data.petAsset]
-              : [],
-          messages: Array.isArray(data.messages) ? data.messages : [],
+          // 旧版本只有 petAsset：迁移为已下载列表的初始成员；petAsset 始终保证在列表内（修复「我的宠物（0）」）
+          downloadedPets: (() => {
+            const list = Array.isArray(data.downloadedPets) ? data.downloadedPets : data.petAsset ? [data.petAsset] : [];
+            const asset = data.petAsset;
+            return asset && !list.some((p) => p.id === asset.id) ? [...list, asset] : list;
+          })(),
+          messages: sanitizeMessages(data.messages),
           overlayEnabled: data.overlayEnabled ?? false,
           ttsEnabled: data.ttsEnabled ?? false,
           petName: data.petName ?? '小宠',

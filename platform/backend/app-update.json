@@ -1,13 +1,13 @@
-﻿{
-    "versionCode":  21,
-    "versionName":  "1.5.1",
+{
+    "versionCode":  24,
+    "versionName":  "1.5.4",
     "minVersionCode":  4,
-    "apkUrl":  "http://39.105.178.6/MobilePet-1.0.apk",
-    "notes":  "修复：开启宠物悬浮窗后输入法失效的问题（悬浮窗不再抢占系统输入焦点，宠物应用与其他应用的键盘恢复正常）",
+    "apkUrl":  "http://39.105.178.6/MobilePet-1.5.4.apk",
+    "notes":  "修复：应用内更新下载进度一直显示 0% 的问题；下载完成后自动校验安装包版本，杜绝装到旧包/半截包",
     "bundle":  {
-                   "version":  4,
-                   "url":  "http://39.105.178.6/pet-bundle-4.zip",
-                   "notes":  "服务器地址固定内置阿里云，移除隧道时代自动发现机制",
+                   "version":  22,
+                   "url":  "http://39.105.178.6/pet-bundle-22.zip",
+                   "notes":  "流式输出自动贴底跟随（微信式）：输出时始终显示最新回复；上滑看历史暂停跟随，滑回底部自动恢复",
                    "minApkCode":  20
                }
 }

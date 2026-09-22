@@ -25,8 +25,6 @@ export interface ChatMsg {
   id?: string;
   role: 'user' | 'assistant';
   content: string;
-  /** 本机发送时间戳（毫秒；云端同步回来的历史消息可能没有，不参与时间分割线） */
-  ts?: number;
   /** 思考过程（开启显示思考时由模型返回，DeepSeek 风格卡片展示） */
   reasoning?: string;
   /** 思考用时秒数（发送到收到回复的耗时） */
@@ -35,6 +33,8 @@ export interface ChatMsg {
   pending?: boolean;
   /** 流式输出进行中（思考/正文逐字到达） */
   streaming?: boolean;
+  /** 请求失败（气泡可点击重试） */
+  error?: boolean;
 }
 
 /** 聊天人设：来自平台智能体 JSON（installedAgentConfig）或默认 */

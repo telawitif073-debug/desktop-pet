@@ -10,8 +10,10 @@ import { Alert } from 'react-native';
 import { appliedBundleVersion } from '../native/HotUpdate';
 import { useAppStore } from '../store/appStore';
 
-export const APP_VERSION_CODE = 21;
-export const APP_VERSION_NAME = '1.5.1';
+// 注意：这两个常量必须与 android/app/build.gradle 的 versionCode/versionName 保持同步，
+// 否则实际已安装新版但 App 仍显示旧版本号、更新横幅永不消失。
+export const APP_VERSION_CODE = 24;
+export const APP_VERSION_NAME = '1.5.4';
 
 export async function checkAppUpdate(silent = true): Promise<void> {
   try {
@@ -43,6 +45,7 @@ export async function checkAppUpdate(silent = true): Promise<void> {
       // 只记录 updateAvailable，由顶部轻量横幅提醒（同一版本关闭后 24h 内不再打扰），点击横幅才打开面板
       const forced = APP_VERSION_CODE < (data.minVersionCode ?? 0);
       const info = {
+        versionCode: remote,
         versionName: data.versionName || `v${remote}`,
         notes: data.notes || '新版本已发布',
         apkUrl: data.apkUrl,

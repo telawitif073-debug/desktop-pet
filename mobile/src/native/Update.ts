@@ -6,7 +6,7 @@
 import { Alert, DeviceEventEmitter, NativeModules } from 'react-native';
 
 const PetUpdate = NativeModules.PetUpdate as {
-  download(url: string, version: string): Promise<'started' | 'busy' | 'permission'>;
+  download(url: string, version: string, expectedCode: number): Promise<'started' | 'busy' | 'permission'>;
   installPending(): Promise<'installing' | 'permission'>;
 } | undefined;
 
@@ -22,11 +22,12 @@ export function isUpdateSupported(): boolean {
 /**
  * 发起后台下载（系统 DownloadManager），成功完成会自动拉起安装器。
  * version 用于任务标题去重：新版本发起时会自动取消并清除其他版本的下载任务与通知。
+ * expectedCode 为期望的 versionCode：下载完成后原生会校验安装包真实版本，不符则拒绝安装（防半截包/旧包）。
  * 返回 'permission' 表示需要先授权安装未知应用；'busy' 表示同版本任务已在下载。
  */
-export async function downloadAndInstall(url: string, version: string): Promise<'started' | 'busy' | 'permission'> {
+export async function downloadAndInstall(url: string, version: string, expectedCode = 0): Promise<'started' | 'busy' | 'permission'> {
   if (!PetUpdate) throw new Error('当前环境不支持应用内更新');
-  return PetUpdate.download(url, version);
+  return PetUpdate.download(url, version, expectedCode);
 }
 
 /** 授权后继续安装已下载的更新包 */

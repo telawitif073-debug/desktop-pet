@@ -72,14 +72,21 @@ class HotUpdateModule(private val reactContext: ReactApplicationContext) :
         try {
             val ctx = reactContext.applicationContext
             val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
-            launch?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            if (launch == null) {
+                promise.reject("ERR_RESTART", "无法获取应用启动入口")
+                return
+            }
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
             val pi = PendingIntent.getActivity(
                 ctx, 1001, launch,
                 PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_UPDATE_CURRENT or
                     (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
             )
             val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, android.os.SystemClock.elapsedRealtime() + 200, pi)
+            // 注意：setExact 在 Android 12+（targetSdk 31+）需要 SCHEDULE_EXACT_ALARM 权限，
+            // 未声明时会抛 SecurityException。重启只需约 200ms 的近似延迟，
+            // 用 inexact set() 无需权限，前台应用场景下准时送达（CodePush 同款做法）。
+            am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, android.os.SystemClock.elapsedRealtime() + 200, pi)
             promise.resolve(true)
             // 给 promise 事件队列一点时间送达 JS，再杀进程
             Thread {

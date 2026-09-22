@@ -1,6 +1,6 @@
 /** 游戏式更新面板：两种模式——热更新（JS Bundle，无需重装，重启生效）/ 整包更新（下载 APK 自动拉起系统安装器） */
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { downloadAndInstall, guideInstallPermission, installPendingApk, subscribeUpdateFinished, subscribeUpdateProgress } from '../native/Update';
 import { applyBundleUpdate, restartApp } from '../native/HotUpdate';
 import { useAppStore } from '../store/appStore';
@@ -72,8 +72,10 @@ function HotUpdatePanel(): React.JSX.Element {
   const restart = async (): Promise<void> => {
     try {
       await restartApp();
-    } catch {
-      // 原生重启失败兜底：提示用户手动杀进程重开
+    } catch (e) {
+      // 原生重启失败兜底：提示用户手动杀进程重开（不再静默无反应）
+      const msg = e instanceof Error ? e.message : '';
+      Alert.alert('自动重启失败', `${msg ? `${msg}\n` : ''}请手动关闭应用后重新打开，新版本即可生效。`);
     }
   };
 
@@ -178,24 +180,22 @@ function ApkUpdatePanel(): React.JSX.Element | null {
       if (p.total > 0) setTotal(p.total);
     });
     try {
-      const result = await downloadAndInstall(updateInfo.apkUrl, updateInfo.versionName);
+      const result = await downloadAndInstall(updateInfo.apkUrl, updateInfo.versionName, updateInfo.versionCode);
       if (result === 'permission') {
+        // 未开始下载：移除进度订阅，等待用户授权后重试
+        unsubRef.current?.();
+        unsubRef.current = null;
         setPhase('idle');
         guideInstallPermission();
         return;
       }
-      if (result === 'busy' || result === 'started') {
-        // 系统级后台下载进行中：进度条继续走，完成时由 PetUpdateFinished 事件收尾
-        setPhase('downloading');
-        return;
-      }
-      setPhase('done');
+      // 'busy' | 'started'：系统级后台下载进行中，保持进度订阅，
+      // 由 PetUpdateProgress 事件持续刷新进度条、PetUpdateFinished 收尾
     } catch (e) {
-      setPhase('error');
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
       unsubRef.current?.();
       unsubRef.current = null;
+      setPhase('error');
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -261,7 +261,7 @@ function ApkUpdatePanel(): React.JSX.Element | null {
             )}
             {phase === 'done' && (
               <Pressable style={[styles.btn, styles.btnPrimary]} onPress={close}>
-                <Text style={styles.btnPrimaryText}>已开始安装</Text>
+                <Text style={styles.btnPrimaryText}>完成</Text>
               </Pressable>
             )}
             {phase === 'error' && (

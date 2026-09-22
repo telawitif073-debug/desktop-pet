@@ -3,8 +3,8 @@
  * 本地变更 60s 防抖上传；退出 App 前由 root 监听触发 flush。
  */
 import { getAssetDetail, syncGet, syncPut } from './platform';
-import { useAppStore, type PetAssetRef } from '../store/appStore';
-import { normalizeFormat, type ChatMsg, type LlmProfile, type PetState } from '../types';
+import { useAppStore, sanitizeMessages, type PetAssetRef } from '../store/appStore';
+import { normalizeFormat, type LlmProfile, type PetState } from '../types';
 
 /** 跨设备共享的当前宠物引用（与桌面端 cloudSync.ts currentPet 同构） */
 interface CurrentPetRef {
@@ -54,7 +54,14 @@ export async function pullAfterLogin(): Promise<void> {
           format: normalizeFormat(detail.format),
           fileUrl: detail.fileUrl,
         };
-        useAppStore.getState().patch({ petAsset });
+        const cur = useAppStore.getState();
+        cur.patch({
+          petAsset,
+          // 并入已下载列表：否则宠物页显示「我的宠物（0）」但有当前形象
+          downloadedPets: cur.downloadedPets.some((p) => p.id === petAsset.id)
+            ? cur.downloadedPets
+            : [...cur.downloadedPets, petAsset],
+        });
         console.log(`[sync] 已从云端恢复当前宠物（${petAsset.name}）`);
       } catch (e) {
         console.log('[sync] 恢复云端宠物失败:', e instanceof Error ? e.message : e);
@@ -78,12 +85,15 @@ export async function pullAfterLogin(): Promise<void> {
     console.log('[sync] 拉取宠物状态失败:', e instanceof Error ? e.message : e);
   }
 
-  // 3. 聊天记录：本地空时恢复
+  // 3. 聊天记录：本地空时恢复（消毒：剥离流式残留，避免卡死气泡）
   try {
     const remote = await syncGet('chat-history');
     if (Array.isArray(remote.data) && remote.data.length && store.messages.length === 0) {
-      store.patch({ messages: remote.data as ChatMsg[] });
-      console.log(`[sync] 已从云端恢复聊天记录（${(remote.data as ChatMsg[]).length} 条）`);
+      const clean = sanitizeMessages(remote.data);
+      if (clean.length) {
+        store.patch({ messages: clean });
+        console.log(`[sync] 已从云端恢复聊天记录（${clean.length} 条）`);
+      }
     }
   } catch (e) {
     console.log('[sync] 拉取聊天记录失败:', e instanceof Error ? e.message : e);
