@@ -1,7 +1,8 @@
-/** 游戏式更新面板：发现新版本 → 面板内进度条下载 → 自动拉起系统安装器 */
+/** 游戏式更新面板：两种模式——热更新（JS Bundle，无需重装，重启生效）/ 整包更新（下载 APK 自动拉起系统安装器） */
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { downloadAndInstall, guideInstallPermission, installPendingApk, subscribeUpdateFinished, subscribeUpdateProgress } from '../native/Update';
+import { applyBundleUpdate, restartApp } from '../native/HotUpdate';
 import { useAppStore } from '../store/appStore';
 import { APP_VERSION_NAME } from './checkUpdate';
 
@@ -9,7 +10,121 @@ function mb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
-export default function UpdateModal(): React.JSX.Element | null {
+/** 面板骨架：标题/说明/进度/按钮区由调用方填充 */
+function Panel({ children, notes, onClose, subtitle, title }: {
+  children: React.ReactNode;
+  notes: string;
+  onClose: () => void;
+  subtitle: string;
+  title: string;
+}): React.JSX.Element {
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.mask}>
+        <View style={styles.panel}>
+          <View style={styles.header}>
+            <Text style={styles.title}>{title}</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Text style={styles.closeBtn}>✕</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.current}>当前版本 {APP_VERSION_NAME}</Text>
+          <Text style={styles.hotTag}>{subtitle}</Text>
+          <View style={styles.notesBox}>
+            <Text style={styles.notesTitle}>更新内容</Text>
+            <Text style={styles.notesText}>{notes}</Text>
+          </View>
+          {children}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** 热更新模式：下载 bundle zip → 解压登记 → 重启生效（无需重装 APK） */
+function HotUpdatePanel(): React.JSX.Element {
+  const hot = useAppStore((s) => s.updateHot)!;
+  const [phase, setPhase] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle');
+  const [received, setReceived] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [error, setError] = useState('');
+
+  const close = (): void => useAppStore.getState().patch({ updatePanelVisible: false });
+  const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0;
+
+  const start = async (): Promise<void> => {
+    setError('');
+    setPhase('downloading');
+    setReceived(0);
+    setTotal(0);
+    try {
+      await applyBundleUpdate(hot.url, hot.version, (r, t) => {
+        setReceived(r);
+        if (t > 0) setTotal(t);
+      });
+      setPhase('done');
+    } catch (e) {
+      setPhase('error');
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const restart = async (): Promise<void> => {
+    try {
+      await restartApp();
+    } catch {
+      // 原生重启失败兜底：提示用户手动杀进程重开
+    }
+  };
+
+  return (
+    <Panel
+      title={`发现新版本 v${hot.version}`}
+      subtitle="热更新 · 无需下载安装包，重启即生效"
+      notes={hot.notes}
+      onClose={() => { if (phase !== 'downloading') close(); }}
+    >
+      {phase === 'downloading' && (
+        <View style={styles.progressWrap}>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${Math.max(3, pct)}%` }]} />
+          </View>
+          <View style={styles.progressMeta}>
+            <Text style={styles.progressPct}>{pct}%</Text>
+            <Text style={styles.progressBytes}>{total > 0 ? `${mb(received)} / ${mb(total)}` : mb(received)}</Text>
+          </View>
+        </View>
+      )}
+      {phase === 'error' && <Text style={styles.errorText}>更新失败：{error}</Text>}
+      <View style={styles.btnRow}>
+        {phase === 'idle' && (
+          <Pressable style={[styles.btn, styles.btnPrimary]} onPress={() => void start()}>
+            <Text style={styles.btnPrimaryText}>立即更新</Text>
+          </Pressable>
+        )}
+        {phase === 'downloading' && (
+          <Pressable style={[styles.btn, styles.btnDisabled]} disabled>
+            <Text style={styles.btnDisabledText}>下载中…</Text>
+          </Pressable>
+        )}
+        {phase === 'done' && (
+          <Pressable style={[styles.btn, styles.btnPrimary]} onPress={() => void restart()}>
+            <Text style={styles.btnPrimaryText}>重启应用生效</Text>
+          </Pressable>
+        )}
+        {phase === 'error' && (
+          <Pressable style={[styles.btn, styles.btnPrimary]} onPress={() => void start()}>
+            <Text style={styles.btnPrimaryText}>重试</Text>
+          </Pressable>
+        )}
+      </View>
+      {phase === 'done' && <Text style={styles.hintText}>重启后自动加载新版本；若新版本异常，连续两次启动将自动恢复</Text>}
+    </Panel>
+  );
+}
+
+/** 整包更新模式：下载 APK → 自动拉起系统安装器 */
+function ApkUpdatePanel(): React.JSX.Element | null {
   const updateInfo = useAppStore((s) => s.updateAvailable);
   const panelVisible = useAppStore((s) => s.updatePanelVisible);
   const [phase, setPhase] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle');
@@ -166,6 +281,16 @@ export default function UpdateModal(): React.JSX.Element | null {
   );
 }
 
+export default function UpdateModal(): React.JSX.Element | null {
+  const updateHot = useAppStore((s) => s.updateHot);
+  const updateAvailable = useAppStore((s) => s.updateAvailable);
+  const panelVisible = useAppStore((s) => s.updatePanelVisible);
+
+  // 热更新与整包更新互斥（checkUpdate 保证），热更新优先展示（体积小、无需重装）
+  if (updateHot && panelVisible && !updateAvailable) return <HotUpdatePanel />;
+  return <ApkUpdatePanel />;
+}
+
 const styles = StyleSheet.create({
   mask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 28 },
   panel: { width: '100%', backgroundColor: '#fff', borderRadius: 16, padding: 18 },
@@ -173,6 +298,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '700', color: '#222', flex: 1 },
   closeBtn: { fontSize: 18, color: '#999', paddingHorizontal: 6 },
   current: { fontSize: 12, color: '#999', marginTop: 4 },
+  hotTag: { fontSize: 12, color: '#0E8A4C', marginTop: 6, fontWeight: '600' },
   forcedText: { color: '#E5484D', fontSize: 12, marginTop: 6, fontWeight: '600' },
   notesBox: { backgroundColor: '#F5F7FA', borderRadius: 10, padding: 12, marginTop: 12 },
   notesTitle: { fontSize: 12, color: '#888', marginBottom: 4 },
@@ -184,6 +310,7 @@ const styles = StyleSheet.create({
   progressPct: { fontSize: 12, color: '#1C6EF2', fontWeight: '600' },
   progressBytes: { fontSize: 11, color: '#999' },
   errorText: { color: '#E5484D', fontSize: 12, marginTop: 10 },
+  hintText: { fontSize: 11, color: '#AAA', marginTop: 8, lineHeight: 16, textAlign: 'center' },
   btnRow: { flexDirection: 'row', marginTop: 16 },
   btn: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginHorizontal: 4 },
   btnPrimary: { backgroundColor: '#1C6EF2' },

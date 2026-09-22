@@ -69,6 +69,8 @@ interface AppStore {
   chatClearConfirm: boolean;
   /** 检测到的新版本信息（安静模式：只显示顶部横幅，点击才打开更新面板；不持久化） */
   updateAvailable: { versionName: string; notes: string; apkUrl: string; forced: boolean } | null;
+  /** 检测到的热更新（JS Bundle，无需重装 APK，重启生效；不持久化） */
+  updateHot: { version: number; url: string; notes: string } | null;
   /** 更新面板是否打开（强制更新时自动打开且不可关闭） */
   updatePanelVisible: boolean;
   /** 用户关闭横幅后对同一版本的静默期（24h 内不再横幅提醒；持久化） */
@@ -161,6 +163,7 @@ export const useAppStore = create<AppStore>((set) => ({
   speechVoice: '',
   chatClearConfirm: true,
   updateAvailable: null,
+  updateHot: null,
   updatePanelVisible: false,
   updateSnooze: null,
 

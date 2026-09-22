@@ -18,8 +18,11 @@ export class AppUpdateController {
   @Get()
   show(): AppUpdateManifest {
     try {
-      const file = path.join(process.cwd(), 'app-update.json');
-      return JSON.parse(fs.readFileSync(file, 'utf8')) as AppUpdateManifest;
+      // 用 __dirname 定位（dist/app-update → ../../ = backend 根目录），不依赖进程启动目录；
+      // 剥离可能存在的 UTF-8 BOM（部分 Windows 工具写入会带），否则 JSON.parse 失败
+      const file = path.join(__dirname, '..', '..', 'app-update.json');
+      const raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+      return JSON.parse(raw) as AppUpdateManifest;
     } catch {
       return { versionCode: 0, versionName: '', apkUrl: '', notes: '' };
     }

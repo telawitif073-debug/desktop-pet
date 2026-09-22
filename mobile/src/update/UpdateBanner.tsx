@@ -8,9 +8,36 @@ const SNOOZE_MS = 24 * 60 * 60 * 1000;
 
 export default function UpdateBanner(): React.JSX.Element | null {
   const updateAvailable = useAppStore((s) => s.updateAvailable);
+  const updateHot = useAppStore((s) => s.updateHot);
   const panelVisible = useAppStore((s) => s.updatePanelVisible);
   const snooze = useAppStore((s) => s.updateSnooze);
   const insets = useSafeAreaInsets();
+
+  // 热更新横幅（整包更新优先级更高，checkUpdate 保证两者互斥）
+  if (updateHot && !panelVisible) {
+    const hotKey = `bundle-${updateHot.version}`;
+    if (snooze && snooze.versionName === hotKey && Date.now() < snooze.until) return null;
+    return (
+      <View style={[styles.wrap, { top: insets.top + 6 }]} pointerEvents="box-none">
+        <Pressable
+          style={styles.pill}
+          onPress={() => useAppStore.getState().patch({ updatePanelVisible: true })}>
+          <Text style={styles.text}>新版本 v{updateHot.version} 可用（无需重装）</Text>
+          <Text style={styles.action}>更新</Text>
+        </Pressable>
+        <Pressable
+          style={styles.close}
+          hitSlop={8}
+          onPress={() =>
+            useAppStore
+              .getState()
+              .patch({ updateSnooze: { versionName: hotKey, until: Date.now() + SNOOZE_MS } })
+          }>
+          <Text style={styles.closeText}>✕</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   if (!updateAvailable || panelVisible) return null;
   // 强制更新不显示横幅（直接弹面板）；静默期内不显示
