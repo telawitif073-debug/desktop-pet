@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { flushAllOnQuit } from '../api/sync';
-import { useAppStore } from '../store/appStore';
+import { DEFAULT_BASE_URL, useAppStore } from '../store/appStore';
 import { listVoices, speak } from '../native/Voice';
 import { APP_VERSION_NAME, checkAppUpdate } from '../update/checkUpdate';
 import {
@@ -106,12 +106,20 @@ export default function SettingsScreen(): React.JSX.Element {
       : '当前环境不支持悬浮窗功能'
     : '开启后宠物会显示在其他应用上方，可拖动到任意位置；关闭即移除';
 
+  /** 清洗用户输入：截取首个合法 URL 起点（兜住 `;` 等误输入前缀），缺 scheme 自动补 https:// */
+  function normalizeServerUrl(raw: string): string {
+    const compact = raw.replace(/\s+/g, '');
+    const hit = compact.match(/https?:\/\/.+/i);
+    if (hit) return hit[0];
+    return 'https://' + compact.replace(/^[^a-zA-Z0-9]+/, '');
+  }
+
   const saveUrl = async (): Promise<void> => {
-    const cleaned = url.replace(/\s+/g, '');
-    if (!/^https?:\/\//i.test(cleaned)) {
-      Alert.alert('地址无效', '需要以 http:// 或 https:// 开头');
+    if (!url.replace(/\s+/g, '')) {
+      Alert.alert('地址为空', `请输入服务器地址（默认 ${DEFAULT_BASE_URL}）`);
       return;
     }
+    const cleaned = normalizeServerUrl(url);
     setUrl(cleaned);
     useAppStore.getState().setBaseUrl(cleaned);
     // 保存后立即验证连通性，当场发现拼错/网络不通
@@ -119,7 +127,7 @@ export default function SettingsScreen(): React.JSX.Element {
       const res = await fetch(`${cleaned.replace(/\/$/, '')}/app-update`);
       Alert.alert('已保存', res.ok ? '服务器地址已更新，连接正常' : `已保存，但服务器返回 ${res.status}`);
     } catch {
-      Alert.alert('已保存，但连不上服务器', '请检查地址拼写与手机网络（用局域网地址时手机需和电脑连同一 Wi-Fi）');
+      Alert.alert('已保存，但连不上服务器', '请检查地址与手机网络');
     }
   };
 
@@ -197,13 +205,15 @@ export default function SettingsScreen(): React.JSX.Element {
 
       <Text style={styles.section}>平台服务器</Text>
       <View style={styles.card}>
-        <TextInput style={styles.input} value={url} onChangeText={setUrl} autoCapitalize="none" placeholder="http://10.0.2.2:3001/api" />
+        <TextInput style={styles.input} value={url} onChangeText={setUrl} autoCapitalize="none" placeholder="http://39.105.178.6/api" />
         <Text style={styles.hint}>
-          Android 模拟器固定用 10.0.2.2 访问电脑；真机请改成电脑的局域网 IP（如 http://192.168.x.x:3001/api）
+          默认使用云服务器（7×24 常驻），一般无需手动修改；模拟器可用 http://10.0.2.2:3001/api
         </Text>
-        <Pressable style={styles.primaryBtn} onPress={saveUrl}>
-          <Text style={styles.primaryText}>保存地址</Text>
-        </Pressable>
+        <View style={styles.btnPair}>
+          <Pressable style={styles.primaryBtn} onPress={saveUrl}>
+            <Text style={styles.primaryText}>保存地址</Text>
+          </Pressable>
+        </View>
       </View>
 
       <Text style={styles.section}>数据同步</Text>
@@ -420,8 +430,12 @@ const styles = StyleSheet.create({
   row: { fontSize: 14, color: '#333', lineHeight: 24 },
   input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
   hint: { fontSize: 11, color: '#AAA', marginTop: 6, lineHeight: 17 },
-  primaryBtn: { backgroundColor: '#1C6EF2', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 10 },
+  primaryBtn: { flex: 1, backgroundColor: '#1C6EF2', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 10 },
   primaryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  btnPair: { flexDirection: 'row' },
+  secondaryBtn: { flex: 1, backgroundColor: '#F2F3F5', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 10, marginRight: 8 },
+  secondaryText: { color: '#1C6EF2', fontSize: 14, fontWeight: '600' },
+  btnDisabled: { opacity: 0.6 },
   dangerBtn: { borderWidth: 1, borderColor: '#E5484D', borderRadius: 8, paddingVertical: 10, alignItems: 'center', marginTop: 12 },
   dangerText: { color: '#E5484D', fontSize: 14 },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

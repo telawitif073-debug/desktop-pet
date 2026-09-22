@@ -63,30 +63,18 @@ try {
 $size = (Get-Item $zipPath).Length
 Write-Host ("==> zip 完成: {0} ({1:N1} MB)" -f $zipPath, ($size / 1MB))
 
-# 5) 更新 app-update.json 的 bundle 字段（apkUrl 保持不变，由隧道看门狗维护）
+# 5) 更新 app-update.json 的 bundle 字段（服务器地址固定内置阿里云，无需动态发现）
 $update | Add-Member -Force -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{
     version = $nextVersion
     url = $zipPath -replace '\\', '/'
     notes = $Notes
     minApkCode = $MinApkCode
 })
-# bundle.url 需要走公网：本地服务器直链在手机上不可达，用 server-discovery.json 里的当前隧道地址拼前缀
-$discoverUrl = ''
-$discoverFile = Join-Path $root 'server-discovery.json'
-if (Test-Path $discoverFile) {
-    try {
-        $t = (Get-Content $discoverFile -Raw | ConvertFrom-Json).tunnel
-        if ($t) { $discoverUrl = "$t".Trim() }
-    } catch {}
-}
-if ($discoverUrl) {
-    $update.bundle.url = "$discoverUrl/pet-bundle-$nextVersion.zip"
-    Write-Host "==> bundle url 使用隧道地址: $($update.bundle.url)"
-} else {
-    Write-Host '!! 未发现 server-discovery.json 隧道地址，bundle.url 暂为本地路径，稍后请手动修正'
-}
+$cloudBase = 'http://39.105.178.6'
+$update.apkUrl = "$cloudBase/MobilePet-1.0.apk"
+$update.bundle.url = "$cloudBase/pet-bundle-$nextVersion.zip"
 $update | ConvertTo-Json -Depth 5 | Set-Content $manifest -Encoding UTF8
-Write-Host "==> app-update.json 已更新（bundle v$nextVersion，minApkCode $MinApkCode）"
+Write-Host "==> app-update.json 已更新（bundle v$nextVersion，url=$($update.bundle.url)）"
 
 # 清理临时目录
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue

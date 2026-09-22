@@ -1,13 +1,13 @@
-{
-    "versionCode": 21,
-    "versionName": "1.5.1",
-    "minVersionCode": 4,
-    "apkUrl": "https://regardless-shaped-particularly-dependent.trycloudflare.com/MobilePet-1.0.apk",
-    "notes": "修复：开启宠物悬浮窗后输入法失效的问题（悬浮窗不再抢占系统输入焦点，宠物应用与其他应用的键盘恢复正常）",
-    "bundle": {
-        "version": 1,
-        "url": "https://regardless-shaped-particularly-dependent.trycloudflare.com/pet-bundle-1.zip",
-        "notes": "热更新机制上线：功能与界面迭代无需重装安装包，重启即生效",
-        "minApkCode": 20
-    }
+﻿{
+    "versionCode":  21,
+    "versionName":  "1.5.1",
+    "minVersionCode":  4,
+    "apkUrl":  "http://39.105.178.6/MobilePet-1.0.apk",
+    "notes":  "修复：开启宠物悬浮窗后输入法失效的问题（悬浮窗不再抢占系统输入焦点，宠物应用与其他应用的键盘恢复正常）",
+    "bundle":  {
+                   "version":  4,
+                   "url":  "http://39.105.178.6/pet-bundle-4.zip",
+                   "notes":  "服务器地址固定内置阿里云，移除隧道时代自动发现机制",
+                   "minApkCode":  20
+               }
 }

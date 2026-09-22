@@ -15,8 +15,8 @@ import {
 } from '../types';
 
 const STORAGE_KEY = 'mobile-pet-store';
-/** 真机默认走公网隧道（任意网络可达）；Android 模拟器可在设置中改为 http://10.0.2.2:3001/api */
-export const DEFAULT_BASE_URL = 'https://regulated-affects-transformation-mia.trycloudflare.com/api';
+/** 默认走阿里云 ECS 常驻服务（7×24）；Android 模拟器可在设置中改为 http://10.0.2.2:3001/api */
+export const DEFAULT_BASE_URL = 'http://39.105.178.6/api';
 
 export interface PetAssetRef {
   id: string;
@@ -47,8 +47,6 @@ interface AppStore {
   /** 已下载到本机的宠物列表（可在宠物页切换/删除） */
   downloadedPets: PetAssetRef[];
   messages: ChatMsg[];
-  /** 历史可用服务器地址（最近优先，最多 5 个）：云端发现源不可达时的兜底探测列表 */
-  knownServers: string[];
   /** 悬浮窗宠物开关（仅 Android 生效，iOS 不支持悬浮窗） */
   overlayEnabled: boolean;
   /** 语音朗读回复开关（TTS 读出助手消息） */
@@ -115,7 +113,6 @@ const PERSIST_KEYS: Array<keyof PersistState> = [
   'petAsset',
   'downloadedPets',
   'messages',
-  'knownServers',
   'overlayEnabled',
   'ttsEnabled',
   'petName',
@@ -155,7 +152,6 @@ export const useAppStore = create<AppStore>((set) => ({
   petAsset: null,
   downloadedPets: [],
   messages: [],
-  knownServers: [],
   overlayEnabled: false,
   ttsEnabled: false,
   petName: '小宠',
@@ -238,10 +234,12 @@ export const useAppStore = create<AppStore>((set) => ({
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       if (raw) {
         const data = JSON.parse(raw) as Partial<PersistState>;
+        // 服务器地址已内置固定（阿里云）；旧版持久化的隧道过渡地址直接归位
+        const legacy = typeof data.baseUrl === 'string' && /trycloudflare\.com/i.test(data.baseUrl);
         set({
           user: data.user ?? null,
           token: data.token ?? '',
-          baseUrl: data.baseUrl || DEFAULT_BASE_URL,
+          baseUrl: legacy || !data.baseUrl ? DEFAULT_BASE_URL : data.baseUrl,
           llmProfiles: Array.isArray(data.llmProfiles) ? data.llmProfiles : [],
           llmActiveProfileId: data.llmActiveProfileId ?? '',
           petSelfDescription: data.petSelfDescription ?? '',
@@ -256,7 +254,6 @@ export const useAppStore = create<AppStore>((set) => ({
               ? [data.petAsset]
               : [],
           messages: Array.isArray(data.messages) ? data.messages : [],
-          knownServers: Array.isArray(data.knownServers) ? data.knownServers : [],
           overlayEnabled: data.overlayEnabled ?? false,
           ttsEnabled: data.ttsEnabled ?? false,
           petName: data.petName ?? '小宠',

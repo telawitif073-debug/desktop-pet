@@ -1,0 +1,21 @@
+[Unit]
+Description=Desktop Pet Platform Backend (NestJS)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+# 工作目录必须是 backend 根（app-update.json、uploads 都以 cwd 相对定位）
+WorkingDirectory=/opt/pet/backend
+ExecStart=/usr/bin/node --enable-source-maps dist/main.js
+Restart=always
+RestartSec=5
+# 后端只绑本机回环，公网访问统一走 nginx
+Environment=PORT=3001
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/pet/backend/.env
+# t2.micro 只有 1GB 内存，限一下防拖垮整机
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

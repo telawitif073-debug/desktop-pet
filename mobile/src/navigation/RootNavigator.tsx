@@ -19,6 +19,11 @@ import UpdateBanner from '../update/UpdateBanner';
 const Tabs = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
+/** 启动/回前台例行检查：检测应用更新（服务器地址固定内置阿里云，无需发现流程） */
+function runChecks(): void {
+  void checkAppUpdate().catch(() => undefined);
+}
+
 function MainTabs(): React.JSX.Element {
   const isAdmin = useAppStore((s) => s.user?.role === 'admin');
   return (
@@ -43,15 +48,15 @@ export default function RootNavigator(): React.JSX.Element {
   const hydrated = useAppStore((s) => s.hydrated);
   const token = useAppStore((s) => s.token);
 
-  // 启动后检查应用更新（平台不可达静默跳过）
+  // 启动后检查（检测应用更新）
   useEffect(() => {
-    if (hydrated) void checkAppUpdate();
+    if (hydrated) runChecks();
   }, [hydrated]);
 
-  // 每次回到前台也自动检测版本（后台切回/解锁屏幕都会触发），版本低自动弹出更新
+  // 每次回到前台也自动执行（后台切回/解锁屏幕都会触发）
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && hydrated) void checkAppUpdate();
+      if (state === 'active' && hydrated) runChecks();
     });
     return () => sub.remove();
   }, [hydrated]);
