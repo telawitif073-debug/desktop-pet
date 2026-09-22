@@ -1,7 +1,7 @@
 {
-    "versionCode":  18,
-    "versionName":  "1.3.4",
+    "versionCode":  19,
+    "versionName":  "1.4.0",
     "minVersionCode":  4,
     "apkUrl":  "https://antarctica-not-association-warrior.trycloudflare.com/MobilePet-1.0.apk",
-    "notes":  "修复点击/双击悬浮窗宠物导致应用闪退、宠物消失的问题"
+    "notes":  "聊天支持流式输出与思考过程逐字显示，界面升级为微信式气泡，键盘适配优化"
 }
