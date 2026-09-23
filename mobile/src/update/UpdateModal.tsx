@@ -5,6 +5,10 @@ import { downloadAndInstall, guideInstallPermission, installPendingApk, subscrib
 import { applyBundleUpdate, restartApp } from '../native/HotUpdate';
 import { useAppStore } from '../store/appStore';
 import { APP_VERSION_NAME } from './checkUpdate';
+import { nativeVersionName } from '../native/PetInfo';
+
+/** 展示用版本号：优先系统真实安装版本（原生），旧包回退 JS 常量 */
+const SHOW_VERSION = nativeVersionName || APP_VERSION_NAME;
 
 function mb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
@@ -28,7 +32,7 @@ function Panel({ children, notes, onClose, subtitle, title }: {
               <Text style={styles.closeBtn}>✕</Text>
             </Pressable>
           </View>
-          <Text style={styles.current}>当前版本 {APP_VERSION_NAME}</Text>
+          <Text style={styles.current}>当前版本 {SHOW_VERSION}</Text>
           <Text style={styles.hotTag}>{subtitle}</Text>
           <View style={styles.notesBox}>
             <Text style={styles.notesTitle}>更新内容</Text>
@@ -62,6 +66,9 @@ function HotUpdatePanel(): React.JSX.Element {
         setReceived(r);
         if (t > 0) setTotal(t);
       });
+      // 记录「已应用该热更版本」：下次启动若被崩溃自愈回滚（生效版本低于此值），
+      // checkUpdate 将识别并封禁该版本，避免「闪退 → 回滚 → 再次提示更新」死循环
+      useAppStore.getState().patch({ hotApply: { version: hot.version, ts: Date.now() } });
       setPhase('done');
     } catch (e) {
       setPhase('error');
@@ -226,7 +233,7 @@ function ApkUpdatePanel(): React.JSX.Element | null {
               </Pressable>
             )}
           </View>
-          <Text style={styles.current}>当前版本 {APP_VERSION_NAME}</Text>
+          <Text style={styles.current}>当前版本 {SHOW_VERSION}</Text>
           {forced && <Text style={styles.forcedText}>当前版本过低，需更新到最新版后才能继续使用</Text>}
 
           <View style={styles.notesBox}>
@@ -286,8 +293,12 @@ export default function UpdateModal(): React.JSX.Element | null {
   const updateAvailable = useAppStore((s) => s.updateAvailable);
   const panelVisible = useAppStore((s) => s.updatePanelVisible);
 
+  // 面板未打开时完全不挂载子面板：避免 ApkUpdatePanel 常驻订阅
+  // DownloadManager 事件（卸载即清理），也杜绝任何隐藏期 effect 活动
+  if (!panelVisible) return null;
+
   // 热更新与整包更新互斥（checkUpdate 保证），热更新优先展示（体积小、无需重装）
-  if (updateHot && panelVisible && !updateAvailable) return <HotUpdatePanel />;
+  if (updateHot && !updateAvailable) return <HotUpdatePanel />;
   return <ApkUpdatePanel />;
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Layout, Menu, Avatar, Button, ConfigProvider, Segmented, Typography } from 'antd';
-import { HeartOutlined, LogoutOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
+import { HeartOutlined, LogoutOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { clearAuth, getMe, getStoredUser } from './api';
 import type { User } from './types';
@@ -11,6 +11,7 @@ import UploadPage from './pages/UploadPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
 import SettingsPage from './pages/SettingsPage';
+import AgentsPage from './pages/AgentsPage';
 
 const { Header, Content } = Layout;
 
@@ -25,7 +26,7 @@ const DEVELOPER_ACCOUNTS = ['developer'];
 function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, onLogout }: { user: User | null; viewMode: 'user' | 'admin'; adminView: boolean; isDeveloper: boolean; onViewModeChange: (mode: 'user' | 'admin') => void; onLogout: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const selected = location.pathname.startsWith('/profile') ? 'profile' : location.pathname.startsWith('/upload') ? 'upload' : location.pathname.startsWith('/admin') ? 'admin' : location.pathname.startsWith('/settings') ? 'settings' : 'browse';
+  const selected = location.pathname.startsWith('/profile') ? 'profile' : location.pathname.startsWith('/agents') ? 'agents' : location.pathname.startsWith('/upload') ? 'upload' : location.pathname.startsWith('/admin') ? 'admin' : location.pathname.startsWith('/settings') ? 'settings' : 'browse';
   const viewSwitch = <Segmented size="small" value={viewMode} onChange={(value) => onViewModeChange(value as 'user' | 'admin')} options={[{ label: '用户视图', value: 'user' }, { label: '管理员视图', value: 'admin' }]} />;
 
   if (adminView) {
@@ -46,7 +47,7 @@ function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, o
         items={[
           { key: 'browse', label: <Link to="/">探索资源</Link>, icon: <ShopOutlined /> },
           { key: 'upload', label: <Link to="/upload">上传资源</Link>, icon: <UploadOutlined /> },
-          ...(user ? [{ key: 'profile', label: <Link to="/profile">个人中心</Link>, icon: <UserOutlined /> }] : []),
+          ...(user ? [{ key: 'profile', label: <Link to="/profile">个人中心</Link>, icon: <UserOutlined /> }, { key: 'agents', label: <Link to="/agents">智能体</Link>, icon: <RobotOutlined /> }] : []),
           { key: 'settings', label: <Link to="/settings">设置</Link>, icon: <SettingOutlined /> },
         ]}
       />
@@ -109,6 +110,7 @@ export default function App() {
             <Route path="/asset/:type/:id" element={<ResourceDetailPage user={user} />} />
             <Route path="/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+            <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/admin" element={user?.role === 'admin' ? <AdminPage user={user} /> : <Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />

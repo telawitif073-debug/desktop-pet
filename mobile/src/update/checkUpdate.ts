@@ -7,13 +7,28 @@
  * 发布新版本：build.gradle versionCode/Name 与这里同步 +1，并更新 backend/app-update.json。
  */
 import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { appliedBundleVersion } from '../native/HotUpdate';
+import { nativeVersionCode } from '../native/PetInfo';
 import { useAppStore } from '../store/appStore';
 
 // 注意：这两个常量必须与 android/app/build.gradle 的 versionCode/versionName 保持同步，
 // 否则实际已安装新版但 App 仍显示旧版本号、更新横幅永不消失。
-export const APP_VERSION_CODE = 24;
-export const APP_VERSION_NAME = '1.5.4';
+export const APP_VERSION_CODE = 27;
+export const APP_VERSION_NAME = '1.5.7';
+
+/** 判定用的本机版本号：优先取系统安装的真实 versionCode（原生），旧包回退常量 */
+const REAL_VERSION_CODE = nativeVersionCode > 0 ? nativeVersionCode : APP_VERSION_CODE;
+
+/** 读取 App.tsx 全局捕获器写入的最后一次 JS 崩溃栈（尽力而为，可能与进程终止竞态写不全） */
+async function readLastCrash(): Promise<string> {
+  try {
+    const raw = await AsyncStorage.getItem('last-crash');
+    return raw ? raw.slice(0, 400) : '';
+  } catch {
+    return '';
+  }
+}
 
 export async function checkAppUpdate(silent = true): Promise<void> {
   try {
@@ -36,14 +51,14 @@ export async function checkAppUpdate(silent = true): Promise<void> {
     const remote = data.versionCode ?? 0;
 
     // ---- 1) 整包更新优先：APK 版本比本机新 → 引导重装 ----
-    if (remote > APP_VERSION_CODE) {
+    if (remote > REAL_VERSION_CODE) {
       if (!data.apkUrl) {
         if (!silent) Alert.alert('暂不可更新', '更新包地址未配置，请稍后再试');
         return;
       }
       // 版本低于最低可用版本 → 强制更新（直接弹不可关闭的面板）；否则安静模式：
       // 只记录 updateAvailable，由顶部轻量横幅提醒（同一版本关闭后 24h 内不再打扰），点击横幅才打开面板
-      const forced = APP_VERSION_CODE < (data.minVersionCode ?? 0);
+      const forced = REAL_VERSION_CODE < (data.minVersionCode ?? 0);
       const info = {
         versionCode: remote,
         versionName: data.versionName || `v${remote}`,
@@ -73,11 +88,36 @@ export async function checkAppUpdate(silent = true): Promise<void> {
     // ---- 2) 热更新：JS Bundle 版本更新且本机 APK 满足最低要求 ----
     const bundle = data.bundle;
     const applied = await appliedBundleVersion();
+
+    // 崩溃自愈回滚检测：最近成功应用过 vX，但现在生效版本已低于 X
+    // （current.json 被原生清除 = 该版本连续启动异常被自动回滚）。
+    // 回滚后 applied=0，若不拦截会立刻再次推送同一版本 → 更新死循环。
+    const st0 = useAppStore.getState();
+    if (st0.hotApply && st0.hotApply.version > applied) {
+      const blacklisted = st0.hotRolledBack.includes(st0.hotApply.version)
+        ? st0.hotRolledBack
+        : [...st0.hotRolledBack, st0.hotApply.version];
+      const crash = await readLastCrash();
+      useAppStore.getState().patch({ hotApply: null, hotRolledBack: blacklisted });
+      if (!silent) {
+        Alert.alert(
+          '新版本启动异常',
+          `热更 v${st0.hotApply.version} 连续启动异常，已自动恢复旧版并停止推送该版本。${crash ? `\n\n错误信息：${crash}` : ''}`,
+        );
+      }
+      // 已回滚无生效版本：走下方黑名单/最低版本判断（applied 已为 0）
+    }
+
     if (!bundle?.version || !bundle.url || bundle.version <= applied) {
       if (!silent) Alert.alert('已是最新版本', `当前版本 ${APP_VERSION_NAME}`);
       return;
     }
-    if (APP_VERSION_CODE < (bundle.minApkCode ?? 0)) {
+    // 黑名单：该版本曾启动异常被回滚，不再重复推送（修复版本的版本号更高，不受影响）
+    if (useAppStore.getState().hotRolledBack.includes(bundle.version)) {
+      if (!silent) Alert.alert('该更新版本已回滚', `热更 v${bundle.version} 曾因启动异常被自动回滚，本次不再提示。修复版本发布后将自动推送。`);
+      return;
+    }
+    if (REAL_VERSION_CODE < (bundle.minApkCode ?? 0)) {
       // 本机 APK 过旧，热更不兼容 → 引导整包更新（APK 版本号应已大于本机，走上一分支，这里兜底提示）
       if (!silent) Alert.alert('需要更新应用', '本次更新需要先升级到最新安装包');
       return;

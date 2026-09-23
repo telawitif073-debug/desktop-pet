@@ -6,6 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import LoginScreen from '../screens/LoginScreen';
 import MainShell from './MainShell';
+import AppErrorBoundary from '../diagnostics/AppErrorBoundary';
 import { useAppStore } from '../store/appStore';
 import { checkAppUpdate } from '../update/checkUpdate';
 import UpdateModal from '../update/UpdateModal';
@@ -43,15 +44,18 @@ export default function RootNavigator(): React.JSX.Element {
     );
   }
 
+  // 错误边界包裹整个导航树：任何屏渲染/生命周期异常都会显示错误页而非闪退
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {token ? <Stack.Screen name="Main" component={MainShell} /> : <Stack.Screen name="Login" component={LoginScreen} />}
-        </Stack.Navigator>
-      </NavigationContainer>
-      <UpdateModal />
-      <UpdateBanner />
-    </SafeAreaProvider>
+    <AppErrorBoundary>
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            {token ? <Stack.Screen name="Main" component={MainShell} /> : <Stack.Screen name="Login" component={LoginScreen} />}
+          </Stack.Navigator>
+        </NavigationContainer>
+        <UpdateModal />
+        <UpdateBanner />
+      </SafeAreaProvider>
+    </AppErrorBoundary>
   );
 }

@@ -40,6 +40,8 @@ class MainApplication : Application(), ReactApplication {
             add(PetUpdatePackage())
             // JS Bundle 热更新
             add(HotUpdatePackage())
+            // 真实安装版本信息（更新检测与关于页）
+            add(PetInfoPackage())
           }
     }
   }

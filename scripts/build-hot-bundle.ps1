@@ -71,7 +71,9 @@ $update | Add-Member -Force -NotePropertyName bundle -NotePropertyValue ([pscust
     minApkCode = $MinApkCode
 })
 $cloudBase = 'http://39.105.178.6'
-$update.apkUrl = "$cloudBase/MobilePet-1.0.apk"
+# 整包更新地址：沿用清单已有配置，不覆写（历史版本曾在此把 1.5.5 误写成 1.0.apk，
+# 导致用户装包校验失败永远卡在旧版）。仅当从未配置过时才写入默认值。
+if (-not $update.apkUrl) { $update.apkUrl = "$cloudBase/MobilePet-1.5.6.apk" }
 $update.bundle.url = "$cloudBase/pet-bundle-$nextVersion.zip"
 # 写回必须无 BOM（PS 5.1 的 Set-Content -Encoding UTF8 会写 BOM，叠加后二次运行解析失败）
 [System.IO.File]::WriteAllText($manifest, ($update | ConvertTo-Json -Depth 5), $utf8NoBom)

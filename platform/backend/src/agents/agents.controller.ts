@@ -101,6 +101,70 @@ export class AgentsController {
     return this.agentsService.remove(id, user.id, user.role === 'admin');
   }
 
+  @Post('deps/verify')
+  @UseGuards(JwtAuthGuard)
+  async verifyDependency(
+    @Body()
+    body: {
+      /** 待探测的端点（http/https 绝对 URL） */
+      url?: string;
+      /** 协议：openai / rest / a2a / mcp / other */
+      protocol?: string;
+      /** 鉴权方式：api_key / bearer / oauth / none */
+      auth?: string;
+      /** 探测使用的密钥（仅服务端转发使用，不落库） */
+      apiKey?: string;
+      /** 附加请求头 */
+      extraHeaders?: Record<string, string>;
+    },
+  ) {
+    const url = typeof body.url === 'string' ? body.url.trim() : '';
+    if (!/^https?:\/\//i.test(url)) {
+      throw new BadRequestException('url 必须是 http/https 绝对地址');
+    }
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const headers: Record<string, string> = {};
+      const auth = body.auth ?? '';
+      if (body.apiKey && (auth === 'api_key' || auth === 'bearer' || auth === 'openai')) {
+        headers.Authorization = `Bearer ${body.apiKey}`;
+      }
+      if (body.extraHeaders && typeof body.extraHeaders === 'object') {
+        for (const [k, v] of Object.entries(body.extraHeaders)) {
+          if (typeof v === 'string') headers[k] = v;
+        }
+      }
+      const started = Date.now();
+      const res = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+        redirect: 'follow',
+      });
+      const latencyMs = Date.now() - started;
+      clearTimeout(timer);
+      // 消费响应体防止连接挂起
+      await res.arrayBuffer().catch(() => undefined);
+      const ok = res.ok;
+      return {
+        ok,
+        status: res.status,
+        latencyMs,
+        error: ok ? undefined : `收到 HTTP ${res.status}（连通，但服务端拒绝了探测请求）`,
+      };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const aborted = message.includes('abort');
+      return {
+        ok: false,
+        status: null,
+        latencyMs: null,
+        error: aborted ? '连接超时（8 秒未响应），请检查地址与网络' : `无法连接：${message}`,
+      };
+    }
+  }
+
   @Get(':id')
   @UseGuards(JwtOptionalGuard)
   findOne(@Param('id') id: string, @CurrentUser() user: User | null) {

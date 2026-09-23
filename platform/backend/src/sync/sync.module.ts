@@ -9,5 +9,6 @@ import { SyncController } from './sync.controller';
   imports: [TypeOrmModule.forFeature([UserSyncData, DownloadRecord])],
   controllers: [SyncController],
   providers: [SyncService],
+  exports: [SyncService],
 })
 export class SyncModule {}

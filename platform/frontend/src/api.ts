@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Asset, AssetType, AuthResponse, DownloadedEntry, PageResponse, Review, User } from './types';
+import type { Asset, AssetType, AuthResponse, DownloadedEntry, PageResponse, Review, SyncConfigPayload, User } from './types';
 
 const TOKEN_KEY = 'platform_access_token';
 const REFRESH_TOKEN_KEY = 'platform_refresh_token';
@@ -211,6 +211,34 @@ export async function uploadPet(
   });
   form.append('actionsMeta', JSON.stringify(actions.map(({ file: _file, ...meta }) => meta)));
   const response = await api.post<Asset>('/pets', form);
+  return response.data;
+}
+
+// ── 个人智能体云同步（/api/sync/config，与手机端/桌面端共库） ──
+
+/** 拉取当前用户的同步配置（含 llmProfiles = 智能体列表） */
+export async function getSyncConfig<T = SyncConfigPayload>() {
+  const response = await api.get<{ data: T }>('/sync/config');
+  return response.data.data;
+}
+
+/** 整包提交同步配置（llmProfiles 全量覆盖；后端对 apiKey 加密落库、传输时解密） */
+export async function putSyncConfig(payload: SyncConfigPayload) {
+  const response = await api.put('/sync/config', { data: payload });
+  return response.data;
+}
+
+/** 智能体外部依赖连通性测试：后端代发探测请求，返回 ok/status/latencyMs/error */
+export async function verifyDependency(options: {
+  url: string;
+  protocol?: string;
+  auth?: string;
+  apiKey?: string;
+}) {
+  const response = await api.post<{ ok: boolean; status: number | null; latencyMs: number | null; error?: string }>(
+    '/agents/deps/verify',
+    options,
+  );
   return response.data;
 }
 

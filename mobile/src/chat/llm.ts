@@ -4,6 +4,7 @@
  */
 import { useAppStore } from '../store/appStore';
 import type { ChatMsg, LlmProfile, PetState } from '../types';
+import { ensureMultiSession, multiChatSend } from '../api/platform';
 
 const DEFAULT_SYSTEM = '你是一只可爱的桌面宠物，说话简短活泼、口语化，单次回复尽量不超过 80 字。';
 
@@ -32,14 +33,23 @@ export function isConfigured(): boolean {
 }
 
 function buildSystemPrompt(): string {
-  const { installedAgent, petSelfDescription, petName, userNickname, showThinking, thinkingLang } = useAppStore.getState();
-  // API 档案里的系统提示词（与桌面端 getLLMConfig 一致：填了即作为人格主体，没填才用默认宠物人格）
-  const profilePrompt = activeProfile()?.systemPrompt?.trim();
+  const { petSelfDescription, petName, userNickname, showThinking, thinkingLang } = useAppStore.getState();
+  // LlmProfile = 智能体，档案自带 systemPrompt（人设主体），没填才用默认宠物人格
+  const profile = activeProfile();
+  const profilePrompt = profile?.systemPrompt?.trim();
   const parts: string[] = [];
   parts.push(profilePrompt || DEFAULT_SYSTEM);
-  // 已安装智能体人设（若有）追加生效；与档案提示词相同时跳过（安装时已写入档案，避免重复拼接）
-  const agentPrompt = installedAgent?.systemPrompt ? String(installedAgent.systemPrompt).trim() : '';
-  if (agentPrompt && agentPrompt !== profilePrompt) parts.push(agentPrompt);
+  // 实时时间注入（智能体可「准确知道时间」：问日期/星期/时刻、用药与预约提醒都以它为基准）
+  const now = new Date();
+  const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  parts.push(
+    `【实时时间】现在是 ${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${weekday} ${hh}:${mm}（这是确切的当前时间，涉及日期/星期/时刻/提醒的问题请以此为准，不要编造）`,
+  );
+  // 智能体页面 P0：角色/风格注入人设（角色提升为拟人身份，风格约束说话口吻）
+  if (profile?.role?.trim()) parts.push(`你的角色是：${profile.role.trim()}。`);
+  if (profile?.style?.trim()) parts.push(`你的说话风格：${profile.style.trim()}。请全程保持该风格。`);
   if (petName && petName !== '小宠') parts.push(`你的名字叫「${petName}」，用户会用这个名字称呼你。`);
   if (userNickname.trim()) parts.push(`请用「${userNickname.trim()}」来称呼用户。`);
   if (petSelfDescription) parts.push(`你的形象：${petSelfDescription}`);
@@ -90,6 +100,42 @@ export interface ChatResult {
   reasoning?: string;
 }
 
+/**
+ * 多智能体协同：档案配置了 multiConfig（外部依赖）时，聊天不走设备直连，
+ * 而是发往平台后端编排接口（子智能体调用 / 路由 / 汇总由服务端执行，可查看协同轨迹）。
+ * 需登录平台账号；子智能体的 API 在智能体配置中提供，档案自己的 Key 可缺省。
+ */
+async function orchestrateViaPlatform(history: ChatMsg[], cb: StreamCallbacks): Promise<ChatResult> {
+  const { token } = useAppStore.getState();
+  if (!token) {
+    throw new Error('多智能体协同需要通过平台账号执行：请先在聊天页登录（右上角），登录后即可与「宠物管家团」式智能体对话');
+  }
+  const profile = activeProfile();
+  if (!profile) throw new Error('当前没有可用的智能体档案');
+  const session = await ensureMultiSession(profile.id, profile.name);
+  const lastUser = [...history].reverse().find((m) => m.role === 'user');
+  const question = lastUser?.content?.trim() ?? '';
+  if (!question) throw new Error('消息内容为空');
+  const res = await multiChatSend(
+    session.id,
+    question,
+    history.slice(-20).map((m) => ({ role: m.role, content: m.content })),
+  );
+  const content = res.content ?? '';
+  if (content) cb.onContent?.(content);
+  return { content };
+}
+
+/** 该档案是否按多智能体模式走平台编排（有外部依赖占位符即认为需要） */
+function isMultiAgentMode(profile: LlmProfile | null): boolean {
+  return !!profile?.multiConfig && (profile.multiConfig.deps?.length ?? 0) > 0;
+}
+
+/** 当前档案是否具备聊天能力：已配置直连 API，或为多智能体协同（走平台编排，档案自己的 Key 可缺省） */
+export function supportsChat(): boolean {
+  return isConfigured() || isMultiAgentMode(activeProfile());
+}
+
 /** 流中断（切后台/网络抖动/网关 5xx）：区别于普通报错，触发一次自动重试 */
 export class StreamInterruptError extends Error {
   constructor(message = '网络连接中断，请重试') {
@@ -129,6 +175,10 @@ export async function requestChat(history: ChatMsg[]): Promise<ChatResult> {
   const profile = activeProfile();
   if (!profile) {
     throw new Error('尚未配置聊天 API：点聊天页顶部「未配置聊天 API」打开档案管理，在手机上直接创建（或桌面端创建后登录同一账号自动同步）');
+  }
+  // 多智能体协同：走后端编排接口（子智能体由服务端按配置调用，档案 Key 可缺省）
+  if (isMultiAgentMode(profile)) {
+    return orchestrateViaPlatform(history, {});
   }
   if (!profile.apiKey || !profile.baseUrl) {
     throw new Error(`API 档案「${profile.name}」缺少 Key 或接口地址，请在桌面端补全后重新同步`);
@@ -171,6 +221,10 @@ export async function streamChat(history: ChatMsg[], cb: StreamCallbacks): Promi
   const profile = activeProfile();
   if (!profile) {
     throw new Error('尚未配置聊天 API：点聊天页顶部「未配置聊天 API」打开档案管理，在手机上直接创建（或桌面端创建后登录同一账号自动同步）');
+  }
+  // 多智能体协同：走后端编排接口（非流式，一次返回最终答复）
+  if (isMultiAgentMode(profile)) {
+    return orchestrateViaPlatform(history, cb);
   }
   if (!profile.apiKey || !profile.baseUrl) {
     throw new Error(`API 档案「${profile.name}」缺少 Key 或接口地址，请在桌面端补全后重新同步`);

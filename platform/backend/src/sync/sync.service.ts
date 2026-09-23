@@ -108,32 +108,55 @@ export class SyncService {
     );
   }
 
-  /** 落库前：加密 config 中各 LLM profile 的 apiKey（幂等，已是密文则跳过） */
+  /** 落库前：加密 config 中的敏感字段（LLM profile 的 apiKey，及多智能体配置的 credentials 值） */
   private protectConfig(data: unknown): unknown {
     if (!data || typeof data !== 'object') return data;
     const clone = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
     if (Array.isArray(clone.llmProfiles)) {
-      clone.llmProfiles = (clone.llmProfiles as Array<Record<string, unknown>>).map((profile) =>
-        profile && typeof profile === 'object' &&
-        typeof profile.apiKey === 'string' && profile.apiKey && !this.isCiphertext(profile.apiKey)
-          ? { ...profile, apiKey: this.encryptString(profile.apiKey) }
-          : profile,
-      );
+      clone.llmProfiles = (clone.llmProfiles as Array<Record<string, unknown>>).map((profile) => {
+        const next = { ...profile };
+        if (
+          profile && typeof profile === 'object' &&
+          typeof profile.apiKey === 'string' && profile.apiKey && !this.isCiphertext(profile.apiKey)
+        ) {
+          next.apiKey = this.encryptString(profile.apiKey);
+        }
+        const mc = profile && typeof profile === 'object' ? (profile as Record<string, unknown>).multiConfig : undefined;
+        if (mc && typeof mc === 'object' && (mc as Record<string, unknown>).credentials && typeof (mc as Record<string, unknown>).credentials === 'object') {
+          const creds = (mc as { credentials: Record<string, string> }).credentials;
+          const enc: Record<string, string> = {};
+          for (const [k, v] of Object.entries(creds)) {
+            enc[k] = this.isCiphertext(v) ? v : this.encryptString(v);
+          }
+          next.multiConfig = { ...(mc as object), credentials: enc };
+        }
+        return next;
+      });
     }
     return clone;
   }
 
-  /** 响应前：解密 config 中各 LLM profile 的 apiKey（明文原样返回） */
+  /** 响应前：解密 config 中的敏感字段（apiKey 与 multiConfig.credentials 的密文还原为明文） */
   private unprotectConfig(data: unknown): unknown {
     if (!data || typeof data !== 'object') return data;
     const clone = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
     if (Array.isArray(clone.llmProfiles)) {
-      clone.llmProfiles = (clone.llmProfiles as Array<Record<string, unknown>>).map((profile) =>
-        profile && typeof profile === 'object' &&
-        typeof profile.apiKey === 'string' && this.isCiphertext(profile.apiKey)
-          ? { ...profile, apiKey: this.decryptString(profile.apiKey) }
-          : profile,
-      );
+      clone.llmProfiles = (clone.llmProfiles as Array<Record<string, unknown>>).map((profile) => {
+        const next = { ...profile };
+        if (profile && typeof profile === 'object' && typeof profile.apiKey === 'string' && this.isCiphertext(profile.apiKey)) {
+          next.apiKey = this.decryptString(profile.apiKey);
+        }
+        const mc = profile && typeof profile === 'object' ? (profile as Record<string, unknown>).multiConfig : undefined;
+        if (mc && typeof mc === 'object' && (mc as Record<string, unknown>).credentials && typeof (mc as Record<string, unknown>).credentials === 'object') {
+          const creds = (mc as { credentials: Record<string, string> }).credentials;
+          const dec: Record<string, string> = {};
+          for (const [k, v] of Object.entries(creds)) {
+            dec[k] = this.isCiphertext(v) ? this.decryptString(v) : v;
+          }
+          next.multiConfig = { ...(mc as object), credentials: dec };
+        }
+        return next;
+      });
     }
     return clone;
   }

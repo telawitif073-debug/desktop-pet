@@ -113,6 +113,26 @@ export async function downloadAsset(type: 'pet' | 'agent', id: string): Promise<
   return { url: new URL(res.url, `${root}/`).toString() };
 }
 
+export interface DepVerifyResult {
+  ok: boolean;
+  status: number | null;
+  latencyMs: number | null;
+  error?: string;
+}
+
+/** 多智能体外部依赖连通性测试：后端代发 GET 探测（8s 超时），规避设备端 CORS */
+export async function verifyDependency(options: {
+  url: string;
+  protocol?: string;
+  auth?: string;
+  apiKey?: string;
+}): Promise<DepVerifyResult> {
+  return request<DepVerifyResult>('/agents/deps/verify', {
+    method: 'POST',
+    body: JSON.stringify(options),
+  });
+}
+
 // --- 用户数据云同步（与桌面端 cloudSync.ts 对齐的 kind 命名） ---
 type SyncKind = 'config' | 'pet-state' | 'chat-history' | 'library';
 
@@ -124,5 +144,72 @@ export async function syncPut(kind: SyncKind, data: unknown): Promise<{ updatedA
   return request<{ updatedAt: string }>(`/sync/${kind}`, {
     method: 'PUT',
     body: JSON.stringify({ data }),
+  });
+}
+
+// --- 多智能体运行时（编排接口；配置在智能体档案 multiConfig 里，由服务端解密注入） ---
+export interface MultiChatTraceItem {
+  stage: string;
+  agentId?: string;
+  model?: string;
+  input?: string;
+  output?: string;
+  latencyMs?: number;
+  error?: string;
+}
+
+/** 幂等获取多智能体会话：同一智能体档案复用一条会话 */
+export async function ensureMultiSession(
+  agentProfileId: string,
+  title?: string,
+): Promise<{ id: string; title: string; messageCount?: number; createdAt: string }> {
+  return request<{ id: string; title: string; messageCount?: number; createdAt: string }>(
+    '/multi-chat/sessions',
+    { method: 'POST', body: JSON.stringify({ agentProfileId, title }) },
+  );
+}
+
+/** 多智能体会话列表（含消息数，便于排查） */
+export async function listMultiSessions(): Promise<
+  Array<{ id: string; agentProfileId: string; title: string; messageCount: number; updatedAt: string }>
+> {
+  return request<Array<{ id: string; agentProfileId: string; title: string; messageCount: number; updatedAt: string }>>(
+    '/multi-chat/sessions',
+  );
+}
+
+/** 会话历史消息（assistant 消息 meta.trace 为协同轨迹） */
+export async function listMultiMessages(
+  sessionId: string,
+): Promise<
+  Array<{
+    id: string;
+    role: string;
+    agentId: string | null;
+    content: string;
+    latencyMs: number | null;
+    error: string | null;
+    meta: { trace?: MultiChatTraceItem[] } | null;
+    createdAt: string;
+  }>
+> {
+  return request(`/multi-chat/sessions/${sessionId}/messages`);
+}
+
+/** 发送消息并执行多智能体编排（服务端返回最终答复与协同轨迹） */
+export async function multiChatSend(
+  sessionId: string,
+  content: string,
+  history?: Array<{ role: string; content: string }>,
+): Promise<{
+  id: string;
+  role: string;
+  content: string;
+  latencyMs: number | null;
+  meta: { trace?: MultiChatTraceItem[] } | null;
+}> {
+  return request(`/multi-chat/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ content, history: history ?? [] }),
   });
 }

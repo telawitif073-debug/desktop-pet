@@ -7,9 +7,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { flushAllOnQuit, scheduleUpload } from '../api/sync';
-import { DEFAULT_BASE_URL, useAppStore } from '../store/appStore';
+import { DEFAULT_BASE_URL, useAppStore, type PetAssetRef } from '../store/appStore';
 import { listVoices, speak } from '../native/Voice';
 import { APP_VERSION_NAME, checkAppUpdate } from '../update/checkUpdate';
+import { nativeVersionName } from '../native/PetInfo';
 import {
   checkOverlayPermission,
   isOverlaySupported,
@@ -143,6 +144,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
   const [accountOpen, setAccountOpen] = useState(false);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
+  const downloadedPets = useAppStore((s) => s.downloadedPets);
 
   // 聊天人设 = 当前 API 档案的系统提示词（安装智能体会写入这里，见商店安装逻辑）
   const activeProfile = llmProfiles.find((p) => p.id === llmActiveProfileId) ?? llmProfiles[0] ?? null;
@@ -294,8 +296,6 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
           </Section>
 
           <Section title="聊天">
-            <Row icon="💬" label="聊天人设" value={activeProfile ? activeProfile.name : '未配置'} showArrow onPress={() => setPersonaOpen(true)} />
-            <View style={st.divider} />
             <Row icon="🧠" label="显示思考过程" switchValue={showThinking} onSwitch={(next) => useAppStore.getState().patch({ showThinking: next })} />
             <View style={st.divider} />
             <Row
@@ -364,7 +364,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
             <Row
               icon="ⓘ"
               label="检查更新"
-              value={APP_VERSION_NAME}
+              value={nativeVersionName || APP_VERSION_NAME}
               showArrow
               onPress={() => void checkAppUpdate(false)}
               onLongPress={() => {
@@ -404,34 +404,6 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               </View>
             </ScrollView>
           </View>
-        </Modal>
-
-        {/* 聊天人设编辑 */}
-        <Modal visible={personaOpen} transparent animationType="fade" onRequestClose={() => setPersonaOpen(false)}>
-          <Pressable style={st.modalMask} onPress={() => setPersonaOpen(false)}>
-            <Pressable style={st.modalCard} onPress={() => undefined}>
-              <Text style={st.modalTitle}>聊天人设（系统提示词）</Text>
-              <TextInput
-                style={st.areaInput}
-                value={persona}
-                onChangeText={(v) => setPersona(v.slice(0, 1000))}
-                placeholder="例如：你是一只傲娇的猫娘，说话简短带喵～"
-                maxLength={1000}
-                multiline
-              />
-              <Text style={st.hint}>
-                当前档案「{activeProfile?.name ?? '-'}」的人格主体；从商店安装智能体会覆盖这里。留空则使用默认宠物人格
-              </Text>
-              <View style={st.modalBtns}>
-                <Pressable style={[st.btn, st.btnGhost]} onPress={() => setPersonaOpen(false)}>
-                  <Text style={st.btnGhostText}>取消</Text>
-                </Pressable>
-                <Pressable style={[st.btn, st.btnPrimary]} onPress={savePersona}>
-                  <Text style={st.btnPrimaryText}>保存</Text>
-                </Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
         </Modal>
 
         {/* 宠物自我描述编辑 */}
@@ -536,6 +508,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
             </Pressable>
           </Pressable>
         </Modal>
+
       </View>
     </Modal>
   );
@@ -582,4 +555,22 @@ const st = StyleSheet.create({
   stepperBtn: { width: 34, height: 30, borderRadius: 8, backgroundColor: '#F0F2F5', alignItems: 'center', justifyContent: 'center' },
   stepperBtnText: { fontSize: 18, color: '#333', lineHeight: 22 },
   stepperVal: { minWidth: 56, textAlign: 'center', fontSize: 14, color: '#333' },
+  // 智能体管理
+  agentEmpty: { paddingVertical: 16, paddingHorizontal: 10, alignItems: 'center' },
+  agentEmptyText: { fontSize: 14, color: '#999' },
+  agentPet: { fontSize: 12, color: '#9AA0A6', marginTop: 2 },
+  agentEditBox: { paddingVertical: 6, paddingHorizontal: 4 },
+  petBindRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  petBindRowActive: { backgroundColor: '#F0F6FF', borderRadius: 8, paddingHorizontal: 8, marginHorizontal: -8 },
+  petBindName: { fontSize: 14, color: '#1A1A1A', flex: 1, marginRight: 8 },
+  petBindNameActive: { color: '#4D6BFE', fontWeight: '600' },
+  petBindCheck: { fontSize: 16, color: '#4D6BFE', fontWeight: '600' },
+  // 智能体列表 Modal
+  modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  modalCloseText: { fontSize: 18, color: '#999', padding: 4 },
+  modalHint: { fontSize: 12, color: '#AAA', marginTop: 10, textAlign: 'center' },
+  agentMgrRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, marginVertical: 2, borderRadius: 8 },
+  agentMgrRowActive: { backgroundColor: '#F0F6FF' },
+  agentMgrName: { fontSize: 15, color: '#1A1A1A', fontWeight: '500' },
+  agentMgrPet: { fontSize: 12, color: '#9AA0A6', marginTop: 2 },
 });

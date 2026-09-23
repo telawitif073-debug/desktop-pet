@@ -11,6 +11,8 @@ import { AdminModule } from './admin/admin.module';
 import { ActionsModule } from './actions/actions.module';
 import { SyncModule } from './sync/sync.module';
 import { AppUpdateModule } from './app-update/app-update.module';
+import { MultiChatModule } from './multi-chat/multi-chat.module';
+import { CrashReportModule } from './crash/crash-report.module';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { AppUpdateModule } from './app-update/app-update.module';
     ActionsModule,
     SyncModule,
     AppUpdateModule,
+    MultiChatModule,
+    CrashReportModule,
   ],
 })
 export class AppModule {}

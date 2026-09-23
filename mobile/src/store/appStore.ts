@@ -1,12 +1,14 @@
 /**
- * 全局状态：账号 / 平台地址 / 同步数据（LLM 档案、宠物状态、聊天记录）/ 当前宠物与智能体。
+ * 全局状态：账号 / 平台地址 / LLM 档案（=智能体，绑定形象+独立对话）/ 宠物状态 / 当前宠物。
  * 持久化到 AsyncStorage（手动白名单序列化，any 变更 1.5s 防抖落盘）。
+ *
+ * 核心模型：**LlmProfile = 智能体**，每个档案自带人设(systemPrompt)+绑定形象(petAssetId)+独立对话。
+ * 切换档案就是切换智能体，同时自动切换宠物形象与对话记录。
  */
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DEFAULT_PET_STATE,
-  type AgentConfig,
   type ChatMsg,
   type LlmProfile,
   type PetFormat,
@@ -38,7 +40,8 @@ interface AppStore {
   llmProfiles: LlmProfile[];
   llmActiveProfileId: string;
   petSelfDescription: string;
-  installedAgent: AgentConfig | null;
+  /** 按档案（=智能体）隔离的对话记录；messages 始终是当前激活档案的消息（UI 响应式） */
+  profileMessages: Record<string, ChatMsg[]>;
   petState: PetState;
   /** 是否已从云端拉取过宠物状态（本地默认值与真实状态的区分标记） */
   petStateReady: boolean;
@@ -79,6 +82,10 @@ interface AppStore {
   updatePanelVisible: boolean;
   /** 用户关闭横幅后对同一版本的静默期（24h 内不再横幅提醒；持久化） */
   updateSnooze: { versionName: string; until: number } | null;
+  /** 最近一次成功应用的热更（用于崩溃自愈回滚检测；持久化） */
+  hotApply: { version: number; ts: number } | null;
+  /** 曾「启动异常被自动回滚」的热更版本黑名单（不再重复推送，防止更新死循环；持久化） */
+  hotRolledBack: number[];
   // actions
   setAuth: (user: PlatformUser, token: string) => void;
   logout: () => void;
@@ -104,6 +111,12 @@ interface AppStore {
   /** 按消息 id 从列表移除（互动回应失败时静默丢弃占位消息） */
   removeMessage: (id: string) => void;
   clearMessages: () => void;
+  /** 切换激活档案（=智能体）：保存当前消息、加载目标档案消息、同时切换绑定的宠物形象 */
+  switchProfile: (id: string) => void;
+  /** 启停智能体：停用当前激活档案时自动切到第一个启用档案并切形象；返回新激活 id（未变返回空串） */
+  toggleProfileEnabled: (id: string, next: boolean) => string;
+  /** 复制智能体：新 id、name 加「副本」、apiKey 一并复制，加入列表并设为激活 */
+  duplicateProfile: (id: string) => void;
   setOverlayEnabled: (enabled: boolean) => void;
   setTtsEnabled: (enabled: boolean) => void;
   hydrate: () => Promise<void>;
@@ -111,7 +124,7 @@ interface AppStore {
 
 type PersistState = Omit<
   AppStore,
-  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'feed' | 'play' | 'rest' | 'decay' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setOverlayEnabled' | 'setTtsEnabled' | 'hydrate' | 'setMoodFromChat' | 'adjustMood' | 'setPetStateEnabled' | 'addAffection' | 'removeMessage'
+  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'feed' | 'play' | 'rest' | 'decay' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setOverlayEnabled' | 'setTtsEnabled' | 'hydrate' | 'setMoodFromChat' | 'adjustMood' | 'setPetStateEnabled' | 'addAffection' | 'removeMessage' | 'switchProfile' | 'toggleProfileEnabled' | 'duplicateProfile'
 >;
 
 const PERSIST_KEYS: Array<keyof PersistState> = [
@@ -121,7 +134,7 @@ const PERSIST_KEYS: Array<keyof PersistState> = [
   'llmProfiles',
   'llmActiveProfileId',
   'petSelfDescription',
-  'installedAgent',
+  'profileMessages',
   'petState',
   'petStateReady',
   'petStateEnabled',
@@ -140,6 +153,8 @@ const PERSIST_KEYS: Array<keyof PersistState> = [
   'speechVoice',
   'chatClearConfirm',
   'updateSnooze',
+  'hotApply',
+  'hotRolledBack',
 ];
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -192,7 +207,7 @@ export const useAppStore = create<AppStore>((set) => ({
   llmProfiles: [],
   llmActiveProfileId: '',
   petSelfDescription: '',
-  installedAgent: null,
+  profileMessages: {},
   petState: { ...DEFAULT_PET_STATE },
   petStateReady: false,
   petStateEnabled: true,
@@ -214,6 +229,8 @@ export const useAppStore = create<AppStore>((set) => ({
   updateHot: null,
   updatePanelVisible: false,
   updateSnooze: null,
+  hotApply: null,
+  hotRolledBack: [],
 
   setAuth: (user, token) => set({ user, token }),
   logout: () => set({ user: null, token: '' }),
@@ -276,14 +293,21 @@ export const useAppStore = create<AppStore>((set) => ({
       petState: { ...s.petState, mood: Math.min(100, Math.max(0, s.petState.mood + delta)) },
     })),
 
-  appendMessages: (msgs) => set((s) => ({ messages: [...s.messages, ...msgs] })),
+  // 消息操作：始终作用于当前激活档案的 messages，并同步归档到 profileMessages[当前档案]
+  // （保证持久化/云同步/切档时的存档与顶层一致，避免「退出后台重进」读回空存档导致记录消失）
+  appendMessages: (msgs) =>
+    set((s) => {
+      const messages = [...s.messages, ...msgs];
+      return { messages, ...(s.llmActiveProfileId ? { profileMessages: { ...s.profileMessages, [s.llmActiveProfileId]: messages } } : {}) };
+    }),
   patchMessage: (id, partial) =>
-    set((s) => ({
-      messages: s.messages.map((m) => (m.id === id ? { ...m, ...partial } : m)),
-    })),
+    set((s) => {
+      const messages = s.messages.map((m) => (m.id === id ? { ...m, ...partial } : m));
+      return { messages, ...(s.llmActiveProfileId ? { profileMessages: { ...s.profileMessages, [s.llmActiveProfileId]: messages } } : {}) };
+    }),
   appendMessageChunk: (id, chunk) =>
-    set((s) => ({
-      messages: s.messages.map((m) =>
+    set((s) => {
+      const messages = s.messages.map((m) =>
         m.id === id
           ? {
               ...m,
@@ -291,10 +315,105 @@ export const useAppStore = create<AppStore>((set) => ({
               content: chunk.contentDelta ? m.content + chunk.contentDelta : m.content,
             }
           : m,
-      ),
+      );
+      return { messages, ...(s.llmActiveProfileId ? { profileMessages: { ...s.profileMessages, [s.llmActiveProfileId]: messages } } : {}) };
+    }),
+  clearMessages: () =>
+    set((s) => ({
+      messages: [],
+      profileMessages: { ...s.profileMessages, ...(s.llmActiveProfileId ? { [s.llmActiveProfileId]: [] } : {}) },
     })),
-  clearMessages: () => set({ messages: [] }),
-  removeMessage: (id) => set((s) => ({ messages: s.messages.filter((m) => m.id !== id) })),
+  removeMessage: (id) =>
+    set((s) => {
+      const messages = s.messages.filter((m) => m.id !== id);
+      return { messages, ...(s.llmActiveProfileId ? { profileMessages: { ...s.profileMessages, [s.llmActiveProfileId]: messages } } : {}) };
+    }),
+
+  /**
+   * 切换档案（=智能体）：
+   * 1. 把当前 messages 存到 profileMessages[当前ID]
+   * 2. 更新 llmActiveProfileId
+   * 3. 从 profileMessages[新ID] 加载 messages（没有则空数组）
+   * 4. 自动切换宠物形象到新档案绑定的 petAssetId
+   */
+  switchProfile: (id) =>
+    set((s) => {
+      if (!id || id === s.llmActiveProfileId) return s;
+      const target = s.llmProfiles.find((p) => p.id === id);
+      // 已停用的智能体不可切换（enabled false）
+      if (target && target.enabled === false) return s;
+      // 严格绑定：未配置形象 / 绑定形象未下载的智能体无法使用，禁止切换
+      const boundPet = target?.petAssetId ? s.downloadedPets.find((p) => p.id === target.petAssetId) : null;
+      if (!target?.petAssetId || !boundPet) return s;
+      // 保存当前消息
+      const profileMessages = { ...s.profileMessages, ...(s.llmActiveProfileId ? { [s.llmActiveProfileId]: s.messages } : {}) };
+      // 加载目标档案的消息
+      const messages = profileMessages[id] ?? [];
+      // 切换宠物形象到目标档案绑定的（严格跟随，不做松动保留）
+      return {
+        llmActiveProfileId: id,
+        profileMessages,
+        messages,
+        petAsset: boundPet,
+      };
+    }),
+
+  /** 启停：停用当前激活档案时自动切到第一个启用档案（清空聊天的停用即 ui 已拦截） */
+  toggleProfileEnabled: (id, next) => {
+    let newActiveId = '';
+    set((s) => {
+      const llmProfiles = s.llmProfiles.map((p) => (p.id === id ? { ...p, enabled: next } : p));
+      if (!next && id === s.llmActiveProfileId) {
+        // 停用当前激活：切到第一个启用档案
+        const nextActive = llmProfiles.find((p) => p.id !== id && p.enabled !== false) ?? null;
+        newActiveId = nextActive?.id ?? '';
+        if (!nextActive) return s; // 全停用了，保持现状（UI 应拦截）
+        const profileMessages = { ...s.profileMessages, ...{ [s.llmActiveProfileId]: s.messages } };
+        const messages = profileMessages[nextActive.id] ?? [];
+        const petAsset = nextActive.petAssetId
+          ? s.downloadedPets.find((p) => p.id === nextActive.petAssetId) ?? null
+          : s.petAsset;
+        return {
+          llmProfiles,
+          llmActiveProfileId: nextActive.id,
+          profileMessages,
+          messages,
+          ...(petAsset ? { petAsset } : {}),
+        };
+      }
+      return { llmProfiles };
+    });
+    return newActiveId;
+  },
+
+  /** 复制档案：新 id、name 加「副本」、apiKey 一并复制，加入列表并设为激活 */
+  duplicateProfile: (id) =>
+    set((s) => {
+      const src = s.llmProfiles.find((p) => p.id === id);
+      if (!src) return s;
+      const copy: LlmProfile = {
+        ...src,
+        id: `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        name: src.name ? `${src.name} 副本` : '未命名副本',
+        enabled: true,
+      };
+      const llmProfiles = [...s.llmProfiles, copy];
+      // 严格绑定：复制品继承源档案绑定的形象；仅当形象已下载时才激活复制品，否则只加入列表
+      const petAsset = copy.petAssetId
+        ? s.downloadedPets.find((p) => p.id === copy.petAssetId) ?? null
+        : null;
+      if (!petAsset) return { llmProfiles };
+      const profileMessages = { ...s.profileMessages, ...(s.llmActiveProfileId ? { [s.llmActiveProfileId]: s.messages } : {}) };
+      const messages = profileMessages[copy.id] ?? [];
+      return {
+        llmProfiles,
+        llmActiveProfileId: copy.id,
+        profileMessages,
+        messages,
+        petAsset,
+      };
+    }),
+
   setOverlayEnabled: (enabled) => set({ overlayEnabled: enabled }),
   setTtsEnabled: (enabled) => set({ ttsEnabled: enabled }),
 
@@ -302,40 +421,120 @@ export const useAppStore = create<AppStore>((set) => ({
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const data = JSON.parse(raw) as Partial<PersistState>;
+        const data = JSON.parse(raw) as Record<string, unknown>;
         // 服务器地址已内置固定（阿里云）；旧版持久化的隧道过渡地址直接归位
         const legacy = typeof data.baseUrl === 'string' && /trycloudflare\.com/i.test(data.baseUrl);
+        // 旧版迁移：installedAgents/agentMessages → llmProfiles/profileMessages
+        // 旧版 AgentConfig.systemPrompt 合入 LlmProfile.systemPrompt
+        const oldAgents = Array.isArray(data.installedAgents) ? (data.installedAgents as Array<{ id: string; name?: string; systemPrompt?: string; petAssetId?: string }>) : undefined;
+        const oldActiveAgentId = data.activeAgentId as string | undefined;
+        const oldAgentMsgs = (data.agentMessages ?? {}) as Record<string, unknown>;
+
+        // llmProfiles：优先用新版，旧版 installedAgents 有 systemPrompt 时合入对应档案
+        let llmProfiles = Array.isArray(data.llmProfiles) ? (data.llmProfiles as LlmProfile[]) : [];
+        if (oldAgents?.length && llmProfiles.length) {
+          // 尝试把旧版 agent 的 systemPrompt/petAssetId 合入 llmProfiles
+          llmProfiles = llmProfiles.map((p) => {
+            // 旧版 agent id 可能和 profile id 不同（agent id 带 "a-" 前缀）
+            // 用 name 模糊匹配 + activeAgentId 指向来关联
+            const matched = oldAgents.find((a) => {
+              if (a.id === p.id) return true;
+              if (a.name && p.name && a.name.includes(p.name)) return true;
+              return false;
+            });
+            if (matched) {
+              return {
+                ...p,
+                systemPrompt: p.systemPrompt?.trim() || matched.systemPrompt?.trim(),
+                petAssetId: p.petAssetId || matched.petAssetId,
+              };
+            }
+            return p;
+          });
+        }
+
+        // llmActiveProfileId：旧版用 activeAgentId 指向的档案
+        let llmActiveProfileId = (data.llmActiveProfileId as string | undefined) ?? '';
+        if (!llmActiveProfileId && oldActiveAgentId && llmProfiles.length) {
+          // 尝试匹配旧版 agent id 到 profile id
+          const directMatch = llmProfiles.find((p) => p.id === oldActiveAgentId);
+          llmActiveProfileId = directMatch?.id ?? llmProfiles[0]?.id ?? '';
+        }
+        if (!llmActiveProfileId && llmProfiles.length) {
+          llmActiveProfileId = llmProfiles[0].id;
+        }
+
+        // profileMessages：合并新版 + 旧版 agentMessages
+        const profileMessages: Record<string, ChatMsg[]> = {};
+        if (data.profileMessages && typeof data.profileMessages === 'object') {
+          for (const [k, v] of Object.entries(data.profileMessages as Record<string, unknown>)) {
+            profileMessages[k] = sanitizeMessages(v);
+          }
+        }
+        if (oldAgentMsgs && typeof oldAgentMsgs === 'object') {
+          for (const [k, v] of Object.entries(oldAgentMsgs)) {
+            // 旧版 agent id 转 profile id（用上面匹配过的）
+            const matchedProfile = llmProfiles.find((p) => p.id === k || oldAgents?.some((a) => a.id === k));
+            const targetId = matchedProfile?.id ?? k;
+            if (!profileMessages[targetId]) {
+              profileMessages[targetId] = sanitizeMessages(v);
+            }
+          }
+        }
+        // 顶层 messages 始终是「当前激活档案的最后快照」（发送/流式只更新 messages，不回写存档）。
+        // 恢复策略：非空的最新快照回填当前档案存档，保证「退出后台重进」不因存档缺失/陈旧而读回空记录
+        // （兼容旧版迁移：老数据只有顶层 messages，也一并归入当前档案）
+        const activeMessages = sanitizeMessages(data.messages);
+        if (llmActiveProfileId && activeMessages.length) {
+          profileMessages[llmActiveProfileId] = activeMessages;
+        }
+
+        // petAsset：严格绑定 —— 激活智能体已绑定且已下载形象时，一律以绑定形象为准（含旧版历史数据归位）
+        let petAsset = (data.petAsset as PetAssetRef | undefined) ?? null;
+        const downloadedList = Array.isArray(data.downloadedPets) ? (data.downloadedPets as PetAssetRef[]) : [];
+        if (llmActiveProfileId) {
+          const p = llmProfiles.find((x) => x.id === llmActiveProfileId);
+          if (p?.petAssetId) {
+            petAsset = downloadedList.find((x) => x.id === p.petAssetId) ?? petAsset;
+          }
+        }
+
         set({
-          user: data.user ?? null,
-          token: data.token ?? '',
-          baseUrl: legacy || !data.baseUrl ? DEFAULT_BASE_URL : data.baseUrl,
-          llmProfiles: Array.isArray(data.llmProfiles) ? data.llmProfiles : [],
-          llmActiveProfileId: data.llmActiveProfileId ?? '',
-          petSelfDescription: data.petSelfDescription ?? '',
-          installedAgent: data.installedAgent ?? null,
-          petState: { ...DEFAULT_PET_STATE, ...(data.petState ?? {}) },
-          petStateReady: data.petStateReady ?? false,
-          petStateEnabled: data.petStateEnabled ?? true,
-          moodFromChat: data.moodFromChat ?? true,
-          petAsset: data.petAsset ?? null,
-          // 旧版本只有 petAsset：迁移为已下载列表的初始成员；petAsset 始终保证在列表内（修复「我的宠物（0）」）
+          user: (data.user as PlatformUser | undefined) ?? null,
+          token: (data.token as string | undefined) ?? '',
+          baseUrl: legacy || !data.baseUrl ? DEFAULT_BASE_URL : (data.baseUrl as string),
+          llmProfiles,
+          llmActiveProfileId,
+          petSelfDescription: (data.petSelfDescription as string | undefined) ?? '',
+          profileMessages,
+          petState: { ...DEFAULT_PET_STATE, ...((data.petState as Partial<PetState> | undefined) ?? {}) },
+          petStateReady: (data.petStateReady as boolean | undefined) ?? false,
+          petStateEnabled: (data.petStateEnabled as boolean | undefined) ?? true,
+          moodFromChat: (data.moodFromChat as boolean | undefined) ?? true,
+          petAsset,
           downloadedPets: (() => {
-            const list = Array.isArray(data.downloadedPets) ? data.downloadedPets : data.petAsset ? [data.petAsset] : [];
-            const asset = data.petAsset;
-            return asset && !list.some((p) => p.id === asset.id) ? [...list, asset] : list;
+            const list = Array.isArray(data.downloadedPets)
+              ? (data.downloadedPets as PetAssetRef[])
+              : petAsset
+                ? [petAsset]
+                : [];
+            return petAsset && !list.some((p) => p.id === petAsset.id) ? [...list, petAsset] : list;
           })(),
-          messages: sanitizeMessages(data.messages),
-          overlayEnabled: data.overlayEnabled ?? false,
-          ttsEnabled: data.ttsEnabled ?? false,
-          petName: data.petName ?? '小宠',
-          userNickname: data.userNickname ?? '',
-          showThinking: data.showThinking ?? false,
+          // messages = 当前激活档案的消息（activeMessages 已回填其存档，此处直接取存档恢复）
+          messages: llmActiveProfileId ? profileMessages[llmActiveProfileId] ?? [] : activeMessages,
+          overlayEnabled: (data.overlayEnabled as boolean | undefined) ?? false,
+          ttsEnabled: (data.ttsEnabled as boolean | undefined) ?? false,
+          petName: (data.petName as string | undefined) ?? '小宠',
+          userNickname: (data.userNickname as string | undefined) ?? '',
+          showThinking: (data.showThinking as boolean | undefined) ?? false,
           thinkingLang: data.thinkingLang === 'zh' || data.thinkingLang === 'en' ? data.thinkingLang : 'auto',
           speechRate: typeof data.speechRate === 'number' ? data.speechRate : 1.0,
           speechPitch: typeof data.speechPitch === 'number' ? data.speechPitch : 1.0,
-          speechVoice: data.speechVoice ?? '',
-          chatClearConfirm: data.chatClearConfirm ?? true,
-          updateSnooze: data.updateSnooze ?? null,
+          speechVoice: (data.speechVoice as string | undefined) ?? '',
+          chatClearConfirm: (data.chatClearConfirm as boolean | undefined) ?? true,
+          updateSnooze: (data.updateSnooze as { versionName: string; until: number } | null | undefined) ?? null,
+          hotApply: (data.hotApply as { version: number; ts: number } | null | undefined) ?? null,
+          hotRolledBack: Array.isArray(data.hotRolledBack) ? (data.hotRolledBack as number[]) : [],
         });
       }
     } catch {
