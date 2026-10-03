@@ -60,7 +60,7 @@
     "kind": "imported",
     "generator": "scripts/pets/import_pet_assets.py",
     "version": "1.0.0",
-    "generatedAt": "2026-10-03"
+    "generatedAt": "2026-10-04"
   },
   "origin": {
     "provider": "github",

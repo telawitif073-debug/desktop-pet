@@ -262,14 +262,26 @@ PERMISSIVE_SPDX = {
     "CC-BY-4.0", "CC-BY-3.0", "CC-BY-SA-4.0", "MPL-2.0", "OFL-1.1", "Zlib", "WTFPL",
 }
 
+# E 层（开源非商用，见 rank-report.mjs 的 NONCOMMERCIAL_APPROVED 白名单）。
+# 关键：这类素材**不是 MIT** —— 上游 README 明确把「素材」排除在 MIT 之外并禁止商用；
+# 若沿用 GitHub 报的 SPDX（如 MIT），清单/索引/归属声明就会写下错误许可，属合规事故。
+NONCOMMERCIAL_SPDX = "SourceAvailable-NonCommercial"
+NONCOMMERCIAL_TERMS = (
+    "开源非商用（source-available, non-commercial）：允许开源使用、禁止商用；"
+    "本项目承诺永久非商用、逐文件署名原作者，并随包附上游许可原文；一旦本项目商业化必须移除"
+)
+
 
 def licence_display(row: dict, full_name: str) -> tuple[str, str]:
     """返回 (许可标识, 展示文本)。
 
-    上游 GitHub 未识别出 SPDX 时（row['license'] 为空），但判定为 A 层是因为
-    「资源目录/根目录许可文件」提供了宽松许可——此时许可标识必须写清楚，
-    否则清单/索引里会出现空许可，既不可追溯也不合规。
+    - E 层（开源非商用白名单）**不能**写上游 SPDX：上游只对代码给 MIT，素材另有「禁止商用」条款。
+    - 上游 GitHub 未识别出 SPDX 时（row['license'] 为空），但判定为 A 层是因为
+      「资源目录/根目录许可文件」提供了宽松许可——此时许可标识必须写清楚，
+      否则清单/索引里会出现空许可，既不可追溯也不合规。
     """
+    if (row.get("licenceTier") or "").strip() == "E":
+        return NONCOMMERCIAL_SPDX, f"{NONCOMMERCIAL_TERMS} — 上游 {full_name}"
     spdx = (row.get("license") or "").strip()
     hints = [h for h in (row.get("licenceHints") or []) if h in PERMISSIVE_SPDX]
     if not spdx:
@@ -277,6 +289,102 @@ def licence_display(row: dict, full_name: str) -> tuple[str, str]:
     reason = row.get("licenceReason") or ""
     text = f"{spdx} — 上游 {full_name}" + (f"（{reason}）" if reason else "")
     return spdx, text
+
+
+def upstream_licence_texts(repo_dir: str, inv: dict) -> list[tuple[str, str]]:
+    """读上游仓库里登记过的许可文件原文，返回 [(仓库内相对路径, 文本)]。"""
+    out: list[tuple[str, str]] = []
+    for lf in inv.get("licenceFiles") or []:
+        rel = (lf.get("path") or "").strip()
+        if not rel:
+            continue
+        full = os.path.join(repo_dir, rel.replace("/", os.sep))
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, encoding="utf-8", errors="replace") as fh:
+                out.append((rel, fh.read()))
+        except Exception:
+            continue
+    return out
+
+
+def ship_upstream_licences(proj: dict, repo_dir: str, inv: dict, slug: str) -> list[str]:
+    """把**上游许可原文**随资源一起放进分发目录（四项硬约束第③条，E 层尤其必需）。
+
+    放在每个宠物目录各一份（宠物是分发单元，被单独拷走时也要自带许可），
+    外加资源库的仓库目录一份。返回写入的工作区相对路径，便于在归属声明里列出。
+    """
+    texts = upstream_licence_texts(repo_dir, inv)
+    if not texts:
+        return []
+    tier = (proj.get("licenceTier") or "").strip()
+    head = [
+        "# 上游许可原文（随包分发，请勿删除）",
+        "",
+        f"- 来源仓库：{proj['fullName']}（{proj['url']}）",
+        f"- 许可分层：{tier}" + ("（开源非商用）" if tier == "E" else ""),
+        f"- 许可说明：{proj['licenseText']}",
+    ]
+    if tier == "E":
+        head += [
+            "- **本项目承诺**：永久非商用；逐文件署名原作者；随包附本许可原文；",
+            "  一旦本项目商业化，必须在发布前移除这些素材（已分发副本不可回收，故宁可保守）。",
+            "- 约束依据：`docs/upstream-pet-assets.md` §3「开源非商用」层。",
+        ]
+    body = "\n\n".join(f"## {rel}\n\n{text.strip()}" for rel, text in texts)
+    content = "\n".join(head) + "\n\n" + body + "\n"
+
+    targets = [os.path.join(BUILTIN_DIR, pet["id"], "LICENSE-UPSTREAM.md") for pet in proj["pets"]]
+    if proj["library"]:
+        targets.append(os.path.join(LIBRARY_DIR, slug, "LICENSE-UPSTREAM.md"))
+    written: list[str] = []
+    for path in targets:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        written.append(os.path.relpath(path, ROOT).replace(os.sep, "/"))
+    return written
+
+
+def prune_library_index(lib_index_path: str, target_slugs: set[str]) -> tuple[list[dict], int]:
+    """读回已有资源库索引，丢掉**本次要重建的仓库**的条目，返回 (保留条目, 丢弃数)。
+
+    旧实现是「整体 rmtree 资源库 + 索引只按本次项目重建」——用 `--only` 导入一个仓库
+    会把其余来源的几百张素材从索引里一并抹掉（文件也没了）。改为增量合并。
+    """
+    if not os.path.isfile(lib_index_path):
+        return [], 0
+    try:
+        old = load_json(lib_index_path)
+    except Exception:
+        return [], 0
+    kept: list[dict] = []
+    dropped = 0
+    for e in old.get("entries") or []:
+        f = str(e.get("file") or "")
+        if any(f.startswith(s + "/") for s in target_slugs):
+            dropped += 1
+        else:
+            kept.append(e)
+    return kept, dropped
+
+
+def prune_attribution_sections(attribution_path: str, target_names: set[str]) -> list[str]:
+    """读回归属声明里**其它来源**的段落（按 `## <fullName>` 切分），本次目标会被重新生成。"""
+    if not os.path.isfile(attribution_path):
+        return []
+    try:
+        with open(attribution_path, encoding="utf-8") as fh:
+            text = fh.read()
+    except Exception:
+        return []
+    kept: list[str] = []
+    for part in re.split(r"(?m)^## ", text)[1:]:
+        name = part.split("\n", 1)[0].strip()
+        if name and name not in target_names:
+            kept.append("## " + part.rstrip() + "\n")
+    return kept
 
 
 def main() -> int:
@@ -314,7 +422,7 @@ def main() -> int:
     if only:
         candidates = [r for r in candidates if r["fullName"] in only]
 
-    print(f"综合排序候选（宠物相关 + 可解码美术 + A 层许可）：{len(candidates)} 个")
+    print(f"综合排序候选（宠物相关 + 可解码美术 + A/E 层许可）：{len(candidates)} 个")
     print(f"本次导入目标：至多 {args.projects} 个项目（按名次下探，只有含「够格本体」的仓库才入选）\n")
 
     report = {
@@ -336,8 +444,13 @@ def main() -> int:
         "totals": {},
     }
 
+    # 本次真正会导入的仓库（--projects 截断后的名单）——增量重建只允许动它们
+    target_names = {r["fullName"] for r in candidates[: args.projects]}
+    target_slugs = {petart.slugify(n.replace("/", "-"), 40) for n in target_names}
+
     if write:
         if args.clean:
+            # 显式 --clean：整目录重建（仍保留 3 只自产宠物），用于从零复现整条流水线
             if os.path.isdir(BUILTIN_DIR):
                 for name in os.listdir(BUILTIN_DIR):
                     full = os.path.join(BUILTIN_DIR, name)
@@ -346,8 +459,11 @@ def main() -> int:
             if os.path.isdir(LIBRARY_DIR):
                 shutil.rmtree(LIBRARY_DIR)
         else:
-            # 幂等：先清掉「上一次导入产生的宠物」。否则重跑时自己的产物会被当成 id 冲突，
-            # 于是生成 -2/-3 后缀的重复宠物，旧文件（可能带着旧 bug 的封面尺寸）也会留在磁盘上。
+            # **增量重建**：只清掉「本次要重新导入的那些仓库」的产物，其余来源一律不动。
+            # 旧实现是「删掉所有 github 来源宠物 + rmtree 整个资源库」，于是 `--only=X` 会把
+            # 上一次导入的其它来源连文件带索引一起抹掉（且资源库索引随后只按本次项目重建）。
+            # 保留「先清后建」的幂等意图：同一仓库重跑仍是替换而不是产生 -2/-3 重复宠物。
+            removed_pets: list[str] = []
             if os.path.isdir(BUILTIN_DIR):
                 for name in os.listdir(BUILTIN_DIR):
                     full = os.path.join(BUILTIN_DIR, name)
@@ -355,13 +471,21 @@ def main() -> int:
                     if not os.path.isdir(full) or not os.path.isfile(mpath):
                         continue
                     try:
-                        if (load_json(mpath).get("origin") or {}).get("provider") == "github":
-                            shutil.rmtree(full)
+                        origin = load_json(mpath).get("origin") or {}
                     except Exception:
-                        pass
-            # 资源库目录完全由本脚本生成 → 整体重建，避免上一轮的孤儿文件
+                        continue
+                    if origin.get("provider") == "github" and origin.get("repo") in target_names:
+                        shutil.rmtree(full)
+                        removed_pets.append(name)
+            removed_lib_dirs: list[str] = []
             if os.path.isdir(LIBRARY_DIR):
-                shutil.rmtree(LIBRARY_DIR)
+                for slug in sorted(target_slugs):
+                    sub = os.path.join(LIBRARY_DIR, slug)
+                    if os.path.isdir(sub):
+                        shutil.rmtree(sub)
+                        removed_lib_dirs.append(slug)
+            print(f"[增量] 只重建本次目标 {len(target_names)} 个仓库"
+                  f"（清理宠物 {len(removed_pets)} 只 / 资源库目录 {len(removed_lib_dirs)} 个）；其余来源保持不变")
         os.makedirs(BUILTIN_DIR, exist_ok=True)
         os.makedirs(LIBRARY_DIR, exist_ok=True)
 
@@ -388,6 +512,7 @@ def main() -> int:
             "combined": row.get("combined"),
             "license": licence_spdx,
             "licenseText": licence_text,
+            "licenceTier": row.get("licenceTier", ""),
             "licenceReason": row.get("licenceReason", ""),
             "url": f"https://github.com/{full_name}",
             "repoDir": repo_dir,
@@ -764,6 +889,11 @@ def main() -> int:
             "excluded": len(considered) - used,
             "accounted": len(dispo) == len(considered_set),
         }
+        # 随包附上游许可原文（四项硬约束第③条；E 层尤其必需）
+        if write:
+            shipped = ship_upstream_licences(proj, repo_dir, inv, repo_slug)
+            if shipped:
+                proj["licenceFilesShipped"] = shipped
         report["projects"].append(proj)
         imported_count += 1
         print(
@@ -803,6 +933,8 @@ def main() -> int:
             json.dump({"schemaVersion": 1, "pets": pets}, fh, ensure_ascii=False, indent=2)
             fh.write("\n")
 
+        lib_index_path = os.path.join(LIBRARY_DIR, "index.json")
+        kept_entries, dropped_entries = prune_library_index(lib_index_path, target_slugs)
         lib_entries = []
         for proj in report["projects"]:
             for e in proj["library"]:
@@ -814,18 +946,32 @@ def main() -> int:
                     "source": {"repo": proj["fullName"], "url": proj["url"], "license": proj["license"],
                                "originalPath": e["source"]},
                 })
-        with open(os.path.join(LIBRARY_DIR, "index.json"), "w", encoding="utf-8") as fh:
+        # 增量合并：保留其它来源的历史条目（本轮重建的仓库已在上一步从磁盘与索引里摘除）
+        merged_entries = sorted(kept_entries + lib_entries, key=lambda e: str(e.get("file", "")))
+        with open(lib_index_path, "w", encoding="utf-8") as fh:
             json.dump({"schemaVersion": 1, "generatedAt": date.today().isoformat(),
                        "note": "上游静态美术资源库：任何一张都可在宠工坊「宠物资源」页设为形象或加为动作",
-                       "entries": lib_entries}, fh, ensure_ascii=False, indent=2)
+                       "entries": merged_entries}, fh, ensure_ascii=False, indent=2)
             fh.write("\n")
+        print(f"[增量] 资源库索引：保留其它来源 {len(kept_entries)} 条，替换本轮 {dropped_entries} 条，"
+              f"新增 {len(lib_entries)} 条 → 共 {len(merged_entries)} 条")
 
+        attribution_path = os.path.join(BUILTIN_DIR, "ATTRIBUTION.md")
+        kept_sections = prune_attribution_sections(attribution_path, target_names)
+        non_commercial_projects = [p for p in report["projects"] if p.get("licenceTier") == "E"]
         lines = ["# 第三方资源归属与许可声明（自动生成，勿手改）", "",
                  f"生成时间：{date.today().isoformat()}｜生成器：`{GENERATOR}` v{GENERATOR_VERSION}", "",
                  "本文件列出 `resources/builtin-pets/` 与 `resources/pet-asset-library/` 中来自上游开源项目的资源，",
                  "包含来源仓库、许可、原始路径与所作修改。上游代码/资源版权归原作者所有。", "",
-                 "筛选口径：仅纳入「宠物领域相关 + 有可解码美术 + 仓库级/资源级宽松许可(A 层)」的项目；",
+                 "筛选口径：仅纳入「宠物领域相关 + 有可解码美术 + 许可为 A 层（宽松）或 E 层（开源非商用白名单）」的项目；",
                  "未声明许可(B)、传染性许可(C)、受限(D) 的项目不复制资源。详见 `docs/upstream-pet-assets.md`。", ""]
+        if non_commercial_projects:
+            lines += ["## 「开源非商用」（E 层）素材的额外约束", "",
+                      "以下项目的素材**允许开源使用但禁止商用**，纳入分发的条件是这四条同时成立：", "",
+                      "1. 本项目承诺**永久非商用**；", "2. **逐文件署名**原作者；",
+                      "3. **随包附上游许可原文**（每个宠物目录下有 `LICENSE-UPSTREAM.md`）；",
+                      "4. 一旦本项目**商业化，必须在发布前移除**这些素材（已分发副本不可回收）。", "",
+                      f"涉及项目：{'、'.join(p['fullName'] for p in non_commercial_projects)}", ""]
         for proj in report["projects"]:
             if not proj["pets"] and not proj["library"]:
                 continue
@@ -833,6 +979,10 @@ def main() -> int:
             lines.append("")
             lines.append(f"- 来源：{proj['url']}")
             lines.append(f"- 许可：{proj['licenseText']}")
+            if proj.get("licenceTier") == "E":
+                lines.append("- **约束（开源非商用）**：本项目承诺永久非商用；逐文件署名原作者；随包附上游许可原文；一旦商业化必须移除。")
+            if proj.get("licenceFilesShipped"):
+                lines.append(f"- 上游许可原文已随包：{len(proj['licenceFilesShipped'])} 份（如 `{proj['licenceFilesShipped'][0]}`）")
             lines.append(f"- 综合排序：第 {proj['rank']} 名（★{proj['stars']}，下载量 {proj.get('downloads', 0)}，" f"综合分 {proj.get('combined')}）")
             for p in proj["pets"]:
                 lines.append(f"- 宠物 `{p['id']}`：{len(p['actions'])} 个动作 / {p['frameCount']} 帧；封面来自 `{p['coverFrom']}`")
@@ -842,7 +992,9 @@ def main() -> int:
             if proj["library"]:
                 lines.append(f"- 资源库：{len(proj['library'])} 张静态美术（`resources/pet-asset-library/{petart.slugify(proj['fullName'].replace('/', '-'), 40)}/`）")
             lines.append("")
-        with open(os.path.join(BUILTIN_DIR, "ATTRIBUTION.md"), "w", encoding="utf-8") as fh:
+        if kept_sections:
+            lines += ["<!-- 以下为历史导入的其它来源（本轮未重建，原样保留） -->", ""] + kept_sections
+        with open(attribution_path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
 
         with open(os.path.join(CACHE, "import-report.json"), "w", encoding="utf-8") as fh:

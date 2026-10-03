@@ -1,21 +1,24 @@
 # 第三方资源归属与许可声明（自动生成，勿手改）
 
-生成时间：2026-10-03｜生成器：`scripts/pets/import_pet_assets.py` v1.0.0
+生成时间：2026-10-04｜生成器：`scripts/pets/import_pet_assets.py` v1.0.0
 
 本文件列出 `resources/builtin-pets/` 与 `resources/pet-asset-library/` 中来自上游开源项目的资源，
 包含来源仓库、许可、原始路径与所作修改。上游代码/资源版权归原作者所有。
 
-筛选口径：仅纳入「宠物领域相关 + 有可解码美术 + 仓库级/资源级宽松许可(A 层)」的项目；
+筛选口径：仅纳入「宠物领域相关 + 有可解码美术 + 许可为 A 层（宽松）或 E 层（开源非商用白名单）」的项目；
 未声明许可(B)、传染性许可(C)、受限(D) 的项目不复制资源。详见 `docs/upstream-pet-assets.md`。
 
 ## LorisYounger/VPet
 
 - 来源：https://github.com/LorisYounger/VPet
 - 许可：Apache-2.0 — 上游 LorisYounger/VPet（仓库级宽松许可 Apache-2.0）
+- 上游许可原文已随包：2 份（如 `resources/builtin-pets/lorisyounger-vpet-squat-c-happy/LICENSE-UPSTREAM.md`）
 - 综合排序：第 32 名（★6854，下载量 0，综合分 0.438333）
 - 宠物 `lorisyounger-vpet-squat-c-happy`：1 个动作 / 8 帧；封面来自 `VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0001.png#frame0`
   - 动作 `play-png`（玩耍，8 帧）：源 `VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0001.png`（原 8 帧，归一化 alpha，缩放 0.456216）
 - 资源库：200 张静态美术（`resources/pet-asset-library/lorisyounger-vpet/`）
+
+<!-- 以下为历史导入的其它来源（本轮未重建，原样保留） -->
 
 ## Playa-Cyrene/Cyrene-Agent
 

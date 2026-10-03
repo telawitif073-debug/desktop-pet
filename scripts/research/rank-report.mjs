@@ -13,10 +13,14 @@
  * 许可分层（决定「能否把资源打包进本项目」）：
  *   A 可打包：宽松许可（MIT/Apache/BSD/ISC/CC0/CC-BY/CC-BY-SA/MPL/OFL/Unlicense…），
  *             且未被资源级线索降级；
+ *   E 开源非商用：**逐仓白名单**批准的「允许开源使用、禁止商用」项目（见 NONCOMMERCIAL_APPROVED）。
+ *             可打包，但必须同时满足四项硬约束：项目永久非商用 / 逐文件署名原作者 /
+ *             随包附上游许可原文 / 一旦商业化必须移除。未列入白名单的非商用项目仍按 D 处理。
  *   B 未声明：无 LICENSE / NOASSERTION → 只能登记不可复制（默认不打包）；
  *   C 传染性：GPL/AGPL/LGPL → 会污染本 MIT 项目，不打包；
- *   D 受限  ：All rights reserved / 非商用 / 禁止改编 / 仅供学习 → 不打包。
- *   注意：资源级线索（assets/LICENSE、README 授权段落）优先级高于仓库级 LICENSE。
+ *   D 受限  ：All rights reserved / 非商用（未获白名单）/ 禁止改编 / 仅供学习 → 不打包。
+ *   注意：资源级线索（assets/LICENSE、README 授权段落）优先级高于仓库级 LICENSE；
+ *        且「禁止商用」这类硬限制优先于任何宽松许可（同一仓库代码与素材的许可可以不同）。
  *
  * 用法：node scripts/research/rank-report.mjs [--top=40] [--eligible-only]
  */
@@ -42,7 +46,29 @@ const PERMISSIVE = new Set([
 const COPYLEFT = new Set(['GPL-2.0', 'GPL-3.0', 'AGPL-3.0', 'LGPL-2.1', 'LGPL-3.0', 'GPL-2.0-only', 'GPL-3.0-only', 'AGPL-3.0-only', 'EUPL-1.2']);
 const read = (f) => (fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf-8')) : null);
 
-const RESTRICTED_HINTS = ['Proprietary', 'NonCommercial', 'NoDerivatives', 'EducationalOnly'];
+/** 硬限制线索：命中即 D（不可打包，也不接受白名单） */
+const RESTRICTED_HINTS = ['Proprietary', 'NoDerivatives', 'EducationalOnly'];
+
+/**
+ * 「开源非商用」逐仓白名单（tier E）
+ * ===========================================================================
+ * 为什么用白名单而不是正则：README 里「允许开源使用」不是任何标准许可文本（非 SPDX），
+ * 用它做通用规则会把大量 CC-BY-NC 之类的项目一并放进来（其中不少并未授予再分发/改编权）。
+ * 逐仓登记 + 写明证据，才能做到「每个被放行的仓库都能追溯到具体依据」。
+ *
+ * 放行的前提是**四项硬约束**同时成立（见 docs/upstream-pet-assets.md §3）：
+ *   ① 本项目承诺永久非商用；② 逐文件署名原作者；③ 随包附上游许可原文；
+ *   ④ 一旦本项目商业化，必须在发布前移除这些素材（已分发副本不可回收，故宁可保守）。
+ * 新增条目请附上原文证据与决议出处，不要只写"看起来允许"。
+ */
+const NONCOMMERCIAL_APPROVED = new Map([
+  [
+    'PC2005-cloud/dsh-pet',
+    '根 README §许可：代码 MIT；素材（动画/提示词/源视频）「允许开源使用，禁止商用」+ 二创须署名原作者。' +
+      '经项目决议接受四项硬约束后放行 —— 见 .trae/documents/pet-video-actions-and-per-pet-cap.md ' +
+      '与 .trae/documents/pet-store-successor-design.md（D6/§四 第 1 条）',
+  ],
+]);
 
 /**
  * 宠物领域相关性：用于把「pet 只是子串」的项目（petl / pettingzoo / HotPEToolBox(WinPE) / petit-dom …）
@@ -112,9 +138,19 @@ function classifyLicence(searchLicence, inventory) {
   }
 
   const all = new Set([...rootHints, ...assetHints, ...readmeHints]);
+  // 硬限制优先：与「禁止商用」并存时按更严格的 D 处理
   const restricted = RESTRICTED_HINTS.filter((h) => all.has(h));
   if (restricted.length)
     return { tier: 'D', reason: `资源级/根级受限线索：${restricted.join(', ')}`, hints: [...all], evidence };
+
+  // 「禁止商用」：只有逐仓白名单里的才放行为 E，其余仍是 D（详见 NONCOMMERCIAL_APPROVED 注释）
+  if (all.has('NonCommercial')) {
+    const approval = NONCOMMERCIAL_APPROVED.get(inventory?.fullName ?? '');
+    if (approval) {
+      return { tier: 'E', reason: `开源非商用白名单：${approval}`, hints: [...all], evidence };
+    }
+    return { tier: 'D', reason: '资源级/根级受限线索：NonCommercial', hints: [...all], evidence };
+  }
 
   const spdx = (searchLicence || '').trim();
   if (spdx && PERMISSIVE.has(spdx)) return { tier: 'A', reason: `仓库级宽松许可 ${spdx}`, hints: [...all], evidence };
@@ -183,8 +219,14 @@ function main() {
       proprietaryCount: a?.proprietary?.count ?? null,
       inventoried: !!a,
       hasDecodableArt: !!a && decodableArt > 0,
-      // 入选条件：宠物领域相关 + 有可解码美术资源 + 许可 A（可打包）
-      eligible: !!a && decodableArt > 0 && licence.tier === 'A' && relevance.relevant && !c.fork && !c.archived,
+      // 入选条件：宠物领域相关 + 有可解码美术资源 + 许可 A（宽松）或 E（开源非商用白名单）
+      eligible:
+        !!a &&
+        decodableArt > 0 &&
+        (licence.tier === 'A' || licence.tier === 'E') &&
+        relevance.relevant &&
+        !c.fork &&
+        !c.archived,
     };
   });
 
@@ -210,7 +252,7 @@ function main() {
       maxStars,
       maxDownloads,
       downloadsCoverage: `${rows.filter((r) => r.downloadsKnown).length}/${rows.length} 个候选取得下载量`,
-      eligibility: '宠物领域相关（语义判定）且有可解码美术资源（魔数嗅探通过）且许可分层为 A（可打包）',
+      eligibility: '宠物领域相关（语义判定）且有可解码美术资源（魔数嗅探通过）且许可分层为 A（宽松）或 E（开源非商用白名单）',
     },
     counts: {
       candidates: rows.length,
@@ -242,7 +284,7 @@ function main() {
   md.push(`- 指标：${out.metric.combined}`);
   md.push(`- 下载量来源：${out.metric.downloads}`);
   md.push(`- 下载量覆盖：${out.metric.downloadsCoverage}`);
-  md.push(`- 候选总数：${rows.length}；已清点资源：${out.counts.inventoried}；含可解码美术：${out.counts.withDecodableArt}；可打包（A 层）：${eligible.length}`);
+  md.push(`- 候选总数：${rows.length}；已清点资源：${out.counts.inventoried}；含可解码美术：${out.counts.withDecodableArt}；可打包（A/E 层）：${eligible.length}（其中 E 开源非商用 ${out.counts.byTier?.E ?? 0}）`);
   md.push('');
   md.push('| # | 项目 | ★ | 下载量 | 综合分 | 许可 | 层级 | 可解码美术 | 入选 |');
   md.push('|---:|---|---:|---:|---:|---|---|---:|---|');

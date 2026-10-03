@@ -6,7 +6,7 @@
 
 - 检索候选：**900** 个仓库（13 组查询，关键字 `pet` 主检索 + 桌宠/虚拟宠物/电子宠物等扩展检索）
 - 资源清点：**148** 个仓库已取源并逐文件嗅探，其中含可解码美术 **129** 个
-- 宠物语义相关且有可解码美术：**73** 个；其中许可可打包（A 层）**40** 个
+- 宠物语义相关且有可解码美术：**73** 个；其中许可可打包（A 层）**41** 个
 - 实际导入项目：**12** 个（按综合分名次自上而下逐名下探，只有含「够格宠物本体」的仓库入选；已清点的候选池到此穷尽）
 - 产出内置宠物：**29** 只 / 动作 **71** 个 / 帧 **636** 帧；上游静态资源库 **286** 张
 - 逐文件处置：扫描到可解码美术 **8,603** 个 → 按分类标准判为**非宠物本体** 4,422 个（**这正是标准的目的：不入包**）、进入「宠物本体」范围 **4,181** 个
@@ -17,8 +17,8 @@
 - 综合分：`0.5 * norm(log1p(stars)) + 0.5 * norm(log1p(downloads)), norm(x)=x/max over this pool`
 - 下载量：GitHub Release asset download_count (paged/cached) + npm last-month + PyPI last-month
 - 下载量覆盖度：55/900 个候选取得下载量
-- 入选条件：宠物领域相关（语义判定）且有可解码美术资源（魔数嗅探通过）且许可分层为 A（可打包）
-- 许可层级分布（全部候选）：A=432、D=15、C=108、B=345
+- 入选条件：宠物领域相关（语义判定）且有可解码美术资源（魔数嗅探通过）且许可分层为 A（宽松）或 E（开源非商用白名单）
+- 许可层级分布（全部候选）：A=432、D=14、C=108、B=345、E=1
 
 ## 3. 入选项目（A 层许可 + 宠物相关 + 含可解码美术，按综合分排序）
 
@@ -29,6 +29,7 @@
 | 5 | [shinyflvre/Mate-Engine](https://github.com/shinyflvre/Mate-Engine) | 3,724 | 213,077 | 0.8370 | NOASSERTION | 487 | — | — | — | — | 主题标签命中宠物语义（desktop-pet） |
 | 16 | [xiufengsun/TokenTracker](https://github.com/xiufengsun/TokenTracker) | 1,944 | 47,886 | 0.7526 | MIT | 150 | — | — | — | — | 主题标签命中宠物语义（desktop-pet） |
 | 20 | [OpenPetsHQ/openpets](https://github.com/OpenPetsHQ/openpets) | 1,257 | 27,734 | 0.7118 | MIT | 133 | — | — | — | — | 主题标签命中宠物语义（desktop-pet） |
+| 21 | [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) | 971 | 28,056 | 0.6994 | MIT | 150 | — | — | — | — | 名称/简介命中宠物语义短语 |
 | 22 | [MemTensor/memmy-agent](https://github.com/MemTensor/memmy-agent) | 2,008 | 9,142 | 0.6963 | MIT | 131 | — | — | — | — | 主题标签命中宠物语义（desktop-pet） |
 | 25 | [MerZlin/dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop) | 716 | 25,748 | 0.6813 | MIT | 105 | — | — | — | — | 名称/简介命中宠物语义短语 |
 | 28 | [DoomVoss/BASpark](https://github.com/DoomVoss/BASpark) | 774 | 16,394 | 0.6694 | MIT | 2 | — | — | — | — | 主题标签命中宠物语义（desktop-pet） |
@@ -43,7 +44,6 @@
 | 82 | [cifertech/TamaFi](https://github.com/cifertech/TamaFi) | 443 | — | 0.3025 | MIT | 41 | — | — | — | — | 名称/简介命中宠物语义短语 |
 | 84 | [Ido-Levi/claude-code-tamagotchi](https://github.com/Ido-Levi/claude-code-tamagotchi) | 433 | — | 0.3014 | MIT | 3 | — | — | — | — | 名称/简介命中宠物语义短语 |
 | 89 | [HanaAyane/remielle-codex-pet](https://github.com/HanaAyane/remielle-codex-pet) | 411 | — | 0.2988 | — | 22 | 1 | 7 | 112 | 0 | 名称/简介命中宠物语义短语 |
-| 93 | [QCYTSN/dsh-dafeiyu](https://github.com/QCYTSN/dsh-dafeiyu) | 380 | — | 0.2949 | MIT | 2,660 | 16 | 16 | 244 | 1 | 主题标签命中宠物语义（desktop-pet） |
 
 > 「入选依据」列是该项目的宠物语义判定理由；许可层级与判定理由（含资源级/根级许可证据）见 `ranking.csv` 与本文第 4 节。
 > 说明：部分项目本身是 AI 助手/桌面应用，其简介或主题明确包含「desktop pet / 桌宠」并随包分发宠物美术资源，因此按规则入选；
@@ -73,7 +73,7 @@
 | 18 | [kushalpandya/Petrichor](https://github.com/kushalpandya/Petrichor) | 1,705 | 29,930 | 0.7296 | MIT | A |  | 18 |  | 宠物无关（pet 仅为子串） |
 | 19 | [Adrianotiger/desktopPet](https://github.com/Adrianotiger/desktopPet) | 1,153 | 51,664 | 0.7293 | — | B | ✔ | 187 |  | 未声明许可 |
 | 20 | [OpenPetsHQ/openpets](https://github.com/OpenPetsHQ/openpets) | 1,257 | 27,734 | 0.7118 | MIT | A | ✔ | 133 | ✔ |  |
-| 21 | [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) | 971 | 28,056 | 0.6994 | MIT | D | ✔ | 150 |  | 资源级受限声明 |
+| 21 | [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) | 971 | 28,056 | 0.6994 | MIT | E | ✔ | 150 | ✔ |  |
 | 22 | [MemTensor/memmy-agent](https://github.com/MemTensor/memmy-agent) | 2,008 | 9,142 | 0.6963 | MIT | A | ✔ | 131 | ✔ |  |
 | 23 | [NVIDIA/NVFlare](https://github.com/NVIDIA/NVFlare) | 978 | 23,969 | 0.6943 | Apache-2.0 | A |  | 425 |  | 宠物无关（pet 仅为子串） |
 | 24 | [ChaozhongLiu/DyberPet](https://github.com/ChaozhongLiu/DyberPet) | 989 | 16,383 | 0.6815 | GPL-3.0 | C | ✔ | 210 |  | 传染性许可 |
@@ -100,7 +100,7 @@
 |---|---:|---|
 | 未声明许可（B 层，只登记不复制） | 17 | Adrianotiger/desktopPet、steve02081504/fount、git-goods/gitanimals、graceavery/tamagotchiTemp、FerryYoungFan/VirtualCockroach、Kritzkingvoid/Desktop_Gremlin 等 |
 | 传染性许可 GPL/AGPL（C 层，不打包） | 12 | SlimeBoyOwO/LingChat、isHarryh/Ark-Pets、ChaozhongLiu/DyberPet、Zao-chen/ZcChat、useLexora/Lexora、ViciousSquid/Dosidicus 等 |
-| 资源级受限（D 层，不打包） | 7 | rullerzhou-afk/clawd-on-desk、PC2005-cloud/dsh-pet、OpenBMB/MiniCPM-Desk-Pet、HELPMEEADICE/BANDORI-PET-REV、Hanzoe/Pet-GPT、sam70361/aora-bot 等 |
+| 资源级受限（D 层，不打包） | 6 | rullerzhou-afk/clawd-on-desk、OpenBMB/MiniCPM-Desk-Pet、HELPMEEADICE/BANDORI-PET-REV、Hanzoe/Pet-GPT、sam70361/aora-bot、momori777/Artemis |
 | 宠物无关（pet 仅为子串） | 71 | knqyf263/pet、Farama-Foundation/PettingZoo、petl-developers/petl、crafter-station/petdex、uber/petastorm、vuejs/petite-vue 等 |
 | 宠物相关但无可解码美术 | 4 | timoschick/pet、jcrona/tamalib、wyuenho/emacs-pet、Xiazhixuan119748/codex-pet-and-imagegen |
 | 未清点（下载量/资源未采集） | 752 | WhiteHouse/petitions、spring-petclinic/spring-framework-petclinic、petitparser/dart-petitparser、wh0amitz/PetitPotato、ilime/Petal、JinJieTan/peter-code 等 |
@@ -108,7 +108,17 @@
 > 未声明许可（B）的项目**不是因为没有价值**，而是不能在 MIT 项目里再分发其美术资源。
 > 若需使用，请先向作者取得授权，再用同一脚本（`--only=owner/repo --write`）导入。
 
-### 5.1 因「没有够格的宠物本体」被跳过的项目（按名次下探）
+### 5.1 「开源非商用」（E 层）已批准项目
+
+这些项目**允许开源使用但禁止商用**，属逐仓白名单放行。放行前提是四项硬约束同时成立：
+**① 本项目永久非商用；② 逐文件署名原作者；③ 随包附上游许可原文；④ 一旦商业化必须在发布前移除。**
+硬约束与决议出处见 [../upstream-pet-assets.md](../upstream-pet-assets.md) §3。
+
+| 项目 | ★ | 可解码美术 | 放行依据 |
+|---|---:|---:|---|
+| [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) | 971 | 150 | 开源非商用白名单：根 README §许可：代码 MIT；素材（动画/提示词/源视频）「允许开源使用，禁止商用」+ 二创须署名原作者。经项目决议接受四项硬约束后放行 —— 见 .trae/documents/pet-video-actions-and-per-pet-cap.md 与 .trae/documents/pet-store-successor-design.md（D6/§四 第 1 条） |
+
+### 5.2 因「没有够格的宠物本体」被跳过的项目（按名次下探）
 
 分类标准要求资源包内至少有一个**够格本体**：模型（Live2D/3D）、动画（帧序列/动图/视频），
 或尺寸 ≥128px 且有 alpha 的静帧。只含界面件/表情包/品牌/文档图/过小图标的项目一律跳过，继续下探名次。

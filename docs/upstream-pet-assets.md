@@ -51,14 +51,15 @@ node scripts/pets/verify-package.mjs                   # 打包产物与源资�
 
 ## 3. 许可分层（决定「能不能打包进本项目」）
 
-本项目是 MIT。把第三方资源纳入分发属于再分发行为，因此**只打包 A 层**：
+本项目是 MIT。把第三方资源纳入分发属于再分发行为，因此**只打包 A 层，以及逐仓批准并经四项硬约束约束的 E 层（开源非商用）**：
 
 | 层 | 含义 | 处理 |
 |---|---|---|
 | **A 可打包** | 仓库级或**资源目录级**宽松许可（MIT / Apache-2.0 / BSD / ISC / CC0 / CC-BY(-SA) / MPL-2.0 / OFL / Unlicense…） | 归一化后纳入 `resources/`，写入归属声明 |
+| **E 开源非商用** | **允许开源使用、禁止商用**（source-available / non-commercial），且**逐个仓库**经项目决议批准（见 §3.1） | 可打包，但必须同时满足 §3.1 的四项硬约束（含随包附上游许可原文） |
 | **B 未声明** | 无 LICENSE / `NOASSERTION` | **只登记不复制**（清单里记录其美术资源存在，但不落盘分发） |
 | **C 传染性** | GPL / AGPL / LGPL | 不打包（会把 MIT 项目拖入传染性许可） |
-| **D 受限** | `All rights reserved` / 非商用 / 禁止改编 / 仅供学习 | 不打包 |
+| **D 受限** | `All rights reserved` / 非商用（**未获 E 层批准**）/ 禁止改编 / 仅供学习 | 不打包 |
 
 **判定证据只采信三处**：仓库根目录的 LICENSE/COPYING、**资源目录内**的 LICENSE、根 README 的授权段落。
 **绝不采信依赖目录里的第三方许可证**，也**不凭 `LICENSE` 文件或 GitHub 徽章一刀切**——以下两个实测案例都会让人误判为可打包（A）：
@@ -79,6 +80,35 @@ node scripts/pets/verify-package.mjs                   # 打包产物与源资�
   > 含 106 段 webm 动画 51.8 MB 与 106 张 preview GIF）；`Environment/downloads/github/dsh-pet-main/`
   > （2026-10-03 全仓 zip，**不含 webm/memes/字体**，但多出根文档、`openapi.yaml`、CI、`assets/screenshots`，
   > 且 `dsh-pet/assets/config.jsonc` 为更新版本）。
+
+### 3.1 E 层「开源非商用」：逐仓批准 + 四项硬约束
+
+「允许开源使用、禁止商用」**不是任何标准许可文本**（非 SPDX），因此**不能写成通用规则**——
+否则会把大量 `CC-BY-NC` 之类项目一并放进来，而其中不少并没有授予再分发或改编权。
+做法是**逐仓白名单**：只有被显式登记、且写明原文证据与决议出处的仓库才升为 E 层
+（实现见 `scripts/research/rank-report.mjs` 的 `NONCOMMERCIAL_APPROVED`）。
+
+**放行前提（四项硬约束，必须同时成立）**
+
+1. 本项目承诺**永久非商用**；
+2. **逐文件署名**原作者（归属声明 + 资源包内 `LICENSE-UPSTREAM.md`）；
+3. **随包附上游许可原文**（每个宠物目录与资源库仓库目录各一份 `LICENSE-UPSTREAM.md`，由导入器生成）；
+4. 一旦本项目**商业化，必须在发布前移除**这些素材 —— 已分发副本不可回收，故宁可保守。
+
+**已批准仓库**
+
+| 仓库 | 素材许可原文依据 | 决议出处 |
+|---|---|---|
+| `PC2005-cloud/dsh-pet` | 根 README §许可：代码 MIT；素材（动画/提示词/源视频）「允许开源使用，**禁止商用**」+ 二创须署名原作者地址 | `.trae/documents/pet-video-actions-and-per-pet-cap.md`、`pet-store-successor-design.md`（D6） |
+
+**落盘时的强制约定**（实现细节，避免"批准了但清单里写错许可"）
+
+- 许可标识一律写成 **`SourceAvailable-NonCommercial`**，**绝不沿用上游的 `MIT`** ——
+  上游只对代码给 MIT，素材另有「禁止商用」条款；写成 MIT 属合规事故（见 `import_pet_assets.py` 的 `licence_display`）。
+- `ATTRIBUTION.md` 会为 E 层项目单独输出一节约束说明，逐项目标注四项硬约束。
+- E 层素材的**分发方式逐案决定**：本轮 dsh-pet 的 106 段动画走「宠物包 + 平台商店按需下载」，不随安装包内置
+  （见 `.trae/documents/pet-video-actions-and-per-pet-cap.md`）。导入器若为 E 层仓库产出宠物，
+  同样会在宠物目录写入 `LICENSE-UPSTREAM.md` 并进 `ATTRIBUTION.md`——即"约束随资源走"。
 
 ---
 

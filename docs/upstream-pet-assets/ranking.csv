@@ -19,7 +19,7 @@ rank,fullName,stars,releaseDownloads,npmMonthly,pypiMonthly,downloads,downloadsK
 18,kushalpandya/Petrichor,1705,29930,,,29930,true,0.729621,MIT,A,false,true,true,18,18,0,0,false,31.4,Swift
 19,Adrianotiger/desktopPet,1153,51664,,,51664,true,0.729304,,B,true,true,true,193,187,0,0,false,15.4,C#
 20,OpenPetsHQ/openpets,1257,27734,,,27734,true,0.711839,MIT,A,true,true,true,135,133,10,0,true,67.2,TypeScript
-21,PC2005-cloud/dsh-pet,971,177,27879,,28056,true,0.699443,MIT,D,true,true,true,150,150,0,0,false,130.7,TypeScript
+21,PC2005-cloud/dsh-pet,971,177,27879,,28056,true,0.699443,MIT,E,true,true,true,150,150,0,0,true,130.7,TypeScript
 22,MemTensor/memmy-agent,2008,9142,,,9142,true,0.696276,MIT,A,true,false,true,132,131,0,0,true,134,TypeScript
 23,NVIDIA/NVFlare,978,0,,23969,23969,true,0.694295,Apache-2.0,A,false,true,true,429,425,0,1,false,153.9,Python
 24,ChaozhongLiu/DyberPet,989,16383,,,16383,true,0.681548,GPL-3.0,C,true,true,true,211,210,1,0,false,119.4,Python

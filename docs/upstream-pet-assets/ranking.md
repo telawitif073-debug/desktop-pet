@@ -1,11 +1,11 @@
 # GitHub「pet」项目综合排序（星标 + 下载频次）
 
-生成时间：2026-10-02T16:32:14.935Z
+生成时间：2026-10-03T22:58:43.132Z
 
 - 指标：0.5 * norm(log1p(stars)) + 0.5 * norm(log1p(downloads)), norm(x)=x/max over this pool
 - 下载量来源：GitHub Release asset download_count (paged/cached) + npm last-month + PyPI last-month
 - 下载量覆盖：55/900 个候选取得下载量
-- 候选总数：900；已清点资源：148；含可解码美术：129；可打包（A 层）：40
+- 候选总数：900；已清点资源：148；含可解码美术：129；可打包（A/E 层）：41（其中 E 开源非商用 1）
 
 | # | 项目 | ★ | 下载量 | 综合分 | 许可 | 层级 | 可解码美术 | 入选 |
 |---:|---|---:|---:|---:|---|---|---:|---|
@@ -29,7 +29,7 @@
 | 18 | kushalpandya/Petrichor | 1705 | 29930 | 0.7296 | MIT | A | 18 |  |
 | 19 | Adrianotiger/desktopPet | 1153 | 51664 | 0.7293 | — | B | 187 |  |
 | 20 | OpenPetsHQ/openpets | 1257 | 27734 | 0.7118 | MIT | A | 133 | ✔ |
-| 21 | PC2005-cloud/dsh-pet | 971 | 28056 | 0.6994 | MIT | D | 150 |  |
+| 21 | PC2005-cloud/dsh-pet | 971 | 28056 | 0.6994 | MIT | E | 150 | ✔ |
 | 22 | MemTensor/memmy-agent | 2008 | 9142 | 0.6963 | MIT | A | 131 | ✔ |
 | 23 | NVIDIA/NVFlare | 978 | 23969 | 0.6943 | Apache-2.0 | A | 425 |  |
 | 24 | ChaozhongLiu/DyberPet | 989 | 16383 | 0.6815 | GPL-3.0 | C | 210 |  |
@@ -49,8 +49,3 @@
 | 38 | MetalPetal/MetalPetal | 2189 | 0 | 0.3817 | MIT | A | 32 |  |
 | 39 | CollaboratingPlatypus/PetaPoco | 2144 | 0 | 0.3807 | NOASSERTION | A | 8 |  |
 | 40 | git-goods/gitanimals | 1782 | 0 | 0.3715 | NOASSERTION | B | 215 |  |
-| 41 | timoschick/pet | 1623 | 0 | 0.3669 | Apache-2.0 | A | 0 |  |
-| 42 | AlekPet/ComfyUI_Custom_Nodes_AlekPet | 1532 | 0 | 0.3640 | MIT | A | 238 |  |
-| 43 | afx-team/petercat | 1494 | 0 | 0.3628 | MIT | A | 37 |  |
-| 44 | graceavery/tamagotchiTemp | 1173 | 0 | 0.3508 | — | B | 2 |  |
-| 45 | WhiteHouse/petitions | 1147 | 0 | 0.3497 | — | B | — |  |

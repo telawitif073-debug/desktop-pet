@@ -39,6 +39,8 @@ const buckets = {
   '宠物相关但无可解码美术': rows.filter((r) => r.petRelevant && r.inventoried && !r.hasDecodableArt),
   '未清点（下载量/资源未采集）': rows.filter((r) => !r.inventoried),
 };
+// E 层是「放行」而非「排除」，故不进上面的排除桶，单独列在下面
+const nonCommercialApproved = rows.filter((r) => r.petRelevant && r.inventoried && r.licenceTier === 'E');
 
 const md = [];
 const pct = (a, b) => (b ? `${((a / b) * 100).toFixed(1)}%` : '—');
@@ -127,11 +129,24 @@ md.push('');
 md.push('> 未声明许可（B）的项目**不是因为没有价值**，而是不能在 MIT 项目里再分发其美术资源。');
 md.push('> 若需使用，请先向作者取得授权，再用同一脚本（`--only=owner/repo --write`）导入。');
 md.push('');
+if (nonCommercialApproved.length) {
+  md.push('### 5.1 「开源非商用」（E 层）已批准项目', '');
+  md.push('这些项目**允许开源使用但禁止商用**，属逐仓白名单放行。放行前提是四项硬约束同时成立：');
+  md.push('**① 本项目永久非商用；② 逐文件署名原作者；③ 随包附上游许可原文；④ 一旦商业化必须在发布前移除。**');
+  md.push('硬约束与决议出处见 [../upstream-pet-assets.md](../upstream-pet-assets.md) §3。');
+  md.push('');
+  md.push('| 项目 | ★ | 可解码美术 | 放行依据 |');
+  md.push('|---|---:|---:|---|');
+  for (const r of nonCommercialApproved) {
+    md.push(`| [${r.fullName}](https://github.com/${r.fullName}) | ${fmt(r.stars)} | ${r.decodableArt ?? '—'} | ${r.licenceReason ?? ''} |`);
+  }
+  md.push('');
+}
 
-// ---- 5.1 包级门槛：因「没有够格本体」被跳过的名次 ----
+// ---- 5.2 包级门槛：因「没有够格本体」被跳过的名次 ----
 const skipped = importReport?.skipped ?? [];
 if (skipped.length) {
-  md.push('### 5.1 因「没有够格的宠物本体」被跳过的项目（按名次下探）');
+  md.push('### 5.2 因「没有够格的宠物本体」被跳过的项目（按名次下探）');
   md.push('');
   md.push('分类标准要求资源包内至少有一个**够格本体**：模型（Live2D/3D）、动画（帧序列/动图/视频），');
   md.push('或尺寸 ≥128px 且有 alpha 的静帧。只含界面件/表情包/品牌/文档图/过小图标的项目一律跳过，继续下探名次。');
