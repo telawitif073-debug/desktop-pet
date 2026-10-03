@@ -55,12 +55,18 @@
 | 阶段 | 目标 | 关键文件 | 验证 | 回滚点 |
 |---|---|---|---|---|
 | **P0** ✅ | **去风险 spike**：确认 Electron 44 里透明 VP9 webm 真能出 alpha | 临时 spike 脚本（不入库） | **已通过**，结论见 §六 风险 1 | 无改动，零成本 |
-| **P1** | 合规层：新增「开源非商用」层 + 四项硬约束 + 许可原文随包；导入器改**增量合并** | `scripts/research/rank-report.mjs`、`scripts/pets/import_pet_assets.py`、`docs/upstream-pet-assets.md` | `--dry-run` + 前后 sha256 清单比对，证明既有 6 来源/286 张**零变动** | tag + 备份 |
+| **P1** ✅ | 合规层：新增「开源非商用」层（E 层）+ 四项硬约束 + 许可原文随包；导入器改**增量合并** | `scripts/research/rank-report.mjs`、`scripts/pets/{import_pet_assets.py,write-report.mjs}`、`docs/upstream-pet-assets.md` | 900 行逐行比对**只 dsh-pet 一行 D→E**；VPet 重跑 added=2 / **removed=0** / 其余 5 来源字节不变；LEDGER PASS；vitest 332 | tag `pet-assets-tier-e-done` |
 | **P2** ✅ | **每宠动作上限**语义重构（128/15 分账）+ UI 分组、子菜单与提示词裁剪、安装失败不再静默 | 见 §四 P2 | `tsc` 0 错；vitest **306 全绿**（+3 配额用例） | tag `pet-actions-per-pet-cap-done` |
 | **P3** ✅ | 动作模型支持 `kind:'video'`（共享包 schemaVersion 2→3 + 迁移 + 校验） | `packages/pet-domain/src/actionModel.ts`(+spec)、`src/main/config.ts`、`src/global.d.ts` | tsc 0 错；vitest **310**（+4：迁移/校验/video 合法） | 同 P2 |
 | **P4** ✅ | 视频文件存储与协议（`petaction://` 支持 Range + `video/webm`） | **Range 抽成可单测的 `src/main/localMedia.ts`**（原计划写在 `main.ts` 里）、`src/main/petActions.ts` 新增 `addVideoAction` | tsc 0 错；`localMedia.spec` **10 用例**、`addVideoAction` **6 用例** | 同 P2 |
 | **P5** ✅ | 渲染端播放视频动作（与帧动作统一接口） | `src/App.tsx`（主路径 + Live2D lite 路径都接了）、新增 `src/renderer/videoActionPlayer.ts` | tsc 0 错；`videoActionPlayer.spec` **6 用例**（最小假 DOM，无新依赖）；**真机 GUI 冒烟仍待做** | 同 P2 |
 | **P6** | 回到商店主线：step 3 服务端包校验 → step 4 桌面 pack 流程 → 组装并发布 dsh-pet pet pack | 见 `pet-store-successor-design.md` §四 第 3~4 步 + 本方案 P1 的导入器 | 服务端 `evaluatePetPack` 通过、客户端安装后可播、sha256 一致 | 独立阶段，各自 tag |
+
+> **P1 实测补充（影响 P6 做法）**：`--dry-run --only PC2005-cloud/dsh-pet` 显示该仓库
+> **整仓被包级门槛跳过** —— 106 张 preview GIF 被角色标准判为 `body-cover`（`assets/preview/` 是封面目录），
+> 其余为 meme 27 / ui 8 / document 8 / branding 1，**没有任何够格本体**（considered 0 / used 0）。
+> 结论：dsh-pet 的素材**不会**经既有管线落地，106 段动画只能走「宠物包 + 视频动作」（本就是既定方案）；
+> 若还想把它的 memes/pic 收进静态资源库，需另行放宽「无够格本体即整仓跳过」这条门槛（本阶段未改）。
 
 **推荐顺序**：`P0 →（用户口径的「先提上限」）P2 → P3 → P4 → P5 → P1 → P6`。
 P1 与桌面端改动彼此独立，可并行或提前；P6 依赖商店主线 step 3/4。
