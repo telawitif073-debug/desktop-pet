@@ -54,16 +54,19 @@
 
 单一入口，对外只暴露一条 import 路径：`import { feed, evaluatePetPack, resolvePlayback } from '../pet'`。
 
-**最终结构（Phase 3 完成后，即当前仓库实况）**：
+**当前结构（Phase 3 建立模块 → 共享包抽象后，实现迁至 `packages/pet-domain/`）**：
 
 ```
-src/pet/
-├─ index.ts          统一出口（facade）：只做再导出，不含逻辑
-├─ vitals.ts         四维：规则/钳制/默认/序列化/归一化（唯一事实来源，桌面与移动共用）
-├─ resource.ts       宠物本体资源识别与包级判定（原 src/shared/petResource.ts）
-├─ actionModel.ts    动作配置模型（原 src/shared/petActionModel.ts）
-├─ playback.ts       动作播放决策（原 src/shared/petPlayback.ts）
-└─ *.spec.ts         对应单测（随实现一起搬迁）
+packages/pet-domain/
+├─ src/
+│  ├─ index.ts        统一出口（facade）：只做再导出，不含逻辑
+│  ├─ vitals.ts       四维：规则/钳制/默认/序列化/归一化（唯一事实来源，桌面与移动共用）
+│  ├─ resource.ts     宠物本体资源识别与包级判定（原 src/shared/petResource.ts）
+│  ├─ actionModel.ts  动作配置模型（原 src/shared/petActionModel.ts）
+│  ├─ playback.ts     动作播放决策（原 src/shared/petPlayback.ts）
+│  └─ *.spec.ts       对应单测（随实现一起搬迁，由仓库根 vitest 统一执行）
+├─ package.json / tsconfig.json / README.md
+└─ （桌面侧 src/pet/ 保留同名再导出 shim，既有 import 路径不变）
 ```
 
 两点与初版设计的出入（记录取舍）：

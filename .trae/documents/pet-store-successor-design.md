@@ -125,12 +125,19 @@ POST /pet-packs (multipart: pack.zip, 可选 preview.png, + 文本字段)
 | c（不推荐） | 后端再实现一份 | 已证明会口径分裂（Python ⇄ TS 那次目录归一化不一致），不再重犯 |
 
 建议：**先用 a 落地跑通，再单独一个提交升级为 b**（与本次"分阶段"的一贯做法一致）。
+> 实施结果（见 §四 第 1 条）：评估后**直接采用 b**——a 的 `paths` 只解决解析，
+> 解决不了 `nest build` 的产物布局，最终仍要落到 b 的机制上。
 
 ---
 
 ## 四、实施清单（按依赖顺序）
 
 1. **抽象共享包**（选 a 或 b）→ 后端可 `import { evaluatePetPack } from '@pet/resource'`。
+   **【已完成，直接采用 b】**：落地为 `packages/pet-domain/`（源）＋ 桌面 `src/pet/**` 再导出 shim
+   ＋ 移动端 metro `watchFolders` 增加 `packages/` ＋ 后端 `platform/backend/src/pet-domain/`
+   （由 `scripts/sync-pet-domain.mjs` 生成、已 gitignore）。
+   跳过了 §3.4 的「先 a 后 b」：a 的 `paths` 方案仍解决不了 `nest build` 的 `rootDir` 产物布局问题，
+   等于白做一遍；直接 b 的同步复制已在后端 `tsc`/`jest`/`nest build`/3199 冷启动上验证通过。
 2. **后端**：`pet_packs` 实体 + module/service/controller + DTO；`admin` 支持 `pet_pack` 审核；
    `reviews` / `download_records` 枚举回补 `'pet'`；配套 migration（建表 + 枚举回补 + 索引）。
 3. **服务端包校验**：新增 `pack-inspection.ts`（解包 + 肩部探测 + 调 `evaluatePetPack`），
