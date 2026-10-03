@@ -61,10 +61,24 @@ node scripts/pets/verify-package.mjs                   # 打包产物与源资�
 | **D 受限** | `All rights reserved` / 非商用 / 禁止改编 / 仅供学习 | 不打包 |
 
 **判定证据只采信三处**：仓库根目录的 LICENSE/COPYING、**资源目录内**的 LICENSE、根 README 的授权段落。
-**绝不采信依赖目录里的第三方许可证**——否则会出现两类反向错误（实测中都发生过）：
+**绝不采信依赖目录里的第三方许可证**，也**不凭 `LICENSE` 文件或 GitHub 徽章一刀切**——以下两个实测案例都会让人误判为可打包（A）：
 
 - `Adrianotiger/desktopPet` 本身无 LICENSE，但仓库里 vendored 依赖带 MIT 文件 → 早期规则误判为 A（**实际不可打包**）；
-- `PC2005-cloud/dsh-pet` 代码是 MIT，但仓库内有 `All rights reserved` 声明 → 早期规则误判为 D（**保守不打包**）。
+- `PC2005-cloud/dsh-pet` 仓库根与 `dsh-pet/` 各有一份 **MIT LICENSE**（两份字节相同，仅覆盖**代码**），
+  但**根 README 与 `dsh-pet/README.md` 的「许可」段落把素材显式排除在 MIT 之外**：
+  「素材（动画/提示词/源视频）：允许开源使用，**禁止商用**」，并要求二创作品在介绍/展示/分发处署名原作者地址。
+  全树再无其他许可文件（**资源目录内没有许可文件，第 ② 条证据为空**）。
+  → 只看 `LICENSE` 会判成 A；按第 ③ 条证据（README 授权段落）才得到正确的 **D 层（受限·非商用）**，素材不打包。
+  **教训：同一仓库里「代码」与「素材」的许可可以不同，必须分别判定。**
+
+  > 更正记录（2026-10-03）：本行此前写作「仓库内有 `All rights reserved` 声明 → 早期规则误判为 D（**保守不打包**）」。
+  > 按上游原文核对：对整仓检索 `All rights reserved` 为 **0 命中**，D 的真实依据是 README 的「禁止商用」——
+  > 即 **D 的结论本身正确**，错的只是证据描述与「误判」的方向（不是误判为 D，而是**差点误判为 A**）。本文档其余口径不变。
+  >
+  > 本地留档（两份不同版本，勿混用）：`Environment/downloads/github/dsh-pet/`（2026-10-02 抓取，
+  > 含 106 段 webm 动画 51.8 MB 与 106 张 preview GIF）；`Environment/downloads/github/dsh-pet-main/`
+  > （2026-10-03 全仓 zip，**不含 webm/memes/字体**，但多出根文档、`openapi.yaml`、CI、`assets/screenshots`，
+  > 且 `dsh-pet/assets/config.jsonc` 为更新版本）。
 
 ---
 
