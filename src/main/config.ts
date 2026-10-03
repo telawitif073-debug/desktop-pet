@@ -2,6 +2,8 @@ import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { validatePetActionModel, type PetActionModel } from '../pet'; // 宠物主体功能模块（统一入口）
+// 动作配额的本体（渲染端也要用，故放在 shared；见下方再导出）
+import { ACTIONS_OWNER_USER, PET_ACTIONS_MAX_USER, actionOwnerKey, actionQuotaLimit } from '../shared/actionQuota';
 
 export interface LLMConfig {
   provider: string;
@@ -293,8 +295,42 @@ export interface PetAction {
   createdAt: number;
 }
 
-/** 动作数量上限 */
-export const PET_ACTIONS_MAX = 15;
+/**
+ * 动作配额：**按归属分别计数**，用户自建动作与宠物自带动作互不挤占。
+ * 常量本体与纯函数在 `src/shared/actionQuota.ts`（渲染端也要用，不能 import 本文件）。
+ */
+export {
+  ACTIONS_OWNER_USER,
+  PET_ACTIONS_MAX_USER,
+  PET_ACTIONS_MAX_PER_PET,
+  actionOwnerKey,
+  actionQuotaLimit,
+  actionOwnerLabel,
+} from '../shared/actionQuota';
+
+/** @deprecated 语义已拆分，请用 `PET_ACTIONS_MAX_USER`（用户自建动作）或
+ *  `PET_ACTIONS_MAX_PER_PET`（单只宠物自带动作）。保留仅为兼容历史引用。 */
+export const PET_ACTIONS_MAX = PET_ACTIONS_MAX_USER;
+
+/**
+ * 动作配额校验（按归属分别计数）。`incoming` 只需给出归属字段。
+ * 抛错文案区分「我的动作」与「该宠物动作」，便于用户判断该删谁。
+ */
+export function assertActionQuota(
+  existing: ReadonlyArray<PetAction>,
+  incoming: Pick<PetAction, 'builtinPetId' | 'petAssetId'>,
+): void {
+  const owner = actionOwnerKey(incoming);
+  const isUser = owner === ACTIONS_OWNER_USER;
+  const limit = actionQuotaLimit(owner);
+  const used = existing.filter((a) => actionOwnerKey(a) === owner).length;
+  if (used >= limit) {
+    const who = isUser ? '我的动作' : '该宠物动作';
+    throw new Error(
+      `${who}数量已达上限（${limit} 个），请先删除部分${isUser ? '自定义' : '该宠物的'}动作`,
+    );
+  }
+}
 
 /** 互动功能绑定的动作 id：喂食/休息/玩耍触发时优先播放绑定的资源库动作，未绑定回退同名动作 */
 export interface PetActionBindings {

@@ -4,6 +4,8 @@ import { ChoiceRow, FileField, PublishLayout, usePublish } from './common';
 import SubjectCutout from '../SubjectCutout';
 import { isImageName, needsPreview } from '../../renderer/publishFiles';
 import type { PublishFilePayload, PublishPayload } from '../../global.d';
+// 发布侧「随宠物附带动作」上限（与用户自建动作配额同为 15，故复用同一常量而非另写字面量）
+import { PET_ACTIONS_MAX_USER } from '../../shared/actionQuota';
 
 /**
  * 「添加宠物资源」：宠物形象发布（原通用发布表单的宠物部分）。
@@ -145,9 +147,9 @@ const PetPublishForm = ({ onNotify }: { onNotify: (text: string) => void }) => {
       <div style={{ marginBottom: 10, padding: 10, border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, color: C.text, fontWeight: 600 }}>附带动作（可选，随宠物上传）</span>
-          <span style={{ fontSize: 11, color: C.sub }}>最多 15 个，随宠物安装、不可跨宠物使用</span>
+          <span style={{ fontSize: 11, color: C.sub }}>最多 {PET_ACTIONS_MAX_USER} 个，随宠物安装、不可跨宠物使用</span>
           <div style={{ flex: 1 }} />
-          <button type="button" style={smallBtn()} onClick={addAction} disabled={actions.length >= 15}>
+          <button type="button" style={smallBtn()} onClick={addAction} disabled={actions.length >= PET_ACTIONS_MAX_USER}>
             添加动作
           </button>
         </div>

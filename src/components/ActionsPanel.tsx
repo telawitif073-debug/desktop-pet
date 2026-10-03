@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PetAction } from '../global.d';
+import { ACTIONS_OWNER_USER, actionOwnerKey, actionOwnerLabel, actionQuotaLimit } from '../shared/actionQuota';
 
 interface Props {
   onClose: () => void;
@@ -21,9 +22,13 @@ const dangerBtnStyle: React.CSSProperties = {
   ...ghostBtnStyle, color: '#ff8080', borderColor: '#6a3a3a', padding: '3px 8px',
 };
 
-/** 动作管理面板：手动上传帧序列 / 播放 / 删除（上限 15 个） */
+/** 动作管理面板：手动上传帧序列 / 播放 / 删除。
+ *  配额按**归属**分组显示：用户自建动作（上限 PET_ACTIONS_MAX_USER）与宠物自带动作
+ *  （单宠上限 PET_ACTIONS_MAX_PER_PET）各算各的，互不挤占。 */
 const ActionsPanel = ({ onClose, onPlay }: Props) => {
   const [actions, setActions] = useState<PetAction[]>([]);
+  const [petAssetId, setPetAssetId] = useState<string | null>(null);
+  const [petDisplayName, setPetDisplayName] = useState<string | null>(null);
   const [uploadName, setUploadName] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
@@ -41,8 +46,29 @@ const ActionsPanel = ({ onClose, onPlay }: Props) => {
     try {
       const config = await window.electronAPI?.config.get();
       setActions((config?.petActions as PetAction[]) || []);
+      setPetAssetId(config?.petAssetId || null);
+      setPetDisplayName(config?.petAssetName || config?.builtinPet || null);
     } catch { /* 非电子环境忽略 */ }
   };
+
+  /** 按归属分组（用户组恒存在，便于随时看到自己的配额） */
+  const groups = useMemo(() => {
+    const map = new Map<string, PetAction[]>();
+    for (const action of actions) {
+      const key = actionOwnerKey(action);
+      const list = map.get(key);
+      if (list) list.push(action);
+      else map.set(key, [action]);
+    }
+    if (!map.has(ACTIONS_OWNER_USER)) map.set(ACTIONS_OWNER_USER, []);
+    return [...map.entries()].sort(([a], [b]) =>
+      a === ACTIONS_OWNER_USER ? -1 : b === ACTIONS_OWNER_USER ? 1 : a.localeCompare(b),
+    );
+  }, [actions]);
+
+  /** 归属显示名：用户组固定文案，宠物组优先用资源名，否则退回 id */
+  const labelOf = (owner: string) =>
+    actionOwnerLabel(owner, owner === petAssetId ? petDisplayName : owner);
 
   useEffect(() => {
     reload();
@@ -86,7 +112,14 @@ const ActionsPanel = ({ onClose, onPlay }: Props) => {
   return (
     <div style={{ width: 350, height: '100%', background: '#181818', borderRight: '1px solid #333', display: 'flex', flexDirection: 'column', color: '#eee' }}>
       <div style={{ padding: '10px 12px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>动作管理（{actions.length}/15）</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <span style={{ fontWeight: 'bold', fontSize: '14px' }}>动作管理（{actions.length}）</span>
+          <span style={{ fontSize: 11, color: '#8a8a8a' }}>
+            {groups
+              .map(([owner, list]) => `${labelOf(owner)} ${list.length}/${actionQuotaLimit(owner)}`)
+              .join('　')}
+          </span>
+        </div>
         <button type="button" onClick={onClose} style={{ ...ghostBtnStyle, padding: '2px 8px' }}>收起</button>
       </div>
 
@@ -128,16 +161,23 @@ const ActionsPanel = ({ onClose, onPlay }: Props) => {
             还没有动作，先上传帧图
           </div>
         )}
-        {actions.map((a) => (
-          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', marginBottom: '6px', background: '#252525', borderRadius: '4px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '13px', color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
-              <div style={{ fontSize: '11px', color: '#888' }}>
-                {a.kind === 'clip' ? `模型动画（${a.clipName}）` : `帧序列（${a.frameFiles?.length || 0} 帧）`} · {a.source === 'ai' ? 'AI 生成' : a.source === 'platform' ? '资源库' : '手动上传'}
-              </div>
+        {groups.filter(([, list]) => list.length > 0).map(([owner, list]) => (
+          <div key={owner}>
+            <div style={{ fontSize: 11, color: '#7ec8ff', margin: '4px 0 6px' }}>
+              {labelOf(owner)} {list.length}/{actionQuotaLimit(owner)}
             </div>
-            <button type="button" onClick={() => onPlay(a.id)} style={{ ...ghostBtnStyle, padding: '3px 8px' }}>播放</button>
-            <button type="button" onClick={() => handleRemove(a.id, a.name)} style={dangerBtnStyle}>删除</button>
+            {list.map((a) => (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', marginBottom: '6px', background: '#252525', borderRadius: '4px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '13px', color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                  <div style={{ fontSize: '11px', color: '#888' }}>
+                    {a.kind === 'clip' ? `模型动画（${a.clipName}）` : `帧序列（${a.frameFiles?.length || 0} 帧）`} · {a.source === 'ai' ? 'AI 生成' : a.source === 'platform' ? '资源库' : '手动上传'}
+                  </div>
+                </div>
+                <button type="button" onClick={() => onPlay(a.id)} style={{ ...ghostBtnStyle, padding: '3px 8px' }}>播放</button>
+                <button type="button" onClick={() => handleRemove(a.id, a.name)} style={dangerBtnStyle}>删除</button>
+              </div>
+            ))}
           </div>
         ))}
       </div>

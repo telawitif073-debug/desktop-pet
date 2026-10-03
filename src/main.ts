@@ -163,15 +163,32 @@ const createWindow = () => {
 
 // --- IPC Handlers ---
 
-/** 在系统提示后注入可用动作列表：智能体可通过回复末尾的 [动作:名称] 标记控制宠物播放动画 */
+/** 注入到系统提示的动作名上限：动作可能很多（单宠上限 128），全量注入会撑爆提示词 */
+const ACTION_PROMPT_LIMIT = 30;
+
+/** 在系统提示后注入可用动作列表：智能体可通过回复末尾的 [动作:名称] 标记控制宠物播放动画。
+ *  按「绑定的互动动作全量 + 其余取最近创建的 N 个」截断，避免动作多时提示词线性膨胀。 */
 function withActionPrompt(messages: ChatMessage[]): void {
-  const actions = loadConfig().petActions;
+  const config = loadConfig();
+  const actions = config.petActions;
   if (!actions.length) return;
   const sys = messages.find((m) => m.role === 'system');
   if (!sys) return;
+  const bindings = config.petActionBindings || {};
+  const boundIds = new Set([bindings.feed, bindings.rest, bindings.play].filter(Boolean) as string[]);
+  const bound = actions.filter((a) => boundIds.has(a.id));
+  const others = actions
+    .filter((a) => !boundIds.has(a.id))
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, Math.max(0, ACTION_PROMPT_LIMIT - bound.length));
+  const names = [...bound, ...others].map((a) => a.name);
+  const tail =
+    names.length < actions.length
+      ? `（动作较多，只列出常用的 ${names.length} 个；未列出的名字请勿使用）`
+      : '';
   sys.content +=
     `\n\n你可以控制桌面宠物的动画播放：在回复的最末尾追加 [动作:动作名] 标记即可触发对应动作（标记会被剥离，不会显示给用户）。` +
-    `动作名必须严格从以下列表中选择：${actions.map((a) => a.name).join('、')}。` +
+    `动作名必须严格从以下列表中选择：${names.join('、')}${tail}。` +
     `仅当动作与对话内容自然相关时才附带，每条回复最多一个，不需要时不要添加。`;
 }
 
@@ -1274,12 +1291,33 @@ ipcMain.on('pet:show-context-menu', () => {
   const petConfig = loadConfig();
   const petSystemOn = petConfig.petSystemEnabled !== false;
   const features = petConfig.petFeatures;
-  // 动作子菜单：列出全部动作供播放（上限 15 个）
-  const actions = loadConfig().petActions;
-  const actionItems: Electron.MenuItemConstructorOptions[] = actions.map((a) => ({
-    label: `${a.name}（${a.source === 'ai' ? 'AI' : '手动'}）`,
-    click: () => mainWindow?.webContents.send('pet:play-action', a.id),
-  }));
+  // 动作子菜单：动作可能很多（单宠上限 128），全量铺开会撑爆原生菜单，
+  // 故「绑定动作优先 + 其余按最近创建取前 N 个」，末尾再给「更多动作…」入口
+  const ACTION_MENU_LIMIT = 20;
+  const actions = petConfig.petActions;
+  const bindings = petConfig.petActionBindings || {};
+  const boundIds = new Set([bindings.feed, bindings.rest, bindings.play].filter(Boolean) as string[]);
+  const boundActions = actions.filter((a) => boundIds.has(a.id));
+  const otherActions = actions
+    .filter((a) => !boundIds.has(a.id))
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, Math.max(0, ACTION_MENU_LIMIT - boundActions.length));
+  const shownActions = [...boundActions, ...otherActions];
+  const actionItems: Electron.MenuItemConstructorOptions[] = [
+    ...shownActions.map((a) => ({
+      label: `${a.name}（${a.source === 'ai' ? 'AI' : '手动'}）`,
+      click: () => mainWindow?.webContents.send('pet:play-action', a.id),
+    })),
+    ...(actions.length > shownActions.length
+      ? [
+          { type: 'separator' as const },
+          {
+            label: `更多动作…（共 ${actions.length} 个）`,
+            click: () => mainWindow?.webContents.send('pet:toggle-actions', null),
+          },
+        ]
+      : []),
+  ];
   const menu = Menu.buildFromTemplate([
     { label: isChatOpen ? '收起聊天' : '聊天', click: () => send('toggle-chat') },
     { label: '资源中心', click: () => void openStoreWindow() },
@@ -1482,7 +1520,7 @@ app.whenReady().then(() => {
       // ── 1. 宠物资源页：形象卡 + 动作管理（含互动绑定）+「添加宠物资源」发布 ──
       log(`pets=${String(await evalIn(viewWc, `JSON.stringify({
         hasPetCard: (document.body.textContent||'').indexOf('当前宠物资源') >= 0,
-        actionRows: (document.body.textContent||'').match(/动作（\\d+\\/15）/)?.[0] ?? '',
+        actionRows: (document.body.textContent||'').match(/动作（\\d+\\/\\d+）/)?.[0] ?? '',
         bindingSelects: document.querySelectorAll('select').length,
         addForm: (document.body.textContent||'').indexOf('添加宠物资源') >= 0,
         agentFieldAbsent: (document.body.textContent||'').indexOf('配置方式') < 0,

@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import { loadConfig, saveConfig, PET_ACTIONS_MAX, type PetAction, type PetActionBindings } from './config';
+import { loadConfig, saveConfig, PET_ACTIONS_MAX_PER_PET, type PetAction, type PetActionBindings } from './config';
 import { clearPlatformActions } from './petActions';
 
 /**
@@ -258,10 +258,13 @@ export function applyBuiltinPet(id: string): { success: boolean; error?: string;
 
   const config = loadConfig();
   const keep = config.petActions.filter((a) => a.source !== 'platform' && !a.builtinPetId);
-  if (keep.length + manifest.actions.length > PET_ACTIONS_MAX) {
+  // 只校验「该宠物自己的动作数」：用户自建动作占的是用户配额（PET_ACTIONS_MAX_USER），
+  // 两者互不挤占——这修掉了「用户已有 13 个动作时内置宠物装不上」的旧问题。
+  // 下面会先 clearPlatformActions / clearBuiltinActions，所以本宠动作不与上一只累加。
+  if (manifest.actions.length > PET_ACTIONS_MAX_PER_PET) {
     return {
       success: false,
-      error: `动作数量将超过上限（${PET_ACTIONS_MAX} 个），请先删除部分自定义动作`,
+      error: `该宠物的动作数（${manifest.actions.length} 个）超过单宠上限（${PET_ACTIONS_MAX_PER_PET} 个）`,
     };
   }
 

@@ -127,4 +127,49 @@ describe('上传动作的宠物本体校验（修复「任意图都能变成宠�
     expect(() => actions.addFramesAction('空', [])).toThrow(/至少上传一张图片/);
     expect(() => actions.addFramesAction('  ', [file('a.png', png(512, 512))])).toThrow(/动作名称不能为空/);
   });
+
+  // ── 动作配额：按归属分别计数（旧口径是「全应用动作总数 ≤ 15」） ──────────────
+
+  it('用户自建动作到达上限后，第 16 个被拒；同刻给宠物加动作不受影响', () => {
+    const limit = configModule.PET_ACTIONS_MAX_USER;
+    for (let i = 0; i < limit; i++) {
+      actions.addFramesAction(`自建${i}`, [file(`f${i}.png`, png(512, 512))]);
+    }
+    expect(() => actions.addFramesAction('第16个', [file('x.png', png(512, 512))]))
+      .toThrow(/我的动作数量已达上限/);
+    // 关键：用户配额已满，但"宠物自带动作"走的是另一个配额，仍可添加
+    expect(() => actions.addFramesAction('宠物动作', [file('y.png', png(512, 512))], { petAssetId: 'pet-A' }))
+      .not.toThrow();
+  });
+
+  it('配额按归属分别计数：宠物满额只挡该宠物，内置归属与用户互不干扰', () => {
+    const petAction = (i: number, extra: Record<string, unknown> = {}) => ({
+      id: `a${i}`,
+      name: `n${i}`,
+      kind: 'frames' as const,
+      source: 'manual' as const,
+      createdAt: i,
+      ...extra,
+    });
+    const userFull = Array.from({ length: configModule.PET_ACTIONS_MAX_USER }, (_, i) => petAction(i));
+    expect(() => configModule.assertActionQuota(userFull, {})).toThrow(/我的动作数量已达上限/);
+    expect(() => configModule.assertActionQuota(userFull, { petAssetId: 'pet-A' })).not.toThrow();
+
+    const petAFull = Array.from({ length: configModule.PET_ACTIONS_MAX_PER_PET }, (_, i) =>
+      petAction(i, { petAssetId: 'pet-A' }),
+    );
+    expect(() => configModule.assertActionQuota(petAFull, { petAssetId: 'pet-A' }))
+      .toThrow(/该宠物动作数量已达上限/);
+    // 换一只宠物、或换成内置宠物归属，都还有各自配额
+    expect(() => configModule.assertActionQuota(petAFull, { petAssetId: 'pet-B' })).not.toThrow();
+    expect(() => configModule.assertActionQuota(petAFull, { builtinPetId: 'sprout-cat' })).not.toThrow();
+  });
+
+  it('归属键优先取 builtinPetId，其次 petAssetId，都没有才算用户自建', () => {
+    expect(configModule.actionOwnerKey({})).toBe(configModule.ACTIONS_OWNER_USER);
+    expect(configModule.actionOwnerKey({ petAssetId: 'p1' })).toBe('p1');
+    expect(configModule.actionOwnerKey({ petAssetId: 'p1', builtinPetId: 'b1' })).toBe('b1');
+    expect(configModule.actionQuotaLimit(configModule.ACTIONS_OWNER_USER)).toBe(configModule.PET_ACTIONS_MAX_USER);
+    expect(configModule.actionQuotaLimit('p1')).toBe(configModule.PET_ACTIONS_MAX_PER_PET);
+  });
 });

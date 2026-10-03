@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import { loadConfig, saveConfig, PET_ACTIONS_MAX, type PetAction } from './config';
+import { loadConfig, saveConfig, assertActionQuota, type PetAction } from './config';
 import { probeImageBuffer } from './petPack';
 import { evaluatePetPack } from '../pet'; // 宠物主体功能模块（统一入口）
 
@@ -44,9 +44,8 @@ export function addFramesAction(
   if (files.length > 30) throw new Error('帧数过多（最多 30 张）');
 
   const config = loadConfig();
-  if (config.petActions.length >= PET_ACTIONS_MAX) {
-    throw new Error(`动作数量已达上限（${PET_ACTIONS_MAX} 个），请先删除部分动作`);
-  }
+  // 配额按归属计数：带 petAssetId 的动作只占该宠物的配额，不挤占用户自建动作
+  assertActionQuota(config.petActions, { petAssetId: options?.petAssetId });
   // 本体校验：只有「全部帧都被证明为非本体」时才拒绝（详见 assertPetBodyFrames 注释）
   assertPetBodyFrames(files);
 
@@ -92,9 +91,7 @@ export function addClipAction(
   if (!trimmedClip) throw new Error('模型动画 clip 名称不能为空');
 
   const config = loadConfig();
-  if (config.petActions.length >= PET_ACTIONS_MAX) {
-    throw new Error(`动作数量已达上限（${PET_ACTIONS_MAX} 个），请先删除部分动作`);
-  }
+  assertActionQuota(config.petActions, { petAssetId: options?.petAssetId });
 
   const action: PetAction = {
     id: `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,

@@ -321,19 +321,25 @@ export class PlatformClient {
   }
 
   /** 安装宠物时同步安装其附带动作：frames 下载 zip 注册帧序列，clip 直接登记模型动画名。
-   * 单个动作失败不阻断安装 */
-  private async installPetActions(petId: string): Promise<number> {
+   * 单个动作失败不阻断安装，但**必须回报失败清单**——过去只 `console.error`，
+   * 一旦动作数超过配额，安装会静默缩水（少装的动作用户完全看不见）。 */
+  private async installPetActions(
+    petId: string,
+  ): Promise<{ installed: number; failures: Array<{ name: string; reason: string }> }> {
     let actions: PetActionResponse[] = [];
     try {
       const response = await axios.get(apiUrl(this.config.platform.baseUrl, `/pets/${petId}/actions`), {
         headers: this.headers,
       });
       actions = Array.isArray(response.data) ? (response.data as PetActionResponse[]) : [];
-    } catch {
-      return 0;
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      console.error(`Failed to fetch pet actions for "${petId}": ${reason}`);
+      return { installed: 0, failures: [{ name: '动作列表', reason: `拉取动作列表失败：${reason}` }] };
     }
 
     let installed = 0;
+    const failures: Array<{ name: string; reason: string }> = [];
     for (const action of actions) {
       const interaction = action.interaction === 'feed' || action.interaction === 'rest' || action.interaction === 'play'
         ? action.interaction
@@ -371,10 +377,12 @@ export class PlatformClient {
         }
         installed += 1;
       } catch (e) {
-        console.error(`Failed to install pet action "${action.name}":`, e);
+        const reason = e instanceof Error ? e.message : String(e);
+        failures.push({ name: action.name, reason });
+        console.error(`Failed to install pet action "${action.name}": ${reason}`);
       }
     }
-    return installed;
+    return { installed, failures };
   }
 
   async install(type: PlatformAssetType, id: string) {
@@ -413,7 +421,7 @@ export class PlatformClient {
       const installedPath = pick.path;
 
       // 随宠物安装附带动作（frames/clip）
-      const actionsCount = await this.installPetActions(id);
+      const { installed: actionsCount, failures: actionsFailed } = await this.installPetActions(id);
 
       saveConfig({
         petAssetPath: installedPath,
@@ -425,7 +433,11 @@ export class PlatformClient {
       });
 
       fs.rmSync(path.dirname(downloaded.tempPath), { recursive: true, force: true });
-      return { success: true, type, id, path: installedPath, actionsCount };
+      return {
+        success: true, type, id, path: installedPath, actionsCount,
+        // 有动作没装上时一并回报（过去被静默吞掉，用户只会觉得"动作少了一堆"）
+        ...(actionsFailed.length ? { actionsFailed } : {}),
+      };
     }
 
     let installedPath = findFirstFile(installDir, (filePath) => /\.json$/i.test(filePath));

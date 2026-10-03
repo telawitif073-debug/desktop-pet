@@ -182,7 +182,7 @@ describe('内置演示宠物 · 应用与还原', () => {
     expect(fs.existsSync(framesDir)).toBe(false);
   });
 
-  it('动作数量将超上限时拒绝应用，且不改动现有配置', () => {
+  it('用户已有 14 个自建动作时仍可应用内置宠物（配额按归属分别计数，互不挤占）', () => {
     const existing = Array.from({ length: 14 }, (_, i) => ({
       id: `manual_${i}`,
       name: `自定义${i}`,
@@ -193,12 +193,15 @@ describe('内置演示宠物 · 应用与还原', () => {
     }));
     configModule.saveConfig({ petActions: existing });
 
+    // 旧口径是「全应用动作总数 ≤ 15」，14 + 3 会被拒；新口径用户自建 14/15、本宠 3/128 都合规
     const result = builtin.applyBuiltinPet('sprout-cat');
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('上限');
+    expect(result.success).toBe(true);
 
     const cfg = configModule.loadConfig();
-    expect(cfg.petActions).toHaveLength(14);
-    expect(cfg.builtinPet).toBeUndefined();
+    expect(cfg.petActions).toHaveLength(14 + (result.actionIds?.length ?? 0));
+    // 自建动作一个都没被丢掉
+    expect(cfg.petActions.filter((a) => a.source === 'manual' && !a.builtinPetId)).toHaveLength(14);
+    // 本宠动作全部带 builtinPetId（归属清晰，才谈得上"各算各的"）
+    expect(cfg.petActions.filter((a) => a.builtinPetId === 'sprout-cat').length).toBeGreaterThan(0);
   });
 });

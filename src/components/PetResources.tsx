@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { C, inputStyle, labelStyle, smallBtn } from './studioTheme';
 import type { BuiltinPetSummary, PetAction, PetLibrarySummary } from '../global.d';
+// 发布侧「随宠物附带动作」的上限（与用户自建动作配额同为 15，故复用同一常量而非另写字面量）
+import { PET_ACTIONS_MAX_USER } from '../shared/actionQuota';
 
 /**
  * 宠工坊「宠物资源」页的左栏：本机宠物形象 + 动作管理（原「动作」页的全部功能） + 互动绑定。
@@ -380,7 +382,7 @@ const PetResources = ({ onNotify }: { onNotify: (text: string) => void }) => {
         </div>
 
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-          动作（{actions.length}/15）
+          动作（{actions.length}/{PET_ACTIONS_MAX_USER}）
         </div>
         <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.7, marginBottom: 8 }}>
           手动添加帧序列（多张图片按选择顺序播放，建议 ≤30 帧）；动作随宠物安装，不可跨宠物使用。
