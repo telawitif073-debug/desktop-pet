@@ -107,6 +107,58 @@ export function addClipAction(
   return action;
 }
 
+/**
+ * 视频动作目前只收 **WebM（EBML，VP9 alpha）**：
+ * P0 spike 已实测 Electron 44/Chromium 152 能完整保住它的 alpha；其它容器（mp4/mov）渲染端虽可播，
+ * 但没有做过 alpha 验证，故显式拒绝而不是「先收下再说」（fail-closed，与资源包判定的口径一致）。
+ */
+const VIDEO_ACTION_EXT = '.webm';
+const EBML_MAGIC = Buffer.from('1a45dfa3', 'hex');
+
+/**
+ * 新增**视频动作**：webm 写入 `userData/pet-actions/<id>/clip.webm`，渲染端用 `<video>` 直接播。
+ * 为什么不转帧序列：106 段动画转成 512 画布 PNG 帧序列实测需 198–364 MB，而 webm 合计仅 52 MB。
+ */
+export function addVideoAction(
+  name: string,
+  video: { filename: string; data: Buffer },
+  options?: { petAssetId?: string; interaction?: 'none' | 'feed' | 'rest' | 'play' },
+): PetAction {
+  const trimmedName = name.trim();
+  if (!trimmedName) throw new Error('动作名称不能为空');
+  if (!video?.data?.length) throw new Error('视频数据为空');
+  const ext = path.extname(video.filename || '').toLowerCase();
+  if (ext !== VIDEO_ACTION_EXT) {
+    throw new Error(`视频动作目前只支持 WebM（${VIDEO_ACTION_EXT}），收到：${video.filename}`);
+  }
+  if (!video.data.subarray(0, 4).equals(EBML_MAGIC)) {
+    throw new Error('不是有效的 WebM 文件（缺少 EBML 头）');
+  }
+
+  const config = loadConfig();
+  assertActionQuota(config.petActions, { petAssetId: options?.petAssetId });
+
+  const id = `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const dir = path.join(getActionsDir(), id);
+  fs.mkdirSync(dir, { recursive: true });
+  const videoFile = path.join(dir, `clip${VIDEO_ACTION_EXT}`);
+  fs.writeFileSync(videoFile, video.data);
+
+  const action: PetAction = {
+    id,
+    name: trimmedName,
+    kind: 'video',
+    source: options?.petAssetId ? 'platform' : 'manual',
+    videoFile,
+    // 刻意不写 frameRate：视频自带帧率（模型里该字段对 video 动作是可选的）
+    ...(options?.petAssetId ? { petAssetId: options.petAssetId } : {}),
+    ...(options?.interaction && options.interaction !== 'none' ? { interaction: options.interaction } : {}),
+    createdAt: Date.now(),
+  };
+  saveConfig({ petActions: [...config.petActions, action] });
+  return action;
+}
+
 /** 清除资源库动作（换宠物时旧宠物的动作不可复用），并清理关联的互动绑定。
  * petAssetId 提供时仅清除属于该宠物的动作 */
 export function clearPlatformActions(petAssetId?: string): number {
@@ -115,13 +167,7 @@ export function clearPlatformActions(petAssetId?: string): number {
   if (!removed.length) return 0;
 
   for (const action of removed) {
-    if (action.kind === 'frames' && action.frameFiles?.length) {
-      try {
-        fs.rmSync(path.dirname(action.frameFiles[0]), { recursive: true, force: true });
-      } catch (e) {
-        console.error('Failed to remove platform action frames dir:', e);
-      }
-    }
+    removeActionFiles(action);
   }
 
   const removedIds = new Set(removed.map((a) => a.id));
@@ -165,18 +211,31 @@ export async function resolvePetInfo(
   return info;
 }
 
-/** 删除动作：帧序列同时清理磁盘目录 */
+/** 删除动作：帧序列/视频同时清理磁盘目录 */
 export function removeAction(id: string): void {
   const config = loadConfig();
   const target = config.petActions.find((a) => a.id === id);
   if (!target) return;
-  if (target.kind === 'frames' && target.frameFiles?.length) {
-    const dir = path.dirname(target.frameFiles[0]);
-    try {
-      fs.rmSync(dir, { recursive: true, force: true });
-    } catch (e) {
-      console.error('Failed to remove action frames dir:', e);
-    }
-  }
+  removeActionFiles(target);
   saveConfig({ petActions: config.petActions.filter((a) => a.id !== id) });
+}
+
+/**
+ * 动作的文件落盘目录：帧序列看首帧、视频动作看视频文件。
+ * 两者都放在 `userData/pet-actions/<actionId>/` 下，因此删目录即可（返回 null 表示无文件）。
+ */
+function actionFilesDir(action: PetAction): string | null {
+  const anchor = action.kind === 'video' ? action.videoFile : action.frameFiles?.[0];
+  return anchor ? path.dirname(anchor) : null;
+}
+
+/** 删除动作的磁盘文件（删不掉只记日志，不阻断配置变更） */
+function removeActionFiles(action: PetAction): void {
+  const dir = actionFilesDir(action);
+  if (!dir) return;
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch (e) {
+    console.error(`Failed to remove action files dir "${dir}":`, e);
+  }
 }

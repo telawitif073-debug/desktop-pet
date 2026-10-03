@@ -57,9 +57,9 @@
 | **P0** ✅ | **去风险 spike**：确认 Electron 44 里透明 VP9 webm 真能出 alpha | 临时 spike 脚本（不入库） | **已通过**，结论见 §六 风险 1 | 无改动，零成本 |
 | **P1** | 合规层：新增「开源非商用」层 + 四项硬约束 + 许可原文随包；导入器改**增量合并** | `scripts/research/rank-report.mjs`、`scripts/pets/import_pet_assets.py`、`docs/upstream-pet-assets.md` | `--dry-run` + 前后 sha256 清单比对，证明既有 6 来源/286 张**零变动** | tag + 备份 |
 | **P2** ✅ | **每宠动作上限**语义重构（128/15 分账）+ UI 分组、子菜单与提示词裁剪、安装失败不再静默 | 见 §四 P2 | `tsc` 0 错；vitest **306 全绿**（+3 配额用例） | tag `pet-actions-per-pet-cap-done` |
-| **P3** | 动作模型支持 `kind:'video'`（共享包 schemaVersion 2→3 + 迁移 + 校验） | `packages/pet-domain/src/actionModel.ts`(+spec)、`src/main/config.ts`、`src/main/importedPets.spec.ts` | vitest：v2→v3 迁移、video 校验、webm 导入用例 | 同 P2 |
-| **P4** | 视频文件存储与协议（`petaction://` 支持 Range + `video/webm`） | `src/main.ts`（协议段）、`src/main/petActions.ts`（新 `addVideoAction`）、`src/main/petPack.ts` | 手工：`<video>` 可 seek、大文件流式响应 | 同 P2 |
-| **P5** | 渲染端播放视频动作（与帧动作统一接口） | `src/App.tsx`、新增 `src/renderer/videoActionPlayer.ts` | 手工 smoke：播一次/循环/镜像/结束回 idle/不连播 | 同 P2 |
+| **P3** ✅ | 动作模型支持 `kind:'video'`（共享包 schemaVersion 2→3 + 迁移 + 校验） | `packages/pet-domain/src/actionModel.ts`(+spec)、`src/main/config.ts`、`src/global.d.ts` | tsc 0 错；vitest **310**（+4：迁移/校验/video 合法） | 同 P2 |
+| **P4** ✅ | 视频文件存储与协议（`petaction://` 支持 Range + `video/webm`） | **Range 抽成可单测的 `src/main/localMedia.ts`**（原计划写在 `main.ts` 里）、`src/main/petActions.ts` 新增 `addVideoAction` | tsc 0 错；`localMedia.spec` **10 用例**、`addVideoAction` **6 用例** | 同 P2 |
+| **P5** ✅ | 渲染端播放视频动作（与帧动作统一接口） | `src/App.tsx`（主路径 + Live2D lite 路径都接了）、新增 `src/renderer/videoActionPlayer.ts` | tsc 0 错；`videoActionPlayer.spec` **6 用例**（最小假 DOM，无新依赖）；**真机 GUI 冒烟仍待做** | 同 P2 |
 | **P6** | 回到商店主线：step 3 服务端包校验 → step 4 桌面 pack 流程 → 组装并发布 dsh-pet pet pack | 见 `pet-store-successor-design.md` §四 第 3~4 步 + 本方案 P1 的导入器 | 服务端 `evaluatePetPack` 通过、客户端安装后可播、sha256 一致 | 独立阶段，各自 tag |
 
 **推荐顺序**：`P0 →（用户口径的「先提上限」）P2 → P3 → P4 → P5 → P1 → P6`。

@@ -173,3 +173,49 @@ describe('上传动作的宠物本体校验（修复「任意图都能变成宠�
     expect(configModule.actionQuotaLimit('p1')).toBe(configModule.PET_ACTIONS_MAX_PER_PET);
   });
 });
+
+describe('视频动作（addVideoAction）', () => {
+  const webm = (n = 64) => Buffer.concat([Buffer.from('1a45dfa3', 'hex'), Buffer.alloc(n)]);
+
+  it('合法 webm → 落盘 clip.webm，登记 kind=video 且不写 frameRate', () => {
+    const action = actions.addVideoAction('打招呼', file('clip.webm', webm()));
+    expect(action.kind).toBe('video');
+    expect(action.videoFile).toBeTruthy();
+    expect(fs.existsSync(action.videoFile!)).toBe(true);
+    expect(action.frameRate).toBeUndefined();
+    // 必须落在 petaction:// 白名单目录内，否则渲染端取不到
+    expect(path.dirname(action.videoFile!)).toBe(path.join(userDataDir, 'pet-actions', action.id));
+  });
+
+  it('非 webm 容器 → 明确拒绝（目前只收做过 alpha 验证的 webm）', () => {
+    expect(() => actions.addVideoAction('mp4', file('clip.mp4', Buffer.from('00000018', 'hex'))))
+      .toThrow(/只支持 WebM/);
+  });
+
+  it('扩展名是 webm 但没有 EBML 头 → 拒绝（防止随便改后缀）', () => {
+    expect(() => actions.addVideoAction('假 webm', file('clip.webm', Buffer.from('not-a-webm'))))
+      .toThrow(/缺少 EBML 头/);
+  });
+
+  it('空数据 / 空名称 → 拒绝', () => {
+    expect(() => actions.addVideoAction('空', file('clip.webm', Buffer.alloc(0)))).toThrow(/视频数据为空/);
+    expect(() => actions.addVideoAction('  ', file('clip.webm', webm()))).toThrow(/动作名称不能为空/);
+  });
+
+  it('删除视频动作会一并清掉磁盘目录（帧序列之外的第二种载体）', () => {
+    const action = actions.addVideoAction('删我', file('clip.webm', webm()));
+    const dir = path.dirname(action.videoFile!);
+    expect(fs.existsSync(dir)).toBe(true);
+    actions.removeAction(action.id);
+    expect(fs.existsSync(dir)).toBe(false);
+    expect(configModule.loadConfig().petActions.find((a) => a.id === action.id)).toBeUndefined();
+  });
+
+  it('视频动作同样走归属配额：用户满额后，仍可作为某只宠物的动作添加', () => {
+    const limit = configModule.PET_ACTIONS_MAX_USER;
+    for (let i = 0; i < limit; i++) actions.addVideoAction(`v${i}`, file('clip.webm', webm(8)));
+    expect(() => actions.addVideoAction('第16个', file('clip.webm', webm(8)))).toThrow(/我的动作数量已达上限/);
+    expect(() => actions.addVideoAction('宠物视频', file('clip.webm', webm(8)), { petAssetId: 'pet-A' }))
+      .not.toThrow();
+  });
+});

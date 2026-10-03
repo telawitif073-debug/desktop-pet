@@ -21,6 +21,7 @@ import { synthVoice, testGptsovitsEngine } from './main/ttsCloud';
 import { startAgentProactive } from './main/agentProactive';
 import { addFramesAction, removeAction } from './main/petActions';
 import { applyBuiltinPet, listBuiltinPets, resetBuiltinPet } from './main/builtinPets';
+import { PETACTION_MEDIA_TYPES, serveLocalMediaRange } from './main/localMedia';
 import {
   addLibraryAssetAsAction,
   applyLibraryAsset,
@@ -1458,10 +1459,20 @@ app.whenReady().then(() => {
       ) {
         return new Response('forbidden', { status: 403 });
       }
+      const cors = { 'Access-Control-Allow-Origin': '*' };
+      // 媒体文件（视频动作的 webm 等）需要按 Range 分段响应，视频才能播放与拖动进度条；
+      // 其它文件（帧图/模型/语音模型）继续走下面的 net.fetch 分支，保持它们原有的 Content-Type 推断。
+      const mediaType = PETACTION_MEDIA_TYPES[path.extname(normalized).toLowerCase()];
+      const rangeHeader = request.headers.get('Range');
+      if (mediaType && rangeHeader) {
+        return serveLocalMediaRange(normalized, mediaType, rangeHeader, cors);
+      }
       // dev 下渲染端是 http origin，fetch petaction:// 属跨源，需带 CORS 头
       const resp = await net.fetch(pathToFileURL(normalized).toString());
       const headers = new Headers(resp.headers);
       headers.set('Access-Control-Allow-Origin', '*');
+      // 声明支持分段：Chromium 才会对媒体发出 Range 请求（否则只能顺序下载、无法 seek）
+      if (mediaType) headers.set('Accept-Ranges', 'bytes');
       return new Response(resp.body, { status: resp.status, headers });
     } catch (e) {
       return new Response(`bad request: ${e}`, { status: 400 });

@@ -8,6 +8,7 @@ import coreJsUrl from './assets/live2dcubismcore.min.js?url';
 import { usePetStore } from './store/petStore';
 import { useChatStore } from './store/chatStore';
 import { speak, speakContextFromConfig } from './renderer/speech';
+import { createVideoActionPlayer, type VideoActionHandle } from './renderer/videoActionPlayer';
 // 宠物主体功能模块（统一入口）：动作播放决策 + 四维体征口径
 import { resolveInteractionTrigger, HUNGER_ALERT_THRESHOLD, DEFAULT_VITALS } from './pet';
 import { syncAmbientSenses } from './renderer/ambientSense';
@@ -457,6 +458,8 @@ const App = () => {
     let pet: PIXI.Sprite | null = null;
     // 帧序列/GIF 动作精灵（AnimatedSprite 或 GifSprite，二者均为 Sprite 子类）
     let actionSprite: PIXI.AnimatedSprite | GifSprite | null = null;
+    // 视频动作（kind='video'）走 DOM <video>，与 PIXI 层互斥：播放时隐藏 pet，结束/中断时恢复
+    let actionVideo: VideoActionHandle | null = null;
 
     // 播放结束清理：销毁动作精灵并恢复本体显示
     const removeActionSprite = (spr: PIXI.AnimatedSprite | GifSprite, actionId?: string) => {
@@ -470,9 +473,34 @@ const App = () => {
     };
 
     const stopActionSprite = () => {
+      if (actionVideo) { actionVideo.stop(); actionVideo = null; }
       if (actionSprite) removeActionSprite(actionSprite);
       if (pet) pet.visible = true;
       if (playingActionIdRef) playingActionIdRef.current = null;
+    };
+
+    /** 开始播放视频动作：隐藏静态本体，播完/出错都恢复（否则宠物窗会空着） */
+    const playVideoAction = (action: PetAction, restore: () => void) => {
+      const videoFile = action.videoFile;
+      if (!videoFile) return false;
+      const name = videoFile.split(/[\\/]/).pop() || 'clip.webm';
+      const url = `petaction://local/${encodeURIComponent(name)}?p=${encodeURIComponent(videoFile)}`;
+      actionVideo = createVideoActionPlayer({
+        url,
+        width,
+        height,
+        onComplete: () => {
+          actionVideo = null;
+          restore();
+        },
+        onError: (message) => {
+          console.error(`视频动作「${action.name}」播放失败：${message}`);
+          actionVideo = null;
+          restore();
+        },
+      });
+      if (playingActionIdRef) playingActionIdRef.current = action.id;
+      return true;
     };
 
     // 形象就绪后交主进程识别并记住（指纹未变时主进程跳过）；延后给动画首帧留渲染时间
@@ -494,6 +522,16 @@ const App = () => {
     const playAction = (action: PetAction) => {
       if (!app || !pet) return;
       stopActionSprite();
+
+      // 视频动作（kind='video'）：DOM <video> 播透明 webm，播放期间隐藏 PIXI 本体
+      if (action.kind === 'video') {
+        const restorePet = () => {
+          if (!app || !pet || isCancelled) return;
+          pet.visible = true;
+        };
+        if (playVideoAction(action, restorePet)) pet.visible = false;
+        return;
+      }
 
       // 帧序列动作：petaction:// 自定义协议加载本地帧图（http origin 无法直接读磁盘文件）。
       // URL path 段携带真实文件名，供 pixi 解析器按扩展名选择 loader（.gif → GifSource）
@@ -1022,11 +1060,16 @@ const App = () => {
           if (swayMotion) root.position.x = width / 2 + swayMotion.amp * Math.sin(2 * Math.PI * swayMotion.speed * t) * fit;
         });
 
-        // clip 动作：lite 包无 motion 组，占位忽略；frames 正常播放
+        // clip 动作：lite 包无 motion 组，占位忽略；frames/video 正常播放
         playActionRef.current = (id: string) => {
           const action = petActionsRef.current.find((a) => a.id === id);
           if (!action) return;
           if (action.kind === 'clip') return;
+          // video：与主路径一致，走 DOM <video>；播放期间隐藏 Live2D 根节点
+          if (action.kind === 'video') {
+            if (playVideoAction(action, () => resetLiteRoot())) root.visible = false;
+            return;
+          }
           // frames：petaction:// 加载帧图，AnimatedSprite 覆盖层
           if (action.frameFiles?.length) {
             const toFrameUrl = (p: string) => {
@@ -1056,6 +1099,7 @@ const App = () => {
           }
         };
         stopActionRef.current = () => {
+          if (actionVideo) { actionVideo.stop(); actionVideo = null; }
           removeLiteFrames();
           resetLiteRoot();
         };
