@@ -109,13 +109,37 @@ src/pet/
 - 退出条件：全仓 `grep -rn "vitalsLegacy\|dualRunVitals"` 为空；tsc + 305 测试全绿；冒烟通过。
 
 ### Phase 4 — 平台与数据库（不可逆，需独立审批 + 备份）
-1. **备份**：`pg_dump` 全库 + `resources/` 打包留存（写入 `Environment/build/backups/`，不入库）。
+
+#### 4.0 前置加固【已完成 2026-10-03】
+把「删实体 = 静默 DROP TABLE」这颗雷先拆掉，再谈删表：
+
+1. **全量备份 + 恢复演练**：`pg_dump` 自定义格式 + 纯文本各一份，落在
+   `Environment/build/backups/`（不入库，恢复步骤见同目录 `RESTORE.md`）。
+   已**实际恢复到临时库**校验：表数 12/12、`user_sync_data` 行数 13→13 一致。
+2. **显式 migration 基础设施**（新增）：
+   - `platform/backend/src/data-source.ts`：应用与 TypeORM CLI **共用的唯一 DB 配置事实来源**
+     （此前 host/port/database 默认值在 `app.module.ts` 一处写死、无 CLI 可用配置）。
+   - `platform/backend/src/migrations/1791030967094-InitSchema.ts`：基线 migration，
+     在空库上可完整重建 10 张实体表（已验证：列结构、FK/UNIQUE 约束 12/12、索引全部一致）。
+   - `app.module.ts`：`synchronize: true` → **永久关闭**，改 `migrationsRun: true`
+     （启动自动执行未落库的 migration）。
+   - `package.json` 新增 `migration:generate|run|revert|show` 四个脚本。
+   - 既有库已「打基线」：写入 `migrations` 记录 `InitSchema1791030967094`，
+     启动不会重复建表（已用 `migration:show` 与实机启动双重确认）。
+3. **验证**：backend `tsc` 0 错；`jest` 3 套件 / 7 用例全绿；另起 3199 实例冷启动成功、
+   接口 200、日志无迁移与报错、真实库表数不变（12 + `migrations`）。
+4. **顺带发现的历史遗留**：库里有 2 张**无实体、无代码引用**的孤儿表
+   `ai_image_providers`、`ai_style_presets`（来自已删除的「AI 生成宠物」功能，commit `7aa21190`）。
+   它们正是 Phase 4 要清的「旧宠物功能遗留组件」，因不在实体集合内，删代码不会自动清理，
+   需要一条显式 `DROP TABLE` migration。
+
+#### 4.1 正式删除（待执行）
+1. 生产库同样先执行 4.0 的备份 + 基线（阿里云 ECS）。
 2. `pet_assets` / `action_assets` / `download_records`(asset_type='pet') / `reviews`(asset_type='pet')
    的数据导出与迁移；`user_sync_data` 中 `pet_state` 的兼容读取。
 3. 删除模型/实体/模块：`platform/backend/src/{pets,actions}`、`app.module.ts` 引用、
    `scripts/seed.ts` 的示例宠物；前端 `ResourceList/Detail/Profile/Workshop` 的宠物分支。
-4. 表结构删除：由于项目用 TypeORM `synchronize:true`（无 migration），删除实体即会被
-   synchronize 落成 `DROP TABLE` —— **必须显式确认数据已备份**，并考虑改为显式 migration 以防误删。
+4. 新增 migration 显式删表（含 4.0 发现的 2 张孤儿表），**不再依赖 synchronize**。
 5. 退出条件：平台后端启动无孤儿引用；商店不再展示宠物类目；移动端/桌面端无 404 调用。
 
 ### Phase 5 — 资源与移动产物清理

@@ -16,7 +16,8 @@ describe('AuthService', () => {
     const jwt = { sign: jest.fn().mockReturnValueOnce('access').mockReturnValueOnce('refresh') };
     const loginUser = { ...user, passwordHash: await bcrypt.hash('secret', 1) };
     users.findByEmailOrUsername.mockResolvedValue(loginUser);
-    const service = new AuthService(users as never, jwt as never);
+    // 第 3 个依赖是邮箱验证码服务（login 路径不使用），注入桩即可
+    const service = new AuthService(users as never, jwt as never, {} as never);
 
     const result = await service.login({ identifier: 'user1', password: 'secret' });
     expect(result.accessToken).toBe('access');
@@ -26,7 +27,7 @@ describe('AuthService', () => {
 
   it('rejects invalid credentials', async () => {
     const users = { findByEmailOrUsername: jest.fn().mockResolvedValue(null) };
-    const service = new AuthService(users as never, { sign: jest.fn() } as never);
+    const service = new AuthService(users as never, { sign: jest.fn() } as never, {} as never);
     await expect(service.login({ identifier: 'missing', password: 'secret' })).rejects.toThrow(UnauthorizedException);
   });
 });
