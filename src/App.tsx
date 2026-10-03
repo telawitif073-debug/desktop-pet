@@ -8,7 +8,8 @@ import coreJsUrl from './assets/live2dcubismcore.min.js?url';
 import { usePetStore } from './store/petStore';
 import { useChatStore } from './store/chatStore';
 import { speak, speakContextFromConfig } from './renderer/speech';
-import { resolveInteractionTrigger } from './shared/petPlayback';
+// 宠物主体功能模块（统一入口）：动作播放决策 + 四维体征口径
+import { resolveInteractionTrigger, HUNGER_ALERT_THRESHOLD, DEFAULT_VITALS } from './pet';
 import { syncAmbientSenses } from './renderer/ambientSense';
 import ChatPanel from './components/ChatPanel';
 import ActionsPanel from './components/ActionsPanel';
@@ -60,7 +61,7 @@ const App = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   // 精灵表五状态判定依据（ticker 内读取）：四项数值 + 互动时间戳 + 漫步标志
   const stateRef = useRef({
-    hunger: 80, mood: 80, energy: 80, affection: 50,
+    ...DEFAULT_VITALS,
     lastFeedAt: 0, lastPlayAt: 0, lastRestAt: 0, moving: false,
   });
   const [chatOpen, setChatOpen] = useState(false);
@@ -643,7 +644,7 @@ const App = () => {
       app.ticker.add(() => {
         if (!pet) return;
         const { hunger } = stateRef.current;
-        pet.tint = hunger < 30 ? 0xaaaaaa : 0xffffff;
+        pet.tint = hunger < HUNGER_ALERT_THRESHOLD ? 0xaaaaaa : 0xffffff;
       });
 
       // 滚轮缩放：渲染器原地 resize + 本体/动作精灵等比重排与命中框重算

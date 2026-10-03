@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import { validatePetActionModel, type PetActionModel } from '../shared/petActionModel';
+import { validatePetActionModel, type PetActionModel } from '../pet'; // 宠物主体功能模块（统一入口）
 
 export interface LLMConfig {
   provider: string;

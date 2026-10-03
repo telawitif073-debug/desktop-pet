@@ -29,6 +29,8 @@ import {
 } from './main/petLibrary';
 import { isWandering, startWander, stopWander } from './main/wander';
 import { clampPetWindow } from './main/windowGeometry';
+// 宠物主体功能模块（统一入口）：四维体征默认值与阈值口径
+import { DEFAULT_VITALS } from './pet';
 import AdmZip from 'adm-zip';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
@@ -74,7 +76,8 @@ let workshopView: WebContentsView | null = null;
 /** 待投放的内嵌工作区（资源中心导航指定，如 /workshop?tab=publish） */
 let workshopTab: StudioWorkspaceTab | undefined;
 let isChatOpen = false;
-let currentPetState: PetStateSnapshot = { hunger: 80, mood: 80, energy: 80, affection: 50 };
+// 四维初始值取自宠物主体功能模块（DEFAULT_VITALS），避免默认值在多处各写一遍
+let currentPetState: PetStateSnapshot = { ...DEFAULT_VITALS };
 
 const llmService = createLLMService(getLLMConfig);
 

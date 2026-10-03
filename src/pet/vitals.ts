@@ -61,8 +61,11 @@ export const DECAY_PER_TICK: Readonly<{ hunger: number; mood: number; energy: nu
 /** 数值钳制到 [0,100]（统一入口，避免各处 Math.min/Math.max 写法漂移） */
 export const clampVital = (value: number): number => Math.min(VITAL_MAX, Math.max(VITAL_MIN, value));
 
-/** 饱腹低于该阈值时渲染端把宠物调灰（UI 口径集中在此，避免散落在组件里） */
-export const HUNGER_ALERT_THRESHOLD = 30;
+/** 「偏低」告警阈值：渲染端把宠物调灰、主动搭话提示、状态条档位共用同一口径 */
+export const VITAL_ALERT_THRESHOLD = 30;
+
+/** 饱腹专用别名（语义化调用点：调灰看的是饱腹） */
+export const HUNGER_ALERT_THRESHOLD = VITAL_ALERT_THRESHOLD;
 
 /** 四个维度名（遍历/序列化/调试用） */
 export const VITAL_KEYS = ['hunger', 'mood', 'energy', 'affection'] as const;
@@ -103,14 +106,17 @@ export function isDefaultVitals(v: PetVitals): boolean {
   );
 }
 
+/** 好感度增量（固定值；与功能开关**完全解耦**——开关只控制显隐与冻结） */
+export const AFFECTION_GAIN = Object.freeze({ feed: 2, play: 5, chatReply: 1 });
+
 /** 喂食：饱腹 +15、好感 +2（好感与开关无关） */
 export function feed(v: PetVitals): PetVitals {
-  return { ...v, hunger: clampVital(v.hunger + 15), affection: clampVital(v.affection + 2) };
+  return { ...v, hunger: clampVital(v.hunger + 15), affection: clampVital(v.affection + AFFECTION_GAIN.feed) };
 }
 
 /** 玩耍：心情 +20、精力 -10、好感 +5（好感与开关无关） */
 export function play(v: PetVitals): PetVitals {
-  return { ...v, mood: clampVital(v.mood + 20), energy: clampVital(v.energy - 10), affection: clampVital(v.affection + 5) };
+  return { ...v, mood: clampVital(v.mood + 20), energy: clampVital(v.energy - 10), affection: clampVital(v.affection + AFFECTION_GAIN.play) };
 }
 
 /** 休息：精力 +30、饱腹 -5 */
@@ -160,7 +166,7 @@ export function addAffection(v: PetVitals, amount: number): PetVitals {
 
 /** 四维的展示档位（状态条文案用；集中口径，避免组件各自判断） */
 export function describeVital(value: number): 'low' | 'mid' | 'high' {
-  if (value < HUNGER_ALERT_THRESHOLD) return 'low';
+  if (value < VITAL_ALERT_THRESHOLD) return 'low';
   if (value < 70) return 'mid';
   return 'high';
 }

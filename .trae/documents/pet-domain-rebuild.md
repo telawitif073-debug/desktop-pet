@@ -87,18 +87,43 @@ src/pet/
   `normalizeVitals` 消毒差异）。
 - **本阶段不删任何东西。**
 
-### Phase 2 — 调用方逐个改走新模块（仍不删）
-逐个子域把消费者切到 `src/pet`，每次一个 PR/提交，保持双跑开启：
-1. 四维：`App.tsx`（衰减定时器、状态条阈值改引 `HUNGER_ALERT_THRESHOLD`）、`conversationManager`、
-   `agentProactive`、`chatStore`/`moodLink`。
-2. 形象与资源：`platformClient.install`、`petPack`、`PetResources.tsx`、`ActionsPanel.tsx`
-   改 `import ... from '../pet'`（等价路径迁移，不改行为）。
-3. 动作：`App.tsx` 的 `autoPlayAction` 改调 `resolveInteractionTrigger`（若尚未接入）。
-4. 移动端：在 `mobile` 侧增加指向 `src/pet` 的共享路径（或抽出 `packages/pet-domain`），
-   把 `appStore` 的四维实现替换为双跑包装。
-5. 平台后端：把 `pets/actions` 的校验规则与 `upload-validation` 的宠物分支改为引用同一份标准
-   （后端为 Node/TS，可直接共享 `src/pet` 或抽出独立包）。
-- 每步退出条件：tsc + 全量测试 + 该子域的冒烟清单；双跑分歧持续为 0。
+### Phase 2 — 调用方逐个改走新模块（仍不删）【已完成 2026-10-03】
+
+实际改动（全部为**等价迁移**，不改行为）：
+
+| 调用点 | 改动 |
+|---|---|
+| `src/App.tsx` | `./shared/petPlayback` → `./pet`；`hunger < 30` → `HUNGER_ALERT_THRESHOLD`；`stateRef` 初值 `{...DEFAULT_VITALS}` |
+| `src/main/petPack.ts` | `../shared/petResource` → `../pet` |
+| `src/main/petActions.ts` | 同上 |
+| `src/main/config.ts` | `../shared/petActionModel` → `../pet` |
+| `src/main/agentProactive.ts` | 三处 `30` → `VITAL_ALERT_THRESHOLD`（新增的通用阈值常量，`HUNGER_ALERT_THRESHOLD` 变为其语义别名） |
+| `src/main.ts` | `currentPetState` 初值 → `{...DEFAULT_VITALS}` |
+| `src/pet/vitals.ts` | 新增 `AFFECTION_GAIN`（喂食 2 / 玩耍 5 / 聊天 1）常量，替掉调用点的魔法数 |
+| **移动端** `mobile/metro.config.js` | 新增 `watchFolders: ['../src']`，让 Metro 能解析 mobile 之外的共享纯逻辑 |
+| **移动端** `mobile/src/store/appStore.ts` | 四维运算改用 `src/pet/vitals`（与桌面同一份实现） |
+
+验证（实跑）：
+- 桌面：`npx tsc --noEmit` 0 错；`npm test` **305 全绿**。
+- 移动：`npx tsc --noEmit -p tsconfig.json` 0 错；
+  `react-native bundle`（dev 与 release 各一次）**打包成功**，并在 dev bundle 中核出
+  `src/pet/vitals` 路径 11 处、`AFFECTION_GAIN` 6 处、`DEFAULT_VITALS` 7 处 → 共享模块确实进入依赖图；
+  反向核对 `vitalsDualRun`/`vitalsLegacy` 命中 **0**（迁移期代码未被打进 RN 包）。
+- 全仓复核：`src/pet` 之外已无任何消费者 import 旧路径（除模块自身的 `index.ts` 再导出与三个自测文件）。
+
+**本阶段发现的重要差异（必须记录，不能默默统一）**：
+桌面与移动的「功能开关」门控**机制不同**——
+- 移动端：开关关闭时对互动**短路**（饱腹/心情/精力都不改，仅好感度继续累积）；
+- 桌面端：互动不短路，而由 `App.tsx` 每 5s 的 `resetVitals` 把关闭项锁定回 80。
+
+两者**稳态一致**（关闭期间三项都停在 80），但若把任一端的门控直接换成另一端，会出现
+「关闭期间喂食后数值不再归位（移动端）／关闭期间数值被冻结读取（桌面端）」的偏差。
+因此本阶段只统一「数学」，**门控策略仍留在各自调用点**；是否统一为同一个策略，是 Phase 3 的决策。
+另外移动端为不把迁移期双跑代码打进包体，只从 `pet/vitals` 直接导入（而非模块门面）。
+
+**平台后端：无调用点可迁移**（已核实）。后端 `uploads/upload-validation.ts` 做的是
+扩展名/MIME/魔数**文件安全校验**，与「宠物本体分类」是两个不同关注点；
+`pets/actions` 也不做本体判定。故 Phase 2 在后端无改动，后端的表结构/配置面已由 Phase 4.0 覆盖。
 
 ### Phase 3 — 删除旧实现（首个破坏性阶段，需先打 tag + 备份）
 按序删除并逐步验证（顺序 = 依赖倒序）：

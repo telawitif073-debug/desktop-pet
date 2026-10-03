@@ -7,6 +7,19 @@
  */
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// 宠物主体功能模块（与桌面端共用同一份纯逻辑；mobile/metro.config.js 已把它加入 watchFolders）。
+// 这里只引 `pet/vitals` 而不引模块门面：门面会连带导出迁移期的双跑比对代码，
+// 没必要打进 RN 包体（Phase 3 删除双跑后可直接改为从门面导入）。
+import {
+  feed as petFeed,
+  play as petPlay,
+  rest as petRest,
+  decay as petDecay,
+  adjustMood as petAdjustMood,
+  addAffection as petAddAffection,
+  LOCKED_VALUE,
+  AFFECTION_GAIN,
+} from '../../../src/pet/vitals';
 import {
   DEFAULT_PET_STATE,
   type ChatMsg,
@@ -274,62 +287,40 @@ export const useAppStore = create<AppStore>((set) => ({
   setBaseUrl: (url) => set({ baseUrl: url.replace(/\s+/g, '').replace(/\/$/, '') }),
   patch: (partial) => set(partial),
 
-  // 数值规则与桌面端 petStore 一致；功能开关关闭时对应项冻结（好感度增长与开关无关）
+  // 数值规则来自宠物主体功能模块（src/pet/vitals），与桌面端**同一份实现**。
+  //
+  // 平台差异（重要，故意保留在调用点而不下沉到共享模块）：
+  //  · 移动端：开关关闭时对互动**短路**（饱腹/心情/精力全部不改，仅好感度继续累积），
+  //    因为移动端没有「每 tick 归位」的兜底；
+  //  · 桌面端：互动不做短路，而由 App 每 5s 的 resetVitals 把关闭项锁定回 80。
+  //  两者稳态一致，但机制不同——统一策略属 Phase 3 的决策，本阶段只统一「数学」。
   feed: () =>
     set((s) => ({
-      petState: {
-        ...s.petState,
-        ...(s.petStateEnabled ? { hunger: Math.min(100, s.petState.hunger + 15) } : {}),
-        affection: Math.min(100, s.petState.affection + 2),
-      },
+      petState: s.petStateEnabled ? petFeed(s.petState) : petAddAffection(s.petState, AFFECTION_GAIN.feed),
     })),
   play: () =>
     set((s) => ({
-      petState: {
-        ...s.petState,
-        ...(s.petStateEnabled
-          ? { mood: Math.min(100, s.petState.mood + 20), energy: Math.max(0, s.petState.energy - 10) }
-          : {}),
-        affection: Math.min(100, s.petState.affection + 5),
-      },
+      petState: s.petStateEnabled ? petPlay(s.petState) : petAddAffection(s.petState, AFFECTION_GAIN.play),
     })),
   rest: () =>
-    set((s) => ({
-      petState: {
-        ...s.petState,
-        ...(s.petStateEnabled
-          ? { energy: Math.min(100, s.petState.energy + 30), hunger: Math.max(0, s.petState.hunger - 5) }
-          : {}),
-      },
-    })),
+    set((s) => (s.petStateEnabled ? { petState: petRest(s.petState) } : s)),
   decay: () =>
-    set((s) => {
-      if (!s.petStateEnabled) return s; // 开关关闭：三项固定 80 不衰减（返回原 state 避免无效订阅更新）
-      return {
-        petState: {
-          ...s.petState,
-          hunger: Math.max(0, s.petState.hunger - 0.5),
-          mood: Math.max(0, s.petState.mood - 0.2),
-          energy: Math.max(0, s.petState.energy - 0.1),
-        },
-      };
-    }),
+    set((s) => (s.petStateEnabled ? { petState: petDecay(s.petState) } : s)), // 开关关闭：三项不衰减（返回原 state）
   setPetStateEnabled: (next) =>
     set((s) => ({
       petStateEnabled: next,
-      // 关闭时三项立即归位 80（与桌面端 resetVitals 一致），开启时维持 80 起步
-      petState: next ? s.petState : { ...s.petState, hunger: 80, mood: 80, energy: 80 },
+      // 关闭时三项立即归位（与桌面端 resetVitals 的锁定值同源），开启时维持原值
+      petState: next
+        ? s.petState
+        : { ...s.petState, hunger: LOCKED_VALUE, mood: LOCKED_VALUE, energy: LOCKED_VALUE },
     })),
-  addAffection: (delta) =>
-    set((s) => ({
-      petState: { ...s.petState, affection: Math.min(100, Math.max(0, s.petState.affection + delta)) },
-    })),
+  addAffection: (delta) => set((s) => ({ petState: petAddAffection(s.petState, delta) })),
   setMoodFromChat: (next) => set({ moodFromChat: next }),
   adjustMood: (delta) =>
     set((s) => {
-      // 状态功能关闭时三项必须恒定 80（防御性门控：任何调用路径都不允许改动）
+      // 状态功能关闭时三项必须恒定（防御性门控：任何调用路径都不允许改动）
       if (!s.petStateEnabled) return s;
-      return { petState: { ...s.petState, mood: Math.min(100, Math.max(0, s.petState.mood + delta)) } };
+      return { petState: petAdjustMood(s.petState, delta) };
     }),
 
   // 消息操作：始终作用于当前激活档案的 messages，并同步归档到 profileMessages[当前档案]

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { loadConfig, saveConfig, PET_ACTIONS_MAX, type PetAction } from './config';
 import { probeImageBuffer } from './petPack';
-import { evaluatePetPack } from '../shared/petResource';
+import { evaluatePetPack } from '../pet'; // 宠物主体功能模块（统一入口）
 
 function getActionsDir(): string {
   return path.join(app.getPath('userData'), 'pet-actions');

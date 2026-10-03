@@ -17,7 +17,7 @@ import {
   type PetPackEvaluation,
   type ResourceEntry,
   type ResourceProbe,
-} from '../shared/petResource';
+} from '../pet'; // 宠物主体功能模块（统一入口）
 
 const SKIP_DIRS = new Set(['.git', '.github', 'node_modules', '__MACOSX', 'dist', 'build', '.vite', 'out', 'coverage']);
 const IMAGE_LIKE = new Set([

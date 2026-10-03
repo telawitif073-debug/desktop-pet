@@ -1,5 +1,6 @@
 import type { AppConfig } from './config';
 import type { ChatMessage } from './llmService';
+import { VITAL_ALERT_THRESHOLD } from '../pet'; // 宠物主体功能模块（统一入口）：低值提醒阈值
 
 const MIN_INTERVAL_MINUTES = 10;
 /** 用户最近发言窗口：窗口内发言视为正在聊天，跳过本轮主动发起 */
@@ -43,9 +44,9 @@ export function startAgentProactive(o: AgentProactiveOptions): () => void {
   const fire = async () => {
     const state = o.getState();
     const hints: string[] = [];
-    if (state.hunger < 30) hints.push('宠物很饿，自然地提醒主人喂食');
-    if (state.energy < 30) hints.push('宠物很累，建议让宠物休息');
-    if (state.mood < 30) hints.push('宠物心情低落，说句话请求主人陪它玩耍');
+    if (state.hunger < VITAL_ALERT_THRESHOLD) hints.push('宠物很饿，自然地提醒主人喂食');
+    if (state.energy < VITAL_ALERT_THRESHOLD) hints.push('宠物很累，建议让宠物休息');
+    if (state.mood < VITAL_ALERT_THRESHOLD) hints.push('宠物心情低落，说句话请求主人陪它玩耍');
     const context = hints.length
       ? `请围绕以下状态主动开启话题：${hints.join('；')}。`
       : '请结合当前时间与最近聊天内容自然地主动开启话题。';
