@@ -31,6 +31,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import Studio from './components/Studio';
 import './index.css';
 
 const rootElement = document.getElementById('root');
@@ -39,8 +40,14 @@ if (!rootElement) {
   throw new Error('找不到根元素 #root，请检查 index.html');
 }
 
+// 同一份渲染包三个用途：宠物窗（默认）、宠工坊（#/workshop）、
+// 以及嵌在资源中心窗口内容区里的宠工坊（#/workshop/embedded，隐藏多余的顶栏入口）
+const route = window.location.hash.replace(/^#/, '').split('/').filter(Boolean);
+const isWorkshop = route[0] === 'workshop';
+const isEmbedded = isWorkshop && route[1] === 'embedded';
+
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <App />
+    {isWorkshop ? <Studio brand="宠工坊" embedded={isEmbedded} /> : <App />}
   </React.StrictMode>
 );

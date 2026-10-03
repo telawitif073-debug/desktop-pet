@@ -171,8 +171,15 @@ export default function MarkdownText({ content, baseStyle, onCopy }: Props): Rea
           );
           return;
         }
-        if (raw.trim()) out.push(renderInline(raw));
-        else out.push(<Text key={idx}>{'\n'}</Text>);
+        // 行内片段必须包在同一个 <Text> 里流式排列：直接作为兄弟节点会各占一行
+        // （此前「要点：`greet` 返回字符串，详见 [链接]。」会被拆成 5 行）
+        if (raw.trim()) {
+          out.push(
+            <Text key={idx} selectable style={baseStyle}>
+              {renderInline(raw)}
+            </Text>,
+          );
+        } else out.push(<Text key={idx}>{'\n'}</Text>);
       });
       return out;
     },
@@ -247,10 +254,11 @@ const styles = StyleSheet.create({
   codeCard: {
     marginVertical: 4,
     borderRadius: 10,
-    // 透明度 0.2 的深灰：在浅色气泡上呈柔和浅灰，不突兀；加细描边保证块面边界清晰
-    backgroundColor: 'rgba(45,45,45,0.2)',
+    // 透明度 0.05 的深灰：在浅色气泡上几乎只留一层极淡的灰，完全不突兀；
+    // 底色很浅，靠描边维持代码块边界可辨识
+    backgroundColor: 'rgba(45,45,45,0.05)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.08)',
+    borderColor: 'rgba(0,0,0,0.12)',
     alignSelf: 'stretch',
     width: '100%',
   },

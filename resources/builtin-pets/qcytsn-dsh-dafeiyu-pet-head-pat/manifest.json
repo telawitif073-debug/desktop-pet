@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "id": "qcytsn-dsh-dafeiyu-pet-head-pat",
+  "name": "dsh-dafeiyu · pet/head_pat",
+  "description": "来自 GitHub 开源项目 QCYTSN/dsh-dafeiyu 的美术资源（pet/head_pat），经并集包围盒归一化后导入；原素材 1 段动画、16 帧。",
+  "author": "QCYTSN/dsh-dafeiyu 上游作者（GitHub）",
+  "license": "MIT — 上游 QCYTSN/dsh-dafeiyu（仓库级宽松许可 MIT）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "ea74ce462e594f3411061afcff0ea61896aaf1ae59de3bab1e54a1d0f65a38eb"
+  },
+  "actions": [
+    {
+      "id": "feed-head-pat",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/feed-head-pat/frame_000.png",
+          "sha256": "39ee8c2b52afdf76bc54c651efb189a5a83c9eabd25d8b1108bcec7e9b93120c"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_001.png",
+          "sha256": "c3c9aff6a2bd00efcee3c032648b94bf7837b6d4402cfb5436d8a01b5f94c5e6"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_002.png",
+          "sha256": "694dceb539b2cea47687739ae4827641d34a757756ca8e447fb1a789937d3619"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_003.png",
+          "sha256": "8dfcf69435ab4c0e4beaa201c1a3ee5b40c952c1dc4498890bfab4cc5f6cf04f"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_004.png",
+          "sha256": "14492e002517c5679438b1a8d252bd9480ba14721531849f2c344d9cdc9af989"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_005.png",
+          "sha256": "8ba228e49e381b0b35c9fc2dd647227345734421cff9bbd4258337c5f4e0a68e"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_006.png",
+          "sha256": "40eabd1f55f157355f64d9323c6c742d31b877b9594be8c79071e3d7d9a73acb"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_007.png",
+          "sha256": "7d3381ea58157c971456f271fd0417caf2cb300423ad615f1a9857a56f87be14"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_008.png",
+          "sha256": "acf1034ee70fb18f1523f6195979b9d7108ab119d6ce4bbb7b16c837795fc79a"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_009.png",
+          "sha256": "66198a0002f448884af92b86842b27ce337976b74bea52f98c9214c3c7164296"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_010.png",
+          "sha256": "4d47e11c20913d6dc73f22c44b2cc3501d45ce2fc4fbeaa07b26c348dcfa3f66"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_011.png",
+          "sha256": "669c808337b45a2fade3b194b94f9be82901fb3e06f078d0ab0cf6adbbc69dd7"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_012.png",
+          "sha256": "56cbdc709e505b126ff75bc448b3e6da53aac875f1194233c365e2beda2da30a"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_013.png",
+          "sha256": "e66205d3b8e014f76618c5a5eb9a0933aff8999a9e4330dc3bc3adf84c1367c9"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_014.png",
+          "sha256": "8266d5f58e22d4067feccd9b694096b7492f568ffee2f529d9acbb3fdf94a0af"
+        },
+        {
+          "file": "actions/feed-head-pat/frame_015.png",
+          "sha256": "dccf472392920b45e49a8df198d113361dc869393be01b7b04571262a96e3763"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "QCYTSN/dsh-dafeiyu",
+    "url": "https://github.com/QCYTSN/dsh-dafeiyu",
+    "stars": 380,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.294917,
+    "rank": 93,
+    "license": "MIT",
+    "licenseTier": "A",
+    "licenseReason": "仓库级宽松许可 MIT",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "assets/pet/head_pat/head_pat_001.webp#frame0",
+    "actionSources": [
+      {
+        "action": "feed-head-pat",
+        "interaction": "feed",
+        "sourcePath": "assets/pet/head_pat/head_pat_001.webp",
+        "sourceFiles": [
+          "assets/pet/head_pat/head_pat_001.webp",
+          "assets/pet/head_pat/head_pat_002.webp",
+          "assets/pet/head_pat/head_pat_003.webp",
+          "assets/pet/head_pat/head_pat_004.webp",
+          "assets/pet/head_pat/head_pat_005.webp",
+          "assets/pet/head_pat/head_pat_006.webp",
+          "assets/pet/head_pat/head_pat_007.webp",
+          "assets/pet/head_pat/head_pat_008.webp",
+          "assets/pet/head_pat/head_pat_009.webp",
+          "assets/pet/head_pat/head_pat_010.webp",
+          "assets/pet/head_pat/head_pat_011.webp",
+          "assets/pet/head_pat/head_pat_012.webp",
+          "assets/pet/head_pat/head_pat_013.webp",
+          "assets/pet/head_pat/head_pat_014.webp",
+          "assets/pet/head_pat/head_pat_015.webp",
+          "assets/pet/head_pat/head_pat_016.webp",
+          "assets/pet/head_pat/head_pat_017.webp",
+          "assets/pet/head_pat/head_pat_018.webp",
+          "assets/pet/head_pat/head_pat_019.webp",
+          "assets/pet/head_pat/head_pat_020.webp",
+          "assets/pet/head_pat/head_pat_021.webp",
+          "assets/pet/head_pat/head_pat_022.webp",
+          "assets/pet/head_pat/head_pat_023.webp",
+          "assets/pet/head_pat/head_pat_024.webp",
+          "assets/pet/head_pat/head_pat_025.webp",
+          "assets/pet/head_pat/head_pat_026.webp",
+          "assets/pet/head_pat/head_pat_027.webp",
+          "assets/pet/head_pat/head_pat_028.webp",
+          "assets/pet/head_pat/head_pat_029.webp",
+          "assets/pet/head_pat/head_pat_030.webp",
+          "assets/pet/head_pat/head_pat_031.webp",
+          "assets/pet/head_pat/head_pat_032.webp",
+          "assets/pet/head_pat/head_pat_033.webp",
+          "assets/pet/head_pat/head_pat_034.webp",
+          "assets/pet/head_pat/head_pat_035.webp",
+          "assets/pet/head_pat/head_pat_036.webp",
+          "assets/pet/head_pat/head_pat_037.webp",
+          "assets/pet/head_pat/head_pat_038.webp",
+          "assets/pet/head_pat/head_pat_039.webp",
+          "assets/pet/head_pat/head_pat_040.webp",
+          "assets/pet/head_pat/head_pat_041.webp",
+          "assets/pet/head_pat/head_pat_042.webp",
+          "assets/pet/head_pat/head_pat_043.webp",
+          "assets/pet/head_pat/head_pat_044.webp",
+          "assets/pet/head_pat/head_pat_045.webp",
+          "assets/pet/head_pat/head_pat_046.webp",
+          "assets/pet/head_pat/head_pat_047.webp",
+          "assets/pet/head_pat/head_pat_048.webp",
+          "assets/pet/head_pat/head_pat_049.webp",
+          "assets/pet/head_pat/head_pat_050.webp",
+          "assets/pet/head_pat/head_pat_051.webp",
+          "assets/pet/head_pat/head_pat_052.webp",
+          "assets/pet/head_pat/head_pat_053.webp",
+          "assets/pet/head_pat/head_pat_054.webp",
+          "assets/pet/head_pat/head_pat_055.webp",
+          "assets/pet/head_pat/head_pat_056.webp",
+          "assets/pet/head_pat/head_pat_057.webp",
+          "assets/pet/head_pat/head_pat_058.webp",
+          "assets/pet/head_pat/head_pat_059.webp",
+          "assets/pet/head_pat/head_pat_060.webp",
+          "assets/pet/head_pat/head_pat_061.webp",
+          "assets/pet/head_pat/head_pat_062.webp",
+          "assets/pet/head_pat/head_pat_063.webp",
+          "assets/pet/head_pat/head_pat_064.webp",
+          "assets/pet/head_pat/head_pat_065.webp",
+          "assets/pet/head_pat/head_pat_066.webp",
+          "assets/pet/head_pat/head_pat_067.webp",
+          "assets/pet/head_pat/head_pat_068.webp",
+          "assets/pet/head_pat/head_pat_069.webp",
+          "assets/pet/head_pat/head_pat_070.webp",
+          "assets/pet/head_pat/head_pat_071.webp",
+          "assets/pet/head_pat/head_pat_072.webp",
+          "assets/pet/head_pat/head_pat_073.webp",
+          "assets/pet/head_pat/head_pat_074.webp",
+          "assets/pet/head_pat/head_pat_075.webp",
+          "assets/pet/head_pat/head_pat_076.webp",
+          "assets/pet/head_pat/head_pat_077.webp",
+          "assets/pet/head_pat/head_pat_078.webp",
+          "assets/pet/head_pat/head_pat_079.webp",
+          "assets/pet/head_pat/head_pat_080.webp",
+          "assets/pet/head_pat/head_pat_081.webp",
+          "assets/pet/head_pat/head_pat_082.webp",
+          "assets/pet/head_pat/head_pat_083.webp",
+          "assets/pet/head_pat/head_pat_084.webp",
+          "assets/pet/head_pat/head_pat_085.webp",
+          "assets/pet/head_pat/head_pat_086.webp",
+          "assets/pet/head_pat/head_pat_087.webp",
+          "assets/pet/head_pat/head_pat_088.webp",
+          "assets/pet/head_pat/head_pat_089.webp",
+          "assets/pet/head_pat/head_pat_090.webp",
+          "assets/pet/head_pat/head_pat_091.webp",
+          "assets/pet/head_pat/head_pat_092.webp",
+          "assets/pet/head_pat/head_pat_093.webp",
+          "assets/pet/head_pat/head_pat_094.webp",
+          "assets/pet/head_pat/head_pat_095.webp",
+          "assets/pet/head_pat/head_pat_096.webp"
+        ],
+        "sourceFrames": 96,
+        "importedFrames": 16,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 1.568773,
+        "sampled": true
+      }
+    ]
+  }
+}

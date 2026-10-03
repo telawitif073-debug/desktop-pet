@@ -1,4 +1,8 @@
 import 'reflect-metadata';
+import * as dns from 'dns';
+// 阿里云 ECS 无 IPv6 出口，而部分上游（open-meteo 等）下发 AAAA 记录，
+// Node 默认 happy-eyeballs 偶发连到 v6 失败 → 强制 IPv4 优先，避免技能数据源抖动
+dns.setDefaultResultOrder('ipv4first');
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, ExceptionFilter, Catch, ArgumentsHost, HttpException } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';

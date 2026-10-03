@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "qcytsn-dsh-dafeiyu-dafeiyu-dragging",
+  "name": "dsh-dafeiyu · dafeiyu/dragging",
+  "description": "来自 GitHub 开源项目 QCYTSN/dsh-dafeiyu 的美术资源（dafeiyu/dragging），经并集包围盒归一化后导入；原素材 1 段动画、4 帧。",
+  "author": "QCYTSN/dsh-dafeiyu 上游作者（GitHub）",
+  "license": "MIT — 上游 QCYTSN/dsh-dafeiyu（仓库级宽松许可 MIT）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "56df7f9f206378ea1f465e04e690ebae6cc6c3aeb6c83e88b4c62a40bf0e129b"
+  },
+  "actions": [
+    {
+      "id": "feed-dragging",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/feed-dragging/frame_000.png",
+          "sha256": "28e420fef00580f233262801acd2fff2ddb54e9836d1ed7c2273965c66addd3a"
+        },
+        {
+          "file": "actions/feed-dragging/frame_001.png",
+          "sha256": "6b04d2880232cd2e59fc8659e542e0e8787fc88a77344c6065bdba49a91c6992"
+        },
+        {
+          "file": "actions/feed-dragging/frame_002.png",
+          "sha256": "a7221c03755a717888cf5e58b32fb28a3758e129fea7166149b9ecd8c841beba"
+        },
+        {
+          "file": "actions/feed-dragging/frame_003.png",
+          "sha256": "9dc920bff17490256aac7823b44eb4ce2ea22d513335d701b966d43d83a970ab"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "QCYTSN/dsh-dafeiyu",
+    "url": "https://github.com/QCYTSN/dsh-dafeiyu",
+    "stars": 380,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.294917,
+    "rank": 93,
+    "license": "MIT",
+    "licenseTier": "A",
+    "licenseReason": "仓库级宽松许可 MIT",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "legacy/dafeiyu/dragging/dragging_238_01.png#frame0",
+    "actionSources": [
+      {
+        "action": "feed-dragging",
+        "interaction": "feed",
+        "sourcePath": "legacy/dafeiyu/dragging/dragging_238_01.png",
+        "sourceFiles": [
+          "legacy/dafeiyu/dragging/dragging_238_01.png",
+          "legacy/dafeiyu/dragging/dragging_238_02.png",
+          "legacy/dafeiyu/dragging/dragging_238_03.png",
+          "legacy/dafeiyu/dragging/dragging_238_04.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 1.736626,
+        "sampled": false
+      }
+    ]
+  }
+}

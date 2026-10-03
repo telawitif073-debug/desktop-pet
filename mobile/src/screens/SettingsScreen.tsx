@@ -8,7 +8,9 @@ import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { flushAllOnQuit, scheduleUpload } from '../api/sync';
 import { DEFAULT_BASE_URL, useAppStore, type PetAssetRef } from '../store/appStore';
-import { listVoices, speak } from '../native/Voice';
+import { listVoices } from '../native/Voice';
+import { speakReply, previewInstalled, previewSystemVoice, cloudVoiceReady, stopAllVoice, testGptsovitsEngine } from '../voiceEngine';
+import type { InstalledVoice, TtsCloudConfig } from '../types';
 import { APP_VERSION_NAME, checkAppUpdate } from '../update/checkUpdate';
 import { nativeVersionName } from '../native/PetInfo';
 import {
@@ -128,6 +130,9 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
   const speechRate = useAppStore((s) => s.speechRate);
   const speechPitch = useAppStore((s) => s.speechPitch);
   const speechVoice = useAppStore((s) => s.speechVoice);
+  const downloadedVoices = useAppStore((s) => s.downloadedVoices);
+  const activeCloudVoiceId = useAppStore((s) => s.activeCloudVoiceId);
+  const ttsCloudConfig = useAppStore((s) => s.ttsCloudConfig);
   const chatClearConfirm = useAppStore((s) => s.chatClearConfirm);
   const petStateEnabled = useAppStore((s) => s.petStateEnabled);
   const moodFromChat = useAppStore((s) => s.moodFromChat);
@@ -141,10 +146,88 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
   const [voiceModal, setVoiceModal] = useState(false);
   const [speechModal, setSpeechModal] = useState(false);
   const [voices, setVoices] = useState<Array<{ name: string; label: string }>>([]);
+  const [voicePreviewing, setVoicePreviewing] = useState('');
+  const [ttsCfgModal, setTtsCfgModal] = useState(false);
+  const [ttsCfg, setTtsCfg] = useState<TtsCloudConfig>({ engine: 'openai', baseUrl: '', apiKey: '', model: '' });
+  const [ttsTesting, setTtsTesting] = useState(false);
+  const [ttsTestResult, setTtsTestResult] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
   const downloadedPets = useAppStore((s) => s.downloadedPets);
+  const activeCloudVoiceName = downloadedVoices.find((v) => v.id === activeCloudVoiceId)?.name ?? '';
+
+  /** 试听已安装云音色（错误如缺 Key 直接弹窗指引） */
+  const previewCloud = async (v: InstalledVoice): Promise<void> => {
+    if (voicePreviewing) return;
+    stopAllVoice();
+    setVoicePreviewing(v.id);
+    try {
+      await previewInstalled(v);
+    } catch (e) {
+      Alert.alert('试听失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setVoicePreviewing('');
+    }
+  };
+
+  const previewSys = async (voiceName: string | undefined): Promise<void> => {
+    if (voicePreviewing) return;
+    setVoicePreviewing(voiceName || 'system-default');
+    try {
+      await previewSystemVoice(voiceName);
+    } finally {
+      setVoicePreviewing('');
+    }
+  };
+
+  /** 删除已安装音色（当前使用中则一并取消选择） */
+  const removeVoice = (v: InstalledVoice): void => {
+    Alert.alert('删除音色', `确定从本机删除「${v.name}」？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => {
+          const s = useAppStore.getState();
+          s.patch({
+            downloadedVoices: s.downloadedVoices.filter((x) => x.id !== v.id),
+            ...(s.activeCloudVoiceId === v.id ? { activeCloudVoiceId: '' } : {}),
+          });
+          scheduleUpload('config');
+        },
+      },
+    ]);
+  };
+
+  /** 选择系统音色：与云音色互斥（清空云选择） */
+  const pickSystemVoice = (voiceName: string): void => {
+    useAppStore.getState().patch({ speechVoice: voiceName, activeCloudVoiceId: '' });
+    scheduleUpload('config');
+    setVoiceModal(false);
+  };
+
+  const pickCloudVoice = (v: InstalledVoice): void => {
+    const s = useAppStore.getState();
+    s.patch({ activeCloudVoiceId: v.id });
+    scheduleUpload('config');
+    setVoiceModal(false);
+    if (!cloudVoiceReady(v)) {
+      Alert.alert('已选择云音色', `「${v.name}」需要云 TTS 服务凭证，请点本页「云 TTS 服务配置」填写地址、模型和 Key。`);
+    }
+  };
+
+  const saveTtsCfg = (): void => {
+    useAppStore.getState().patch({
+      ttsCloudConfig: {
+        engine: ttsCfg.engine || 'openai',
+        baseUrl: ttsCfg.baseUrl.trim().replace(/\/+$/, ''),
+        apiKey: ttsCfg.apiKey.trim(),
+        model: ttsCfg.model.trim(),
+      },
+    });
+    scheduleUpload('config');
+  };
 
   // 聊天人设 = 当前 API 档案的系统提示词（安装智能体会写入这里，见商店安装逻辑）
   const activeProfile = llmProfiles.find((p) => p.id === llmActiveProfileId) ?? llmProfiles[0] ?? null;
@@ -323,7 +406,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
             <Row
               icon="🎙"
               label="音色"
-              value={speechVoice ? '已选音色' : '系统默认'}
+              value={activeCloudVoiceName || (speechVoice ? '系统音色' : '系统默认')}
               showArrow
               disabled={!tts}
               onPress={() => {
@@ -331,6 +414,20 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                   setVoices(list);
                   setVoiceModal(true);
                 });
+              }}
+            />
+            <View style={st.divider} />
+            <Row
+              icon="☁️"
+              label="云 TTS 服务配置"
+              value={ttsCloudConfig.apiKey || ttsCloudConfig.baseUrl ? (ttsCloudConfig.engine === 'gptsovits' ? 'GPT-SoVITS' : '已配置 Key') : '未配置'}
+              showArrow
+              disabled={!tts}
+              onPress={() => {
+                const c = useAppStore.getState().ttsCloudConfig;
+                setTtsCfg({ engine: c.engine || 'openai', baseUrl: c.baseUrl, apiKey: c.apiKey, model: c.model });
+                setTtsTestResult('');
+                setTtsCfgModal(true);
               }}
             />
             <View style={st.divider} />
@@ -442,12 +539,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               <Pressable
                 style={[st.btn, st.btnPrimary, { marginTop: 16 }]}
                 onPress={() => {
-                  const s = useAppStore.getState();
-                  void speak('你好，我是你的宠物，很高兴见到你。', {
-                    rate: s.speechRate,
-                    pitch: s.speechPitch,
-                    voice: s.speechVoice || undefined,
-                  });
+                  void speakReply('你好，我是你的宠物，很高兴见到你。', null);
                 }}>
                 <Text style={st.btnPrimaryText}>试听</Text>
               </Pressable>
@@ -455,36 +547,188 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
           </Pressable>
         </Modal>
 
-        {/* 音色选择 */}
+        {/* 音色选择：我的云音色（商店安装）+ 系统音色 */}
         <Modal visible={voiceModal} transparent animationType="fade" onRequestClose={() => setVoiceModal(false)}>
           <Pressable style={st.modalMask} onPress={() => setVoiceModal(false)}>
             <Pressable style={st.modalCard} onPress={() => undefined}>
               <Text style={st.modalTitle}>选择音色</Text>
-              <ScrollView style={{ maxHeight: 360 }}>
-                <Pressable
-                  style={st.voiceRow}
-                  onPress={() => {
-                    useAppStore.getState().patch({ speechVoice: '' });
-                    setVoiceModal(false);
-                  }}>
-                  <Text style={[st.voiceRowText, !speechVoice && st.voiceRowActive]}>系统默认</Text>
-                  {!speechVoice && <Text style={st.voiceRowActive}>✓</Text>}
-                </Pressable>
-                {voices.map((v) => (
-                  <Pressable
-                    key={v.name}
-                    style={st.voiceRow}
-                    onPress={() => {
-                      useAppStore.getState().patch({ speechVoice: v.name });
-                      setVoiceModal(false);
-                    }}>
-                    <Text style={[st.voiceRowText, speechVoice === v.name && st.voiceRowActive]} numberOfLines={1}>
-                      {v.label}
-                    </Text>
-                    {speechVoice === v.name && <Text style={st.voiceRowActive}>✓</Text>}
+              <ScrollView style={{ maxHeight: 380 }}>
+                {downloadedVoices.length > 0 && <Text style={st.voiceGroup}>我的云音色（商店）</Text>}
+                {downloadedVoices.map((v) => {
+                  const active = activeCloudVoiceId === v.id;
+                  const ready = v.config.engine === 'system' || cloudVoiceReady(v);
+                  return (
+                    <View key={v.id} style={st.voiceRow}>
+                      <Pressable style={{ flex: 1 }} onPress={() => pickCloudVoice(v)}>
+                        <Text style={[st.voiceRowText, active && st.voiceRowActive]} numberOfLines={1}>
+                          {v.name}
+                          {v.config.engine === 'cloud' && !ready ? '（未配 Key）' : ''}
+                        </Text>
+                      </Pressable>
+                      <Pressable hitSlop={6} disabled={!!voicePreviewing} onPress={() => void previewCloud(v)} style={{ marginRight: 12 }}>
+                        <Text style={{ color: '#4D6BFE', fontSize: 13 }}>{voicePreviewing === v.id ? '…' : '试听'}</Text>
+                      </Pressable>
+                      <Pressable hitSlop={6} onPress={() => removeVoice(v)} style={{ marginRight: 10 }}>
+                        <Text style={{ color: '#C04040', fontSize: 13 }}>删除</Text>
+                      </Pressable>
+                      {active && <Text style={st.voiceRowActive}>✓</Text>}
+                    </View>
+                  );
+                })}
+
+                <Text style={st.voiceGroup}>系统音色（离线）</Text>
+                <View style={st.voiceRow}>
+                  <Pressable style={{ flex: 1 }} onPress={() => pickSystemVoice('')}>
+                    <Text style={[st.voiceRowText, !speechVoice && !activeCloudVoiceId && st.voiceRowActive]}>系统默认</Text>
                   </Pressable>
+                  <Pressable hitSlop={6} disabled={!!voicePreviewing} onPress={() => void previewSys(undefined)} style={{ marginRight: 12 }}>
+                    <Text style={{ color: '#4D6BFE', fontSize: 13 }}>{voicePreviewing === 'system-default' ? '…' : '试听'}</Text>
+                  </Pressable>
+                  {!speechVoice && !activeCloudVoiceId && <Text style={st.voiceRowActive}>✓</Text>}
+                </View>
+                {voices.map((v) => (
+                  <View key={v.name} style={st.voiceRow}>
+                    <Pressable style={{ flex: 1 }} onPress={() => pickSystemVoice(v.name)}>
+                      <Text style={[st.voiceRowText, speechVoice === v.name && !activeCloudVoiceId && st.voiceRowActive]} numberOfLines={1}>
+                        {v.label}
+                      </Text>
+                    </Pressable>
+                    <Pressable hitSlop={6} disabled={!!voicePreviewing} onPress={() => void previewSys(v.name)} style={{ marginRight: 12 }}>
+                      <Text style={{ color: '#4D6BFE', fontSize: 13 }}>{voicePreviewing === v.name ? '…' : '试听'}</Text>
+                    </Pressable>
+                    {speechVoice === v.name && !activeCloudVoiceId && <Text style={st.voiceRowActive}>✓</Text>}
+                  </View>
                 ))}
-                {!voices.length && <Text style={st.hint}>未发现可切换的中文音色</Text>}
+                {!voices.length && <Text style={st.hint}>未发现更多系统音色（可在安卓系统设置中安装语音引擎与中文语音包）</Text>}
+                <Text style={[st.hint, { marginTop: 8 }]}>更多云音色请到侧边栏「商店 → 音色」安装；云音色需配合「云 TTS 服务配置」使用</Text>
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        {/* 云 TTS 服务配置：OpenAI 兼容 /audio/speech 或自建 GPT-SoVITS api_v2 */}
+        <Modal visible={ttsCfgModal} transparent animationType="fade" onRequestClose={() => setTtsCfgModal(false)}>
+          <Pressable style={st.modalMask} onPress={() => setTtsCfgModal(false)}>
+            <Pressable style={st.modalCard} onPress={() => undefined}>
+              <Text style={st.modalTitle}>云 TTS 服务配置</Text>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                {/* 引擎选择 */}
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                  {([
+                    { key: 'openai', label: 'OpenAI 兼容' },
+                    { key: 'gptsovits', label: 'GPT-SoVITS' },
+                  ] as const).map((it) => (
+                    <Pressable
+                      key={it.key}
+                      onPress={() => {
+                        setTtsCfg((c) => ({ ...c, engine: it.key }));
+                        setTtsTestResult('');
+                      }}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        alignItems: 'center',
+                        backgroundColor: (ttsCfg.engine || 'openai') === it.key ? '#4D6BFE' : '#F2F3F6',
+                      }}>
+                      <Text style={{ color: (ttsCfg.engine || 'openai') === it.key ? '#fff' : '#555', fontSize: 13, fontWeight: '600' }}>{it.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Text style={st.fieldLabel}>服务地址</Text>
+                <TextInput
+                  style={st.textInput}
+                  value={ttsCfg.baseUrl}
+                  onChangeText={(t) => setTtsCfg((c) => ({ ...c, baseUrl: t }))}
+                  placeholder={ttsCfg.engine === 'gptsovits' ? 'http://192.168.1.5:9880' : 'https://api.openai.com/v1'}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+
+                {ttsCfg.engine === 'gptsovits' ? (
+                  <>
+                    <Text style={st.hint}>
+                      填你电脑上 GPT-SoVITS 整合包 api_v2 服务的地址（默认端口 9880），手机需与电脑在同一局域网；引擎所在电脑记得放行防火墙端口。
+                      参考音频（refAudioPath）在音色配置里填，无需 API Key。部署与训练克隆详见音色板块的帮助指南。
+                    </Text>
+                    {ttsTestResult ? <Text style={{ fontSize: 12, marginTop: 8, color: ttsTestResult.startsWith('✓') ? '#2BA44C' : '#E5484D' }}>{ttsTestResult}</Text> : null}
+                    <Pressable
+                      style={[st.btn, { borderWidth: 1, borderColor: '#4D6BFE', marginTop: 12 }, ttsTesting && { opacity: 0.6 }]}
+                      disabled={ttsTesting}
+                      onPress={async () => {
+                        setTtsTesting(true);
+                        setTtsTestResult('');
+                        try {
+                          const r = await testGptsovitsEngine(ttsCfg.baseUrl);
+                          setTtsTestResult(`${r.online ? '✓' : '✗'} ${r.message}`);
+                        } finally {
+                          setTtsTesting(false);
+                        }
+                      }}>
+                      <Text style={{ color: '#4D6BFE', fontSize: 14 }}>{ttsTesting ? '测试中…' : '连接测试'}</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Text style={st.fieldLabel}>模型名</Text>
+                    <TextInput
+                      style={st.textInput}
+                      value={ttsCfg.model}
+                      onChangeText={(t) => setTtsCfg((c) => ({ ...c, model: t }))}
+                      placeholder="tts-1 / gpt-4o-mini-tts / cosyvoice-v2 等"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <Text style={st.fieldLabel}>API Key</Text>
+                    <TextInput
+                      style={st.textInput}
+                      value={ttsCfg.apiKey}
+                      onChangeText={(t) => setTtsCfg((c) => ({ ...c, apiKey: t }))}
+                      placeholder="sk-..."
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      secureTextEntry
+                    />
+                    <Text style={st.hint}>
+                      Key 仅保存在本机、云同步时加密，不会随音色配置分享。兼容 OpenAI「/audio/speech」的服务均可：OpenAI、阿里云
+                      CosyVoice/百炼、火山引擎豆包语音、MiniMax、硅基流动等，具体地址与模型名以服务商控制台为准。
+                    </Text>
+                  </>
+                )}
+
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                  <Pressable
+                    style={[st.btn, { borderWidth: 1, borderColor: '#D5D8DE' }, ttsTesting && { opacity: 0.6 }]}
+                    disabled={ttsTesting}
+                    onPress={async () => {
+                      saveTtsCfg();
+                      const cur = useAppStore.getState();
+                      const v = cur.downloadedVoices.find((x) => x.id === cur.activeCloudVoiceId);
+                      if (!v || v.config.engine === 'system') {
+                        Alert.alert('暂无可试听音色', '请先在「音色」里选择一个云音色，或到商店安装后再来测试。');
+                        return;
+                      }
+                      setTtsTesting(true);
+                      try {
+                        await previewInstalled(v);
+                      } catch (e) {
+                        Alert.alert('测试失败', e instanceof Error ? e.message : String(e));
+                      } finally {
+                        setTtsTesting(false);
+                      }
+                    }}>
+                    <Text style={{ color: '#4D6BFE', fontSize: 14 }}>{ttsTesting ? '合成中…' : '保存并试听'}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[st.btn, st.btnPrimary, { flex: 1 }]}
+                    onPress={() => {
+                      saveTtsCfg();
+                      setTtsCfgModal(false);
+                    }}>
+                    <Text style={st.btnPrimaryText}>保存</Text>
+                  </Pressable>
+                </View>
               </ScrollView>
             </Pressable>
           </Pressable>
@@ -550,6 +794,8 @@ const st = StyleSheet.create({
   voiceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
   voiceRowText: { fontSize: 14, color: '#1A1A1A', flex: 1, marginRight: 8 },
   voiceRowActive: { color: '#4D6BFE', fontWeight: '600' },
+  voiceGroup: { fontSize: 12, color: '#8A8F99', fontWeight: '700', marginTop: 14, marginBottom: 2 },
+  fieldLabel: { fontSize: 12, color: '#666', fontWeight: '600', marginTop: 10, marginBottom: 4 },
   stepperRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
   stepper: { flexDirection: 'row', alignItems: 'center' },
   stepperBtn: { width: 34, height: 30, borderRadius: 8, backgroundColor: '#F0F2F5', alignItems: 'center', justifyContent: 'center' },

@@ -13,6 +13,11 @@ const MIME_BY_EXTENSION: Record<string, Set<string>> = {
   '.gz': new Set(['application/gzip', 'application/x-gzip', 'application/octet-stream']),
   '.json': new Set(['application/json', 'text/json', 'text/plain']),
   '.txt': new Set(['text/plain']),
+  // 音色试听（≤5MB，仅音色上传接口允许；MIME 宽松兼容 Android 录音的 octet-stream）
+  '.mp3': new Set(['audio/mpeg', 'audio/mp3', 'application/octet-stream']),
+  '.wav': new Set(['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/vnd.wave', 'application/octet-stream']),
+  '.m4a': new Set(['audio/mp4', 'audio/x-m4a', 'audio/m4a', 'application/octet-stream']),
+  '.aac': new Set(['audio/aac', 'audio/x-aac', 'application/octet-stream']),
 };
 
 export const UPLOAD_EXTENSIONS = new Set(Object.keys(MIME_BY_EXTENSION));
@@ -52,6 +57,18 @@ export function validateUploadFile(file: Pick<Express.Multer.File, 'originalname
   }
   if (extension === '.zip' && bytes.subarray(0, 2).toString() !== 'PK') {
     throw new BadRequestException('ZIP 文件内容无效');
+  }
+  if (extension === '.mp3' && !(bytes.subarray(0, 3).toString() === 'ID3' || (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0))) {
+    throw new BadRequestException('MP3 文件内容无效');
+  }
+  if (extension === '.wav' && !(bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WAVE')) {
+    throw new BadRequestException('WAV 文件内容无效');
+  }
+  if (extension === '.m4a' && bytes.subarray(4, 8).toString() !== 'ftyp') {
+    throw new BadRequestException('M4A 文件内容无效');
+  }
+  if (extension === '.aac' && !(bytes[0] === 0xff && (bytes[1] & 0xf6) === 0xf0)) {
+    throw new BadRequestException('AAC 文件内容无效');
   }
   return extension;
 }

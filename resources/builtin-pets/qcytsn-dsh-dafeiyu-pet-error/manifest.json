@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "id": "qcytsn-dsh-dafeiyu-pet-error",
+  "name": "dsh-dafeiyu · pet/error",
+  "description": "来自 GitHub 开源项目 QCYTSN/dsh-dafeiyu 的美术资源（pet/error），经并集包围盒归一化后导入；原素材 1 段动画、16 帧。",
+  "author": "QCYTSN/dsh-dafeiyu 上游作者（GitHub）",
+  "license": "MIT — 上游 QCYTSN/dsh-dafeiyu（仓库级宽松许可 MIT）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "aeb546635e3e75cd847b5509f2d557be5b4bcd582db64cbe471436bfe5e2622b"
+  },
+  "actions": [
+    {
+      "id": "feed-error",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/feed-error/frame_000.png",
+          "sha256": "12a4763f1dba259d22d23cf680662e6a954c6610d8afa912336edb766c87b116"
+        },
+        {
+          "file": "actions/feed-error/frame_001.png",
+          "sha256": "fa5874a784264deea19925b8be728113919c274f112905f5572f94e05e7d6fee"
+        },
+        {
+          "file": "actions/feed-error/frame_002.png",
+          "sha256": "dd7d657515091c36a3086c82a91c43ed6a02b5133cf507d651dd9dd4882796ac"
+        },
+        {
+          "file": "actions/feed-error/frame_003.png",
+          "sha256": "c25130100d3dfa88f03a92409e0abb741962a7606eaca14da5c0b002005c9250"
+        },
+        {
+          "file": "actions/feed-error/frame_004.png",
+          "sha256": "d08301798f88349fb0d7d97735ac86f852496cb9019144da698c0e6a0361d019"
+        },
+        {
+          "file": "actions/feed-error/frame_005.png",
+          "sha256": "e15430299a556ce9261ff21a410f9339f7cdc5311c75d30fff7e433388405603"
+        },
+        {
+          "file": "actions/feed-error/frame_006.png",
+          "sha256": "a9e8432feb0e5bf33912a381366c8dc82c36f974227d45fd89ef7354f2f933f6"
+        },
+        {
+          "file": "actions/feed-error/frame_007.png",
+          "sha256": "c92a7d39d6eb49dd15eb4a4f1f77ab88b0942cab08b6d3779c2d36d33fc2055f"
+        },
+        {
+          "file": "actions/feed-error/frame_008.png",
+          "sha256": "63d6e451da2f140673afcdfcac384dcd649d69360b6401919d074e9d3b3c0243"
+        },
+        {
+          "file": "actions/feed-error/frame_009.png",
+          "sha256": "cd1fcacb85b6885b84b774227f6f3e085566c39cf099318efe4ef674d738a42d"
+        },
+        {
+          "file": "actions/feed-error/frame_010.png",
+          "sha256": "187a5931ec687442fc91cfab13aff4bcb27721581efb2c16eddb31d763623d31"
+        },
+        {
+          "file": "actions/feed-error/frame_011.png",
+          "sha256": "05db10766a4665ce9bc98b02803ce25e989cff497aa18775e662868a7e387779"
+        },
+        {
+          "file": "actions/feed-error/frame_012.png",
+          "sha256": "92bf83a454db718029aab9a8386208dfb0cf393fa65db64cd526497b4030955c"
+        },
+        {
+          "file": "actions/feed-error/frame_013.png",
+          "sha256": "be7a1faece9152cab0d62650b7264d15ee354ef7be872d1e7b7120bd78086cce"
+        },
+        {
+          "file": "actions/feed-error/frame_014.png",
+          "sha256": "3f7ee234d350509a789d4d03a95a72db69fa2f795011a5db73780bd5cf7b2174"
+        },
+        {
+          "file": "actions/feed-error/frame_015.png",
+          "sha256": "2e4837a1541bd79669529eaf60765746c82a044b709578f55382717ee0d7952f"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "QCYTSN/dsh-dafeiyu",
+    "url": "https://github.com/QCYTSN/dsh-dafeiyu",
+    "stars": 380,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.294917,
+    "rank": 93,
+    "license": "MIT",
+    "licenseTier": "A",
+    "licenseReason": "仓库级宽松许可 MIT",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "assets/pet/error/error_001.webp#frame0",
+    "actionSources": [
+      {
+        "action": "feed-error",
+        "interaction": "feed",
+        "sourcePath": "assets/pet/error/error_001.webp",
+        "sourceFiles": [
+          "assets/pet/error/error_001.webp",
+          "assets/pet/error/error_002.webp",
+          "assets/pet/error/error_003.webp",
+          "assets/pet/error/error_004.webp",
+          "assets/pet/error/error_005.webp",
+          "assets/pet/error/error_006.webp",
+          "assets/pet/error/error_007.webp",
+          "assets/pet/error/error_008.webp",
+          "assets/pet/error/error_009.webp",
+          "assets/pet/error/error_010.webp",
+          "assets/pet/error/error_011.webp",
+          "assets/pet/error/error_012.webp",
+          "assets/pet/error/error_013.webp",
+          "assets/pet/error/error_014.webp",
+          "assets/pet/error/error_015.webp",
+          "assets/pet/error/error_016.webp",
+          "assets/pet/error/error_017.webp",
+          "assets/pet/error/error_018.webp",
+          "assets/pet/error/error_019.webp",
+          "assets/pet/error/error_020.webp",
+          "assets/pet/error/error_021.webp",
+          "assets/pet/error/error_022.webp",
+          "assets/pet/error/error_023.webp",
+          "assets/pet/error/error_024.webp",
+          "assets/pet/error/error_025.webp",
+          "assets/pet/error/error_026.webp",
+          "assets/pet/error/error_027.webp",
+          "assets/pet/error/error_028.webp",
+          "assets/pet/error/error_029.webp",
+          "assets/pet/error/error_030.webp",
+          "assets/pet/error/error_031.webp",
+          "assets/pet/error/error_032.webp",
+          "assets/pet/error/error_033.webp",
+          "assets/pet/error/error_034.webp",
+          "assets/pet/error/error_035.webp",
+          "assets/pet/error/error_036.webp",
+          "assets/pet/error/error_037.webp",
+          "assets/pet/error/error_038.webp",
+          "assets/pet/error/error_039.webp",
+          "assets/pet/error/error_040.webp",
+          "assets/pet/error/error_041.webp",
+          "assets/pet/error/error_042.webp",
+          "assets/pet/error/error_043.webp",
+          "assets/pet/error/error_044.webp",
+          "assets/pet/error/error_045.webp",
+          "assets/pet/error/error_046.webp",
+          "assets/pet/error/error_047.webp",
+          "assets/pet/error/error_048.webp",
+          "assets/pet/error/error_049.webp",
+          "assets/pet/error/error_050.webp",
+          "assets/pet/error/error_051.webp",
+          "assets/pet/error/error_052.webp",
+          "assets/pet/error/error_053.webp",
+          "assets/pet/error/error_054.webp",
+          "assets/pet/error/error_055.webp",
+          "assets/pet/error/error_056.webp",
+          "assets/pet/error/error_057.webp",
+          "assets/pet/error/error_058.webp",
+          "assets/pet/error/error_059.webp",
+          "assets/pet/error/error_060.webp",
+          "assets/pet/error/error_061.webp",
+          "assets/pet/error/error_062.webp",
+          "assets/pet/error/error_063.webp",
+          "assets/pet/error/error_064.webp",
+          "assets/pet/error/error_065.webp",
+          "assets/pet/error/error_066.webp",
+          "assets/pet/error/error_067.webp",
+          "assets/pet/error/error_068.webp",
+          "assets/pet/error/error_069.webp",
+          "assets/pet/error/error_070.webp",
+          "assets/pet/error/error_071.webp",
+          "assets/pet/error/error_072.webp",
+          "assets/pet/error/error_073.webp",
+          "assets/pet/error/error_074.webp",
+          "assets/pet/error/error_075.webp",
+          "assets/pet/error/error_076.webp",
+          "assets/pet/error/error_077.webp",
+          "assets/pet/error/error_078.webp",
+          "assets/pet/error/error_079.webp",
+          "assets/pet/error/error_080.webp",
+          "assets/pet/error/error_081.webp",
+          "assets/pet/error/error_082.webp",
+          "assets/pet/error/error_083.webp",
+          "assets/pet/error/error_084.webp",
+          "assets/pet/error/error_085.webp",
+          "assets/pet/error/error_086.webp",
+          "assets/pet/error/error_087.webp",
+          "assets/pet/error/error_088.webp",
+          "assets/pet/error/error_089.webp",
+          "assets/pet/error/error_090.webp",
+          "assets/pet/error/error_091.webp",
+          "assets/pet/error/error_092.webp",
+          "assets/pet/error/error_093.webp",
+          "assets/pet/error/error_094.webp",
+          "assets/pet/error/error_095.webp",
+          "assets/pet/error/error_096.webp",
+          "assets/pet/error/error_097.webp",
+          "assets/pet/error/error_098.webp",
+          "assets/pet/error/error_099.webp",
+          "assets/pet/error/error_100.webp",
+          "assets/pet/error/error_101.webp",
+          "assets/pet/error/error_102.webp",
+          "assets/pet/error/error_103.webp",
+          "assets/pet/error/error_104.webp",
+          "assets/pet/error/error_105.webp",
+          "assets/pet/error/error_106.webp",
+          "assets/pet/error/error_107.webp",
+          "assets/pet/error/error_108.webp",
+          "assets/pet/error/error_109.webp",
+          "assets/pet/error/error_110.webp",
+          "assets/pet/error/error_111.webp",
+          "assets/pet/error/error_112.webp",
+          "assets/pet/error/error_113.webp",
+          "assets/pet/error/error_114.webp",
+          "assets/pet/error/error_115.webp",
+          "assets/pet/error/error_116.webp",
+          "assets/pet/error/error_117.webp",
+          "assets/pet/error/error_118.webp"
+        ],
+        "sourceFrames": 118,
+        "importedFrames": 16,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 1.496454,
+        "sampled": true
+      }
+    ]
+  }
+}

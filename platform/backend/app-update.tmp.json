@@ -1,0 +1,13 @@
+﻿{
+    "versionCode":  21,
+    "versionName":  "1.5.1",
+    "minVersionCode":  4,
+    "apkUrl":  "http://39.105.178.6/MobilePet-1.0.apk",
+    "notes":  "修复：应用内更新下载进度一直显示 0% 的问题；下载完成后自动校验安装包版本，杜绝装到旧包/半截包",
+    "bundle":  {
+                   "version":  10,
+                   "url":  "http://39.105.178.6/pet-bundle-10.zip",
+                   "notes":  "修复版本号显示：已安装新版后设置页正确显示 1.5.4，更新横幅不再反复出现",
+                   "minApkCode":  20
+               }
+}

@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "id": "qcytsn-dsh-dafeiyu-pet-poke",
+  "name": "dsh-dafeiyu · pet/poke",
+  "description": "来自 GitHub 开源项目 QCYTSN/dsh-dafeiyu 的美术资源（pet/poke），经并集包围盒归一化后导入；原素材 1 段动画、16 帧。",
+  "author": "QCYTSN/dsh-dafeiyu 上游作者（GitHub）",
+  "license": "MIT — 上游 QCYTSN/dsh-dafeiyu（仓库级宽松许可 MIT）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "ab0a5998b1930782f2ffd00762fdfe4488a6dfe44a13d82eb7fc98f7265a6cfd"
+  },
+  "actions": [
+    {
+      "id": "feed-poke",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/feed-poke/frame_000.png",
+          "sha256": "c852c56e85f3fc80d4afb150c2a4c6644115607cf088f339a7f535394f9eeded"
+        },
+        {
+          "file": "actions/feed-poke/frame_001.png",
+          "sha256": "820c6408887fc45a480dd6e8decf0d2c8952994307629f935589326a1e6833ac"
+        },
+        {
+          "file": "actions/feed-poke/frame_002.png",
+          "sha256": "394e27c41b85b56296538c650564470d10aa0fdc5b0fad9add039d9f41484d8c"
+        },
+        {
+          "file": "actions/feed-poke/frame_003.png",
+          "sha256": "3f31a2ecc4f354b186cf1506cccdc0401e24122be2b8a4358200e1f26fef1f8e"
+        },
+        {
+          "file": "actions/feed-poke/frame_004.png",
+          "sha256": "25cb5d682c9a278e04fd5991a1b117afe8bc0ca7d96e0cb80f8b7c0da7bb8673"
+        },
+        {
+          "file": "actions/feed-poke/frame_005.png",
+          "sha256": "752084e46dd0306ad2db5430d55d4cad995ff106f698c9ab14cefff9f6fef5b5"
+        },
+        {
+          "file": "actions/feed-poke/frame_006.png",
+          "sha256": "89fa38553cce8a97cad95cc2aae175835aed2186cd4138c028ee8e63a7e9d4f6"
+        },
+        {
+          "file": "actions/feed-poke/frame_007.png",
+          "sha256": "7ffd4e6faa2c195748a4b1983df11dbd15fd2760cb4694a8609809060d7ac15a"
+        },
+        {
+          "file": "actions/feed-poke/frame_008.png",
+          "sha256": "81d59ea47ad4d24d8ca6e1f88c0d5f7c71fd5092eb2235ae92da772cba84f931"
+        },
+        {
+          "file": "actions/feed-poke/frame_009.png",
+          "sha256": "b1d2f37d4a602ceb3d0761a316be79c61a39aff6ef8428b4b8218b3ca4e3f9ca"
+        },
+        {
+          "file": "actions/feed-poke/frame_010.png",
+          "sha256": "23be5e7afdc935d2bd8f291c602930d7c7c841241b620e737472d1bd310ca162"
+        },
+        {
+          "file": "actions/feed-poke/frame_011.png",
+          "sha256": "df3685a2f82a5fe4732ec672f4d8de8cc7283d5099bf298525a71a9159d87bab"
+        },
+        {
+          "file": "actions/feed-poke/frame_012.png",
+          "sha256": "567d6774698062f874cb97fece771d0920332565b4d4f524d12d06096c4fd7ac"
+        },
+        {
+          "file": "actions/feed-poke/frame_013.png",
+          "sha256": "207bf803ed89ec94486cbee8e85884e57b09fc2cfc6e8ad89ee9dda2ac51d322"
+        },
+        {
+          "file": "actions/feed-poke/frame_014.png",
+          "sha256": "32edc37e485603d8abee39bbcfb34c105efb09fa63f2a6ee352925907965c6ac"
+        },
+        {
+          "file": "actions/feed-poke/frame_015.png",
+          "sha256": "96f18106d914a8efc79d12498211050f89e0da84c216e5dd548d648668471a9b"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "QCYTSN/dsh-dafeiyu",
+    "url": "https://github.com/QCYTSN/dsh-dafeiyu",
+    "stars": 380,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.294917,
+    "rank": 93,
+    "license": "MIT",
+    "licenseTier": "A",
+    "licenseReason": "仓库级宽松许可 MIT",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "assets/pet/poke/poke_001.webp#frame0",
+    "actionSources": [
+      {
+        "action": "feed-poke",
+        "interaction": "feed",
+        "sourcePath": "assets/pet/poke/poke_001.webp",
+        "sourceFiles": [
+          "assets/pet/poke/poke_001.webp",
+          "assets/pet/poke/poke_002.webp",
+          "assets/pet/poke/poke_003.webp",
+          "assets/pet/poke/poke_004.webp",
+          "assets/pet/poke/poke_005.webp",
+          "assets/pet/poke/poke_006.webp",
+          "assets/pet/poke/poke_007.webp",
+          "assets/pet/poke/poke_008.webp",
+          "assets/pet/poke/poke_009.webp",
+          "assets/pet/poke/poke_010.webp",
+          "assets/pet/poke/poke_011.webp",
+          "assets/pet/poke/poke_012.webp",
+          "assets/pet/poke/poke_013.webp",
+          "assets/pet/poke/poke_014.webp",
+          "assets/pet/poke/poke_015.webp",
+          "assets/pet/poke/poke_016.webp",
+          "assets/pet/poke/poke_017.webp",
+          "assets/pet/poke/poke_018.webp",
+          "assets/pet/poke/poke_019.webp",
+          "assets/pet/poke/poke_020.webp",
+          "assets/pet/poke/poke_021.webp",
+          "assets/pet/poke/poke_022.webp",
+          "assets/pet/poke/poke_023.webp",
+          "assets/pet/poke/poke_024.webp",
+          "assets/pet/poke/poke_025.webp",
+          "assets/pet/poke/poke_026.webp",
+          "assets/pet/poke/poke_027.webp",
+          "assets/pet/poke/poke_028.webp",
+          "assets/pet/poke/poke_029.webp",
+          "assets/pet/poke/poke_030.webp",
+          "assets/pet/poke/poke_031.webp",
+          "assets/pet/poke/poke_032.webp",
+          "assets/pet/poke/poke_033.webp",
+          "assets/pet/poke/poke_034.webp",
+          "assets/pet/poke/poke_035.webp",
+          "assets/pet/poke/poke_036.webp",
+          "assets/pet/poke/poke_037.webp",
+          "assets/pet/poke/poke_038.webp",
+          "assets/pet/poke/poke_039.webp",
+          "assets/pet/poke/poke_040.webp",
+          "assets/pet/poke/poke_041.webp",
+          "assets/pet/poke/poke_042.webp",
+          "assets/pet/poke/poke_043.webp",
+          "assets/pet/poke/poke_044.webp",
+          "assets/pet/poke/poke_045.webp",
+          "assets/pet/poke/poke_046.webp",
+          "assets/pet/poke/poke_047.webp",
+          "assets/pet/poke/poke_048.webp",
+          "assets/pet/poke/poke_049.webp",
+          "assets/pet/poke/poke_050.webp",
+          "assets/pet/poke/poke_051.webp",
+          "assets/pet/poke/poke_052.webp",
+          "assets/pet/poke/poke_053.webp",
+          "assets/pet/poke/poke_054.webp",
+          "assets/pet/poke/poke_055.webp",
+          "assets/pet/poke/poke_056.webp",
+          "assets/pet/poke/poke_057.webp",
+          "assets/pet/poke/poke_058.webp",
+          "assets/pet/poke/poke_059.webp",
+          "assets/pet/poke/poke_060.webp",
+          "assets/pet/poke/poke_061.webp",
+          "assets/pet/poke/poke_062.webp",
+          "assets/pet/poke/poke_063.webp",
+          "assets/pet/poke/poke_064.webp",
+          "assets/pet/poke/poke_065.webp",
+          "assets/pet/poke/poke_066.webp",
+          "assets/pet/poke/poke_067.webp",
+          "assets/pet/poke/poke_068.webp",
+          "assets/pet/poke/poke_069.webp",
+          "assets/pet/poke/poke_070.webp",
+          "assets/pet/poke/poke_071.webp",
+          "assets/pet/poke/poke_072.webp",
+          "assets/pet/poke/poke_073.webp",
+          "assets/pet/poke/poke_074.webp",
+          "assets/pet/poke/poke_075.webp",
+          "assets/pet/poke/poke_076.webp",
+          "assets/pet/poke/poke_077.webp",
+          "assets/pet/poke/poke_078.webp",
+          "assets/pet/poke/poke_079.webp",
+          "assets/pet/poke/poke_080.webp",
+          "assets/pet/poke/poke_081.webp",
+          "assets/pet/poke/poke_082.webp",
+          "assets/pet/poke/poke_083.webp",
+          "assets/pet/poke/poke_084.webp",
+          "assets/pet/poke/poke_085.webp",
+          "assets/pet/poke/poke_086.webp",
+          "assets/pet/poke/poke_087.webp",
+          "assets/pet/poke/poke_088.webp",
+          "assets/pet/poke/poke_089.webp",
+          "assets/pet/poke/poke_090.webp",
+          "assets/pet/poke/poke_091.webp",
+          "assets/pet/poke/poke_092.webp",
+          "assets/pet/poke/poke_093.webp",
+          "assets/pet/poke/poke_094.webp",
+          "assets/pet/poke/poke_095.webp",
+          "assets/pet/poke/poke_096.webp"
+        ],
+        "sourceFrames": 96,
+        "importedFrames": 16,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 1.545788,
+        "sampled": true
+      }
+    ]
+  }
+}

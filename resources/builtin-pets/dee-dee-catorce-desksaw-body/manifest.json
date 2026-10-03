@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "dee-dee-catorce-desksaw-body",
+  "name": "desksaw · Body",
+  "description": "来自 GitHub 开源项目 dee-dee-catorce/desksaw 的美术资源（Body），经并集包围盒归一化后导入；原素材 1 段动画、3 帧。",
+  "author": "dee-dee-catorce/desksaw 上游作者（GitHub）",
+  "license": "MIT — 上游 dee-dee-catorce/desksaw（仓库级宽松许可 MIT）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "cc98e69c513223c8e027e7ae0f76017a0c517683691dc0a4a07ad4cbae11f8ae"
+  },
+  "actions": [
+    {
+      "id": "feed-experimentheaddisfigured",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/feed-experimentheaddisfigured/frame_000.png",
+          "sha256": "58a4e9513a2b6d89a3d9db2c83f155c7bc76e860bb0faf027cf93fd91117ba99"
+        },
+        {
+          "file": "actions/feed-experimentheaddisfigured/frame_001.png",
+          "sha256": "564ebe05880cd64db3658e5f30e318c89cb6578d32e48d1ca6739e498a00096a"
+        },
+        {
+          "file": "actions/feed-experimentheaddisfigured/frame_002.png",
+          "sha256": "6069835458b0eb33ab2cb03d6a6a2e1be375fb2fb85029543ce69642e06ee873"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "dee-dee-catorce/desksaw",
+    "url": "https://github.com/dee-dee-catorce/desksaw",
+    "stars": 202,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.263673,
+    "rank": 173,
+    "license": "MIT",
+    "licenseTier": "A",
+    "licenseReason": "仓库级宽松许可 MIT",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "assets/Body/oughno.png",
+    "actionSources": [
+      {
+        "action": "feed-experimentheaddisfigured",
+        "interaction": "feed",
+        "sourcePath": "assets/Body/experimentHeadDisfigured1.png",
+        "sourceFiles": [
+          "assets/Body/experimentHeadDisfigured1.png",
+          "assets/Body/experimentHeadDisfigured2.png",
+          "assets/Body/experimentHeadDisfigured3.png"
+        ],
+        "sourceFrames": 3,
+        "importedFrames": 3,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      }
+    ]
+  }
+}

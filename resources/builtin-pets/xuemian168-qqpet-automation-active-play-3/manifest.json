@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "id": "xuemian168-qqpet-automation-active-play-3",
+  "name": "qqpet_automation · active/play",
+  "description": "来自 GitHub 开源项目 xuemian168/qqpet_automation 的美术资源（active/play），经并集包围盒归一化后导入；原素材 4 段动画、16 帧。",
+  "author": "xuemian168/qqpet_automation 上游作者（GitHub）",
+  "license": "NOASSERTION — 上游 xuemian168/qqpet_automation（仓库级未声明，但根目录许可文件为宽松许可：MIT, Apache-2.0）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "672998084d48203b8faa772fa2733ea845f862f82179003a61abcc25cd797349"
+  },
+  "actions": [
+    {
+      "id": "play-nongchang",
+      "name": "玩耍",
+      "interaction": "play",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/play-nongchang/frame_000.png",
+          "sha256": "aa4d7a8f0ef5eb2b8190aa09a9b8485b5f66917afbe9e463682e9692f74e432e"
+        },
+        {
+          "file": "actions/play-nongchang/frame_001.png",
+          "sha256": "052bf6596aa29302789ff7b255655d84fd5b0f8733981b8b5080c863b2450d65"
+        },
+        {
+          "file": "actions/play-nongchang/frame_002.png",
+          "sha256": "ece48c195224f0e797447024a0c58f24430a9e50c018e09172447796d54a0deb"
+        },
+        {
+          "file": "actions/play-nongchang/frame_003.png",
+          "sha256": "f5ac052010ba638836ca4faf1a14763887661391893e34974649dac017174e80"
+        }
+      ]
+    },
+    {
+      "id": "feed-paopao",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/feed-paopao/frame_000.png",
+          "sha256": "9591c624ab31e460011481fba45cd510adbe035105066ff82ccf2730f06a05a8"
+        },
+        {
+          "file": "actions/feed-paopao/frame_001.png",
+          "sha256": "9569e29626a8515ae7357a63246cfc78e28db66698ead351a2cbb0dcff26e73e"
+        },
+        {
+          "file": "actions/feed-paopao/frame_002.png",
+          "sha256": "dbf58b98731fa235e677a729fed8191d905a75879add4aa558af3725e9cae15a"
+        },
+        {
+          "file": "actions/feed-paopao/frame_003.png",
+          "sha256": "1ca5238c9ac5de6305376964540989a6ff84360dc005fae6bee23b37d299a1cb"
+        }
+      ]
+    },
+    {
+      "id": "rest-tanliqiu",
+      "name": "休息",
+      "interaction": "rest",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/rest-tanliqiu/frame_000.png",
+          "sha256": "b763dd6f34b1e70e883f664b33f0ed7f15c223fe53372af6e7e2762d5fdb9072"
+        },
+        {
+          "file": "actions/rest-tanliqiu/frame_001.png",
+          "sha256": "66688bc97a7a18f3c213ed1fa093b8cae1bc453aabb44a02a41a8819d12a17cd"
+        },
+        {
+          "file": "actions/rest-tanliqiu/frame_002.png",
+          "sha256": "1cfa7a1d89a38c7e87df16cad05d76651784cbf13b85800ef5644c3781d29c3e"
+        },
+        {
+          "file": "actions/rest-tanliqiu/frame_003.png",
+          "sha256": "322e8b3010e7166ad1414a175156827b1cbc62d1c7176154b79599cf3bbd1c86"
+        }
+      ]
+    },
+    {
+      "id": "tiaosheng",
+      "name": "tiaosheng",
+      "interaction": "none",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/tiaosheng/frame_000.png",
+          "sha256": "acd58f884aa978b130f02392b6ab455c2e97437f6f5a8ca0add0e160d722b296"
+        },
+        {
+          "file": "actions/tiaosheng/frame_001.png",
+          "sha256": "87eb2d106392b6f246ff1b6b98d57074262ff7ff6dc7dedbac014da2304f7fd8"
+        },
+        {
+          "file": "actions/tiaosheng/frame_002.png",
+          "sha256": "be8bec51c54eea28809b8842db167a64a1031501d8ce6db2688d14d19f3f3f37"
+        },
+        {
+          "file": "actions/tiaosheng/frame_003.png",
+          "sha256": "105a77f030ab4cb715a7a91e8e8a043d2aad69904ead50b936ad4b74704113e7"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "xuemian168/qqpet_automation",
+    "url": "https://github.com/xuemian168/qqpet_automation",
+    "stars": 190,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.260649,
+    "rank": 179,
+    "license": "NOASSERTION",
+    "licenseTier": "A",
+    "licenseReason": "仓库级未声明，但根目录许可文件为宽松许可：MIT, Apache-2.0",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "qq_pet_asar/src/assets/active/play/nongchang00.png#frame0",
+    "actionSources": [
+      {
+        "action": "play-nongchang",
+        "interaction": "play",
+        "sourcePath": "qq_pet_asar/src/assets/active/play/nongchang00.png",
+        "sourceFiles": [
+          "qq_pet_asar/src/assets/active/play/nongchang00.png",
+          "qq_pet_asar/src/assets/active/play/nongchang01.png",
+          "qq_pet_asar/src/assets/active/play/nongchang02.png",
+          "qq_pet_asar/src/assets/active/play/nongchang03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "feed-paopao",
+        "interaction": "feed",
+        "sourcePath": "qq_pet_asar/src/assets/active/play/paopao00.png",
+        "sourceFiles": [
+          "qq_pet_asar/src/assets/active/play/paopao00.png",
+          "qq_pet_asar/src/assets/active/play/paopao01.png",
+          "qq_pet_asar/src/assets/active/play/paopao02.png",
+          "qq_pet_asar/src/assets/active/play/paopao03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "rest-tanliqiu",
+        "interaction": "rest",
+        "sourcePath": "qq_pet_asar/src/assets/active/play/tanliqiu00.png",
+        "sourceFiles": [
+          "qq_pet_asar/src/assets/active/play/tanliqiu00.png",
+          "qq_pet_asar/src/assets/active/play/tanliqiu01.png",
+          "qq_pet_asar/src/assets/active/play/tanliqiu02.png",
+          "qq_pet_asar/src/assets/active/play/tanliqiu03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "tiaosheng",
+        "interaction": "none",
+        "sourcePath": "qq_pet_asar/src/assets/active/play/tiaosheng00.png",
+        "sourceFiles": [
+          "qq_pet_asar/src/assets/active/play/tiaosheng00.png",
+          "qq_pet_asar/src/assets/active/play/tiaosheng01.png",
+          "qq_pet_asar/src/assets/active/play/tiaosheng02.png",
+          "qq_pet_asar/src/assets/active/play/tiaosheng03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      }
+    ]
+  }
+}

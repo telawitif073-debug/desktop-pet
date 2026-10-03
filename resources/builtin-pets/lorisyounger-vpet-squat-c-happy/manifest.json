@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "id": "lorisyounger-vpet-squat-c-happy",
+  "name": "VPet · Squat/C_Happy",
+  "description": "来自 GitHub 开源项目 LorisYounger/VPet 的美术资源（Squat/C_Happy），经并集包围盒归一化后导入；原素材 1 段动画、8 帧。",
+  "author": "LorisYounger/VPet 上游作者（GitHub）",
+  "license": "Apache-2.0 — 上游 LorisYounger/VPet（仓库级宽松许可 Apache-2.0）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "e71fc3a9494b2f92315cca51cd0c336881852c0c90e59f1992854e50938f2e8a"
+  },
+  "actions": [
+    {
+      "id": "play-png",
+      "name": "玩耍",
+      "interaction": "play",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/play-png/frame_000.png",
+          "sha256": "91e08ce8a6f9819d3efb3e21260d521760d00892ade4a596ed0575ed2753f8bf"
+        },
+        {
+          "file": "actions/play-png/frame_001.png",
+          "sha256": "91418484088933050bdba9465b6bd7ee8dc8c7eb6cb5ce056a95eddfe1fe8c31"
+        },
+        {
+          "file": "actions/play-png/frame_002.png",
+          "sha256": "260dbed4bb3ba35a345a9bbc40f1aa43ace1a0971685ab56643c4731c15eabaa"
+        },
+        {
+          "file": "actions/play-png/frame_003.png",
+          "sha256": "05edbe9ccecff4e21981195c93350b7e82f8133b68f0fb6b63426686858718b6"
+        },
+        {
+          "file": "actions/play-png/frame_004.png",
+          "sha256": "dafc7f0956a6bde245bf0247c4ec016d0fd7f64f8416f414ac92fd71d2ab6a63"
+        },
+        {
+          "file": "actions/play-png/frame_005.png",
+          "sha256": "c3506e1612c68a44f25d5b2d0cb66e6c6193a225695d94d3669e7a72fbc232e7"
+        },
+        {
+          "file": "actions/play-png/frame_006.png",
+          "sha256": "4c476978ec113499dac41103d250b4634190ff623cc9a521f8a8341831a3e9e4"
+        },
+        {
+          "file": "actions/play-png/frame_007.png",
+          "sha256": "e1d44b128da46ea3e21cde67e8efcd9c869db359dc24da5d0799a3a8915a89e2"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "LorisYounger/VPet",
+    "url": "https://github.com/LorisYounger/VPet",
+    "stars": 6854,
+    "releaseDownloads": 0,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.438333,
+    "rank": 32,
+    "license": "Apache-2.0",
+    "licenseTier": "A",
+    "licenseReason": "仓库级宽松许可 Apache-2.0",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0001.png#frame0",
+    "actionSources": [
+      {
+        "action": "play-png",
+        "interaction": "play",
+        "sourcePath": "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0001.png",
+        "sourceFiles": [
+          "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0001.png",
+          "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0002.png",
+          "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0003.png",
+          "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0004.png",
+          "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0005.png",
+          "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0006.png",
+          "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0007.png",
+          "VPet-Simulator.Windows/mod/0000_core/pet/vup/IDEL/Squat/C_Happy/0008.png"
+        ],
+        "sourceFrames": 8,
+        "importedFrames": 8,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 0.456216,
+        "sampled": false
+      }
+    ]
+  }
+}

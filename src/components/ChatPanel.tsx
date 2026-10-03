@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import { TONE_PRESETS, EDGE_VOICES, listVoices, speak } from '../renderer/speech';
+import { TONE_PRESETS, EDGE_VOICES, listVoices, speak, previewInstalled, DEFAULT_PREVIEW_TEXT } from '../renderer/speech';
 import { isMicAmbientActive, startManualVoice, stopManualVoice, syncAmbientSenses } from '../renderer/ambientSense';
 import { recordScreenFrames } from '../renderer/senseIntent';
-import type { SpeechSettings, LlmProfile, VoiceAsrApiConfig } from '../main/config';
+import MarkdownText from './MarkdownText';
+import type { ChatMessage } from '../global.d';
+import type { SpeechSettings, LlmProfile, VoiceConfig, VoiceAsrApiConfig } from '../main/config';
 
 // 从 config.installedAgentConfig 中解析当前生效的智能体信息
 function resolveAgent(config: { installedAgentConfig?: unknown } | null) {
@@ -64,6 +66,18 @@ const SettingsPanel = () => {
     speechRate: config?.speech?.rate ?? 1,
     speechPitch: config?.speech?.pitch ?? 1,
     speechVolume: config?.speech?.volume ?? 1,
+    // 全局音色选择：云音色库（downloadedVoices[].id）；空 = 用 Edge/系统音色
+    cloudVoiceId: config?.activeCloudVoiceId || '',
+    // 云 TTS 服务凭证（全局共享；Key 只落本机与云端加密库）
+    ttsEngine: (config?.ttsCloudConfig?.engine || 'openai') as 'openai' | 'gptsovits',
+    ttsBaseUrl: config?.ttsCloudConfig?.baseUrl || '',
+    ttsModel: config?.ttsCloudConfig?.model || '',
+    ttsApiKey: config?.ttsCloudConfig?.apiKey || '',
+    // 对话体验：思考过程显示/思考语言 + 宠物状态与心情联动（T2 配置，运行时见 T5）
+    showThinking: config?.showThinking === true,
+    thinkingLang: (config?.thinkingLang || 'auto') as 'auto' | 'zh' | 'en',
+    petSystemEnabled: config?.petSystemEnabled !== false,
+    moodFromChat: config?.moodFromChat !== false,
   });
 
   // 当前智能体信息（含是否自带语音识别），「智能体自带」选项据此显隐
@@ -134,6 +148,119 @@ const SettingsPanel = () => {
       return () => speechSynthesis.removeEventListener('voiceschanged', load);
     }
   }, []);
+
+  // ── 音色库（本机已安装云音色）与云 TTS 服务配置 ──
+  const installedVoices = config?.downloadedVoices ?? [];
+  const [ttsOpen, setTtsOpen] = useState(false);
+  const [ttsTesting, setTtsTesting] = useState('');
+  /** 当前表单对应的朗读基础配置（试听与正式朗读共用同一套语速/音调/音量） */
+  const formSpeech = (): SpeechSettings => ({
+    enabled: true,
+    voice: form.voice || undefined,
+    tone: form.tone,
+    rate: Number(form.speechRate) || 1,
+    pitch: Number(form.speechPitch) || 1,
+    volume: Number(form.speechVolume) || 1,
+  });
+  const formTtsCloud = () => ({
+    engine: form.ttsEngine,
+    baseUrl: form.ttsBaseUrl.trim().replace(/\/+$/, ''),
+    model: form.ttsModel.trim(),
+    apiKey: form.ttsApiKey.trim(),
+  });
+  /** GPT-SoVITS 引擎连通性测试（需要引擎已在本机/局域网运行） */
+  const testTtsEngine = async () => {
+    setTtsTesting('正在测试连接…');
+    const res = await window.electronAPI?.tts.testGptsovits(form.ttsBaseUrl.trim());
+    setTtsTesting(res?.message || '测试失败');
+  };
+  /** 试听当前选择的音色：云音色先落盘云 TTS 凭证再现场合成；Edge/系统音色直接朗读 */
+  const previewSelected = async () => {
+    const selected = installedVoices.find((v) => v.id === form.cloudVoiceId);
+    if (!selected) {
+      speak(DEFAULT_PREVIEW_TEXT, { speech: formSpeech() });
+      return;
+    }
+    try {
+      await saveConfig({ ttsCloudConfig: formTtsCloud() });
+      await previewInstalled(selected);
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // ── 音色库管理（本机自建音色，local- 前缀；商店安装的音色在创作中心音色板块）──
+  const [voiceMgrOpen, setVoiceMgrOpen] = useState(false);
+  const [voiceForm, setVoiceForm] = useState({
+    name: '',
+    engine: 'cloud' as VoiceConfig['engine'],
+    voiceId: '',
+    model: '',
+    refAudioPath: '',
+  });
+  const engineLabel = (engine: VoiceConfig['engine']): string =>
+    engine === 'gptsovits' ? 'GPT-SoVITS' : engine === 'system' ? '系统音色' : '云 TTS';
+
+  /** 手动添加本机音色（云 TTS voiceId / GPT-SoVITS 参考音频 / 系统音色名），添加后即设为全局音色 */
+  const addLocalVoice = async () => {
+    const name = voiceForm.name.trim();
+    if (!name) {
+      showNotice('请先填写音色名称');
+      return;
+    }
+    if (voiceForm.engine === 'cloud' && !voiceForm.voiceId.trim()) {
+      showNotice('云音色需要填写 voiceId（如 alloy，或平台克隆音色 id）');
+      return;
+    }
+    if (voiceForm.engine === 'gptsovits' && !voiceForm.refAudioPath.trim()) {
+      showNotice('GPT-SoVITS 音色需要填写引擎所在机器上的参考音频路径');
+      return;
+    }
+    const id = `local-${Date.now().toString(36)}`;
+    const voiceId = voiceForm.voiceId.trim();
+    const config: VoiceConfig =
+      voiceForm.engine === 'gptsovits'
+        ? {
+            engine: 'gptsovits',
+            voiceId: '',
+            baseUrl: '',
+            refAudioPath: voiceForm.refAudioPath.trim(),
+            promptText: '',
+            promptLang: 'zh',
+            textLang: 'zh',
+            sampleText: '',
+          }
+        : voiceForm.engine === 'system'
+          ? { engine: 'system', voiceId, voiceName: voiceId, sampleText: '' }
+          : {
+              engine: 'cloud',
+              voiceId,
+              baseUrl: '',
+              model: voiceForm.model.trim(),
+              instructions: '',
+              sampleText: '',
+            };
+    await saveConfig({
+      // 一并落盘云 TTS 服务配置与全局音色选择，添加后即可直接试听/朗读（与提示文案一致）
+      ttsCloudConfig: formTtsCloud(),
+      activeCloudVoiceId: id,
+      downloadedVoices: [...installedVoices, { id, name, config, installedAt: Date.now(), fromStore: false }],
+    });
+    setForm((prev) => ({ ...prev, cloudVoiceId: id }));
+    setVoiceForm({ name: '', engine: voiceForm.engine, voiceId: '', model: '', refAudioPath: '' });
+    showNotice(`已添加音色「${name}」，已设为全局音色`);
+  };
+
+  /** 删除本机音色；若正是当前全局音色则同时清空选择（自动回退 Edge/系统音色） */
+  const removeLocalVoice = async (id: string) => {
+    const isActive = form.cloudVoiceId === id;
+    await saveConfig({
+      downloadedVoices: installedVoices.filter((v) => v.id !== id),
+      ...(isActive ? { activeCloudVoiceId: '' } : {}),
+    });
+    if (isActive) setForm((prev) => ({ ...prev, cloudVoiceId: '' }));
+    showNotice(isActive ? '已删除音色，朗读回退 Edge/系统音色' : '已删除音色');
+  };
 
   // 语音唤醒模型包导入：平台不内置模型，用户填本地 zip 路径或下载 URL 后手动导入
   const [importingVoice, setImportingVoice] = useState(false);
@@ -247,7 +374,7 @@ const SettingsPanel = () => {
         enabled: form.proactiveEnabled,
         intervalMinutes: Math.max(10, Number(form.proactiveInterval) || 30),
       },
-      // 宠物语音朗读配置（回复/问候/主动消息统一走 speech.ts）
+      // 宠物语音朗读配置（回复/主动消息统一走 speech.ts 三引擎链）
       speech: {
         enabled: form.speechEnabled,
         voice: form.voice || undefined,
@@ -256,8 +383,16 @@ const SettingsPanel = () => {
         pitch: Number(form.speechPitch) || 1,
         volume: Number(form.speechVolume) || 1,
       },
+      // 全局音色选择（云音色库）与云 TTS 服务凭证（Key 只存本机，云同步时服务端加密）
+      activeCloudVoiceId: form.cloudVoiceId || '',
+      ttsCloudConfig: formTtsCloud(),
       // 清空对话前是否询问（"以后不再询问"后可在此重新开启）
       chatClearConfirm: form.clearAsk ? 'ask' : 'never',
+      // 对话体验：思考过程显示/思考语言 + 宠物状态与聊天影响心情
+      showThinking: form.showThinking,
+      thinkingLang: form.thinkingLang,
+      petSystemEnabled: form.petSystemEnabled,
+      moodFromChat: form.moodFromChat,
     });
     // 本地档案列表同步（改名/改配置后下拉立即显示新内容，无需重开面板）
     setProfiles(profilesPayload);
@@ -376,6 +511,8 @@ const SettingsPanel = () => {
             </button>
           )}
         </div>
+        {/* 宠工坊（智能体/动作/音色/上传发布）已收口到资源中心窗口内的页面：
+            入口唯一，聊天设置里不再重复放按钮 */}
         {activeId && (
           <>
             <label style={{ ...labelStyle, marginTop: 6 }}>API 名称（可修改，保存后下拉显示新名称）</label>
@@ -433,6 +570,55 @@ const SettingsPanel = () => {
         rows={3}
         style={{ ...inputStyle, resize: 'none' }}
       />
+
+      {/* 对话体验（DeepSeek 风格）：思考过程显示与思考语言，以及宠物状态/心情联动开关 */}
+      <div style={{ marginTop: '10px', padding: '8px 10px', border: '1px solid #444', borderRadius: '4px', background: '#252525' }}>
+        <label style={{ display: 'block', fontSize: '11px', color: '#aaa', marginBottom: '4px' }}>对话体验</label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: '#ddd', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={form.showThinking}
+            onChange={(e) => setForm({ ...form, showThinking: e.target.checked })}
+          />
+          显示思考过程（推理模型返回的思维链，可展开查看）
+        </label>
+        <label style={{ ...labelStyle, marginTop: 6 }}>思考语言</label>
+        <select
+          value={form.thinkingLang}
+          onChange={(e) => setForm({ ...form, thinkingLang: e.target.value as 'auto' | 'zh' | 'en' })}
+          disabled={!form.showThinking}
+          style={inputStyle}
+        >
+          <option value="auto">跟随模型</option>
+          <option value="zh">强制中文思考</option>
+          <option value="en">强制英文思考</option>
+        </select>
+        <div style={{ fontSize: '10px', color: '#777', marginTop: '2px' }}>
+          仅约束模型的内部思考，正文回复不受影响；关闭「显示思考过程」时不额外干预
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: '#ddd', cursor: 'pointer', marginTop: 6 }}>
+          <input
+            type="checkbox"
+            checked={form.petSystemEnabled}
+            onChange={(e) => setForm({ ...form, petSystemEnabled: e.target.checked })}
+          />
+          宠物状态（饱食/心情/精力/好感：关闭后不衰减、不显示，也不随对话变化）
+        </label>
+        <label
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px',
+            color: form.petSystemEnabled ? '#ddd' : '#777', cursor: form.petSystemEnabled ? 'pointer' : 'not-allowed', marginTop: 4,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={form.moodFromChat}
+            disabled={!form.petSystemEnabled}
+            onChange={(e) => setForm({ ...form, moodFromChat: e.target.checked })}
+          />
+          聊天影响心情（回复里的情绪词让心情 ±8）
+        </label>
+      </div>
 
       {/* 宠物名字（语音唤醒词）：与商店设置 → 宠物信息共用同一配置 */}
       <label style={{ ...labelStyle, marginTop: '12px' }}>宠物名字（语音唤醒词）</label>
@@ -641,12 +827,26 @@ const SettingsPanel = () => {
         </label>
         {form.speechEnabled && (
           <>
-            <label style={labelStyle}>音色（Edge 神经音色免费在线更自然，系统声音离线兜底）</label>
+            <label style={labelStyle}>音色（智能体专属音色 → 云音色 → Edge 神经音色 → 系统声音逐级降级）</label>
             <select
-              value={form.voice}
-              onChange={(e) => setForm({ ...form, voice: e.target.value })}
+              value={form.cloudVoiceId ? `cloud:${form.cloudVoiceId}` : form.voice}
+              onChange={(e) => {
+                const value = e.target.value;
+                // 云音色选择清空语音的基础音色（保留 Edge/系统选择便于随时切回）
+                if (value.startsWith('cloud:')) setForm({ ...form, cloudVoiceId: value.slice(6) });
+                else setForm({ ...form, voice: value, cloudVoiceId: '' });
+              }}
               style={inputStyle}
             >
+              {installedVoices.length > 0 && (
+                <optgroup label="已安装音色（本机音色库）">
+                  {installedVoices.map((v) => (
+                    <option key={v.id} value={`cloud:${v.id}`}>
+                      {v.name}（{engineLabel(v.config.engine)}）
+                    </option>
+                  ))}
+                </optgroup>
+              )}
               <optgroup label="Edge 神经音色（推荐·免费在线）">
                 <option value="">晓晓（默认·温暖自然）</option>
                 {EDGE_VOICES.filter((v) => v.name !== 'zh-CN-XiaoxiaoNeural').map((v) => (
@@ -691,18 +891,188 @@ const SettingsPanel = () => {
             />
             <button
               type="button"
-              onClick={() => speak('你好呀，我是你的桌面宠物，很高兴见到你！', {
-                enabled: true,
-                voice: form.voice || undefined,
-                tone: form.tone,
-                rate: Number(form.speechRate) || 1,
-                pitch: Number(form.speechPitch) || 1,
-                volume: Number(form.speechVolume) || 1,
-              })}
+              onClick={() => void previewSelected()}
               style={{ width: '100%', marginTop: '8px', padding: '6px', border: '1px solid #555', borderRadius: '4px', background: '#333', color: '#ccc', fontSize: '12px', cursor: 'pointer' }}
             >
-              试听
+              试听当前音色
             </button>
+
+            {/* 云 TTS 服务配置：OpenAI 兼容 /audio/speech 或自建 GPT-SoVITS（用户自己的凭证） */}
+            <button
+              type="button"
+              onClick={() => setTtsOpen((open) => !open)}
+              style={{ width: '100%', marginTop: '8px', padding: '6px', border: '1px solid #555', borderRadius: '4px', background: '#2a2a2a', color: '#9ad', fontSize: '12px', cursor: 'pointer' }}
+            >
+              {ttsOpen ? '收起云 TTS 服务配置' : '云 TTS 服务配置（云音色 / GPT-SoVITS 需要）'}
+            </button>
+            {ttsOpen && (
+              <>
+                <div style={{ marginTop: 6, fontSize: 11, color: '#888', lineHeight: 1.6 }}>
+                  云音色（商店下载或导入的音色）用你自己的服务合成：OpenAI 兼容接口需地址 + Key；
+                  自建 GPT-SoVITS 只需地址（音色自带参考音频，零样本克隆）。
+                </div>
+                <label style={labelStyle}>引擎</label>
+                <select
+                  value={form.ttsEngine}
+                  onChange={(e) => setForm({ ...form, ttsEngine: e.target.value as 'openai' | 'gptsovits' })}
+                  style={inputStyle}
+                >
+                  <option value="openai">OpenAI 兼容（/audio/speech，需 Key）</option>
+                  <option value="gptsovits">自建 GPT-SoVITS（api_v2，无需 Key）</option>
+                </select>
+                <label style={labelStyle}>服务地址</label>
+                <input
+                  value={form.ttsBaseUrl}
+                  onChange={(e) => setForm({ ...form, ttsBaseUrl: e.target.value })}
+                  placeholder={form.ttsEngine === 'gptsovits' ? 'http://192.168.1.5:9880' : 'https://api.openai.com/v1'}
+                  style={inputStyle}
+                />
+                {form.ttsEngine === 'openai' ? (
+                  <>
+                    <label style={labelStyle}>模型（留空用 tts-1）</label>
+                    <input
+                      value={form.ttsModel}
+                      onChange={(e) => setForm({ ...form, ttsModel: e.target.value })}
+                      placeholder="tts-1 / gpt-4o-mini-tts / CosyVoice-300M-SFT"
+                      style={inputStyle}
+                    />
+                    <label style={labelStyle}>API Key（只存本机，云同步时服务端加密）</label>
+                    <input
+                      type="password"
+                      value={form.ttsApiKey}
+                      onChange={(e) => setForm({ ...form, ttsApiKey: e.target.value })}
+                      placeholder="sk-..."
+                      style={inputStyle}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void testTtsEngine()}
+                      style={{ width: '100%', marginTop: '8px', padding: '6px', border: '1px solid #555', borderRadius: '4px', background: '#2a2a2a', color: '#ccc', fontSize: '12px', cursor: 'pointer' }}
+                    >
+                      连接测试
+                    </button>
+                    {ttsTesting && (
+                      <div style={{ marginTop: 6, fontSize: 11, color: ttsTesting.includes('在线') ? '#6c6' : '#c96' }}>
+                        {ttsTesting}
+                      </div>
+                    )}
+                  </>
+                )}
+                <div style={{ marginTop: 6, fontSize: 11, color: '#888' }}>
+                  提示：点「试听当前音色」会先把上面的服务配置保存到本机，再现场合成。
+                </div>
+              </>
+            )}
+
+            {/* 音色库管理：本机自建音色（local-）；商店音色安装见创作中心音色板块 */}
+            <button
+              type="button"
+              onClick={() => setVoiceMgrOpen((open) => !open)}
+              style={{ width: '100%', marginTop: '8px', padding: '6px', border: '1px solid #555', borderRadius: '4px', background: '#2a2a2a', color: '#9ad', fontSize: '12px', cursor: 'pointer' }}
+            >
+              {voiceMgrOpen ? '收起音色库管理' : `音色库管理（本机已装 ${installedVoices.length} 个）`}
+            </button>
+            {voiceMgrOpen && (
+              <>
+                {installedVoices.length === 0 ? (
+                  <div style={{ marginTop: 6, fontSize: 11, color: '#888' }}>
+                    本机还没有音色：可在创作中心音色板块安装，或在下方手动添加（添加后即成为全局音色）。
+                  </div>
+                ) : (
+                  installedVoices.map((v) => (
+                    <div
+                      key={v.id}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 11, color: '#ccc' }}
+                    >
+                      <span style={{ flex: 1 }}>
+                        {v.name}（{engineLabel(v.config.engine)}）
+                        {form.cloudVoiceId === v.id ? ' · 当前' : ''}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void previewInstalled(v).catch((e) => showNotice(e instanceof Error ? e.message : String(e)))
+                        }
+                        style={{ padding: '2px 8px', border: '1px solid #555', borderRadius: 3, background: '#333', color: '#ccc', fontSize: 11, cursor: 'pointer' }}
+                      >
+                        试听
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void removeLocalVoice(v.id)}
+                        style={{ padding: '2px 8px', border: '1px solid #644', borderRadius: 3, background: '#3a2a2a', color: '#d99', fontSize: 11, cursor: 'pointer' }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))
+                )}
+                <label style={labelStyle}>手动添加音色</label>
+                <input
+                  value={voiceForm.name}
+                  onChange={(e) => setVoiceForm({ ...voiceForm, name: e.target.value })}
+                  placeholder="音色名称（如：温柔客服）"
+                  style={inputStyle}
+                />
+                <select
+                  value={voiceForm.engine}
+                  onChange={(e) =>
+                    setVoiceForm({ ...voiceForm, engine: e.target.value as VoiceConfig['engine'] })
+                  }
+                  style={inputStyle}
+                >
+                  <option value="cloud">云 TTS（OpenAI 兼容，需 voiceId）</option>
+                  <option value="gptsovits">GPT-SoVITS（参考音频克隆，无需 Key）</option>
+                  <option value="system">系统音色（用系统已装语音）</option>
+                </select>
+                {voiceForm.engine === 'gptsovits' ? (
+                  <input
+                    value={voiceForm.refAudioPath}
+                    onChange={(e) => setVoiceForm({ ...voiceForm, refAudioPath: e.target.value })}
+                    placeholder="参考音频路径（3~10 秒干净人声，如 D:\ref\voice.wav）"
+                    style={inputStyle}
+                  />
+                ) : voiceForm.engine === 'system' ? (
+                  <select
+                    value={voiceForm.voiceId}
+                    onChange={(e) => setVoiceForm({ ...voiceForm, voiceId: e.target.value })}
+                    style={inputStyle}
+                  >
+                    <option value="">系统默认音色</option>
+                    {voices.map((v) => (
+                      <option key={v.voiceURI} value={v.voiceURI}>
+                        {v.name}（{v.lang}）
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <>
+                    <input
+                      value={voiceForm.voiceId}
+                      onChange={(e) => setVoiceForm({ ...voiceForm, voiceId: e.target.value })}
+                      placeholder="voiceId（如 alloy / echo / 克隆音色 id）"
+                      style={inputStyle}
+                    />
+                    <input
+                      value={voiceForm.model}
+                      onChange={(e) => setVoiceForm({ ...voiceForm, model: e.target.value })}
+                      placeholder="模型（留空用云 TTS 配置里的模型）"
+                      style={inputStyle}
+                    />
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void addLocalVoice()}
+                  style={{ width: '100%', marginTop: 6, padding: '6px', border: 'none', borderRadius: 4, background: '#3a6ea5', color: '#fff', fontSize: 12, cursor: 'pointer' }}
+                >
+                  添加并设为全局音色
+                </button>
+              </>
+            )}
           </>
         )}
       </div>
@@ -743,41 +1113,116 @@ const SettingsPanel = () => {
   );
 };
 
-const MessageBubble = ({ message }: { message: { role: string; content: string; streaming?: boolean } }) => {
-  const isUser = message.role === 'user';
+/** 思考过程卡片：流式时自动展开并显示「深度思考中…」；结束后折叠为「已深度思考（用时 X 秒）」 */
+const ThinkCard = ({
+  reasoning,
+  seconds,
+  streaming,
+}: {
+  reasoning: string;
+  seconds?: number;
+  streaming?: boolean;
+}) => {
+  const [manual, setManual] = useState<boolean | null>(null);
+  const expanded = manual ?? !!streaming;
+  const title = streaming
+    ? '深度思考中…'
+    : `已深度思考${typeof seconds === 'number' && seconds > 0 ? `（用时 ${seconds} 秒）` : ''}`;
   return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: isUser ? 'flex-end' : 'flex-start',
-        marginBottom: '6px',
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '85%',
-          padding: '6px 10px',
-          borderRadius: '10px',
-          fontSize: '13px',
-          lineHeight: '1.4',
-          wordBreak: 'break-word',
-          background: isUser ? '#4a9eff' : '#3a3a3a',
-          color: isUser ? 'white' : '#eee',
-          borderBottomRightRadius: isUser ? '2px' : '10px',
-          borderBottomLeftRadius: isUser ? '10px' : '2px',
-        }}
-      >
-        {message.content || (message.streaming ? '...' : '')}
-        {message.streaming && message.content && (
-          <span style={{ opacity: 0.5 }}>▎</span>
-        )}
+    <div className="think-card">
+      <div className="think-header" onClick={() => setManual(!expanded)}>
+        <span>{title}</span>
+        <span className="think-chevron">{expanded ? '▾' : '▸'}</span>
       </div>
+      {expanded && <div className="think-body">{reasoning}</div>}
+    </div>
+  );
+};
+
+/** Trae 式等待指示：无气泡，「正在思考」+ 三个由浅到深的圆点波浪 */
+const WaitingThink = () => (
+  <div className="wait-wrap">
+    <span className="wait-title">正在思考</span>
+    <span className="wait-dots">
+      <i /><i /><i />
+    </span>
+  </div>
+);
+
+const MessageBubble = ({
+  message,
+  showThinking,
+  onRetry,
+}: {
+  message: ChatMessage;
+  showThinking: boolean;
+  onRetry: () => void;
+}) => {
+  const isUser = message.role === 'user';
+  // 思考开关关闭时完全忽略 reasoning：既不显示思考卡，也不让「隐形思考期」误判为有内容
+  const reasoning = showThinking ? message.reasoning : undefined;
+  const hasReasoning = !!reasoning?.trim();
+  const hasContent = !!message.content?.trim();
+  const waiting = !!message.pending && !hasReasoning && !hasContent && !message.error;
+
+  if (isUser) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
+        <div
+          style={{
+            maxWidth: '85%',
+            padding: '6px 10px',
+            borderRadius: '10px',
+            fontSize: '13px',
+            lineHeight: '1.4',
+            wordBreak: 'break-word',
+            whiteSpace: 'pre-wrap',
+            background: '#4a9eff',
+            color: 'white',
+            borderBottomRightRadius: '2px',
+          }}
+        >
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
+  if (!message.pending && !hasReasoning && !hasContent) return null;
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: '6px' }}>
+      {waiting ? (
+        <WaitingThink />
+      ) : (
+        <div
+          className={`bubble-theirs${message.error ? ' bubble-error' : ''}`}
+          onClick={message.error ? onRetry : undefined}
+          title={message.error ? '点击重试' : undefined}
+          style={{ cursor: message.error ? 'pointer' : 'default' }}
+        >
+          {hasReasoning && reasoning && (
+            <ThinkCard reasoning={reasoning} seconds={message.thinkSeconds} streaming={message.streaming} />
+          )}
+          {message.error ? (
+            <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+          ) : (
+            hasContent && (
+              <MarkdownText
+                content={message.content + (message.streaming ? ' ▍' : '')}
+                className={hasReasoning ? 'md-after-think' : undefined}
+              />
+            )
+          )}
+          {message.error && <div className="retry-hint">点此重试</div>}
+        </div>
+      )}
     </div>
   );
 };
 
 const ChatPanel = ({ onClose }: { onClose: () => void }) => {
-  const { messages, isLoading, showSettings, sendMessage, clearMessages, clearScreen, toggleSettings, loadConfig, loadHistory, saveConfig, config } = useChatStore();
+  const { messages, isLoading, showSettings, sendMessage, retryMessage, clearMessages, clearScreen, toggleSettings, loadConfig, loadHistory, saveConfig, config } = useChatStore();
   const [input, setInput] = useState('');
   const [clearAsk, setClearAsk] = useState(false); // 清空确认条
   const [clearNeverAsk, setClearNeverAsk] = useState(false); // 确认条内的"以后不再询问"
@@ -925,6 +1370,14 @@ const ChatPanel = ({ onClose }: { onClose: () => void }) => {
 
   const isConfigured = !!config?.llmProfiles?.some((p) => p.apiKey);
   const agent = resolveAgent(config);
+  const showThinking = config?.showThinking === true;
+  // 空会话开场（DeepSeek 式）：当前生效智能体的欢迎语 + 最多 4 个示例问题（点击即发送）
+  const activeProfile =
+    config?.llmProfiles?.find((p) => p.id === config.llmActiveProfileId) ??
+    config?.llmProfiles?.find((p) => p.enabled !== false);
+  const emptyGreeting = activeProfile?.greeting?.trim()
+    || (activeProfile ? `和${activeProfile.name}聊点什么吧` : isConfigured ? '和宠物说点什么吧～' : '');
+  const exampleQuestions = (activeProfile?.exampleQuestions ?? []).slice(0, 4);
 
   return (
     <div
@@ -1037,21 +1490,38 @@ const ChatPanel = ({ onClose }: { onClose: () => void }) => {
             }}
           >
             {messages.length === 0 && (
-              <div
-                style={{
-                  textAlign: 'center',
-                  color: '#666',
-                  fontSize: '12px',
-                  marginTop: '40px',
-                }}
-              >
-                {isConfigured
-                  ? '和宠物说点什么吧～'
-                  : '请点击「设置」配置 API Key 后开始聊天'}
+              <div style={{ marginTop: '30px', textAlign: 'center' }}>
+                <div style={{ color: '#8a8a8a', fontSize: '12px', lineHeight: 1.6 }}>
+                  {isConfigured ? emptyGreeting : '请点击「设置」配置 API Key 后开始聊天'}
+                </div>
+                {isConfigured && exampleQuestions.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '14px' }}>
+                    {exampleQuestions.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => void sendMessage(q)}
+                        style={{
+                          padding: '6px 10px', border: '1px solid #444', borderRadius: '8px',
+                          background: '#2a2a2a', color: '#bbb', fontSize: '12px',
+                          textAlign: 'left', cursor: isLoading ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                showThinking={showThinking}
+                onRetry={() => void retryMessage(msg.id)}
+              />
             ))}
             <div ref={messagesEndRef} />
           </div>

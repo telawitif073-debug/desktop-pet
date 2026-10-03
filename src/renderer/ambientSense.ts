@@ -12,7 +12,7 @@
 import { SpeechASR, type ModelPaths } from 'speech-asr';
 import { ApiAsr } from './apiAsr';
 import { useChatStore } from '../store/chatStore';
-import { isSpeaking, speak } from './speech';
+import { isSpeaking, speak, speakContextFromConfig } from './speech';
 
 const CAMERA_SENSE_MS = 15 * 60 * 1000;
 /** 唤醒后聆听需求的时间窗口 */
@@ -79,7 +79,7 @@ function wakeOnPartial(clean: string): void {
   if (rest.length >= 2) return;
   console.log(`[voice] wake on partial (name="${name}")`);
   awakeUntil = Date.now() + AWAKE_WINDOW_MS;
-  void speak(wakeReplyText(), config?.speech);
+  void speak(wakeReplyText(), speakContextFromConfig(config));
 }
 
 /**
@@ -116,7 +116,7 @@ function handleFinalVoice(text: string): void {
     }
     // 只叫了名字：回应并聆听（partial 未抢先时兜底）
     awakeUntil = Date.now() + AWAKE_WINDOW_MS;
-    void speak(wakeReplyText(), config?.speech);
+    void speak(wakeReplyText(), speakContextFromConfig(config));
     return;
   }
   // 聆听窗口内：

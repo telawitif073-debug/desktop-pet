@@ -113,3 +113,130 @@ describe('getLLMConfig 档案驱动（API 全部由用户配置，无默认 API�
     expect(configModule.getLLMConfig().model).toBe('deepseek-chat');
   });
 });
+
+describe('生效档案选择与档案启停（T2）', () => {
+  it('停用的激活档案不生效，回落首个启用档案', () => {
+    configModule.saveConfig({
+      llmProfiles: [{ ...profileA, enabled: false }, profileB],
+      llmActiveProfileId: 'p_a',
+    });
+    expect(configModule.resolveActiveProfile()?.id).toBe('p_b');
+    expect(configModule.getLLMConfig().apiKey).toBe('key-b');
+  });
+
+  it('全部停用时无生效档案（getLLMConfig 返回空 API 配置）', () => {
+    configModule.saveConfig({
+      llmProfiles: [{ ...profileA, enabled: false }],
+      llmActiveProfileId: 'p_a',
+    });
+    expect(configModule.resolveActiveProfile()).toBeUndefined();
+    expect(configModule.resolveActiveProfileId()).toBe('');
+    expect(configModule.getLLMConfig().apiKey).toBe('');
+  });
+
+  it('激活档案被删除后回落首个可用档案', () => {
+    configModule.saveConfig({ llmProfiles: [profileA, profileB], llmActiveProfileId: 'p_a' });
+    configModule.saveConfig({ llmProfiles: [profileB] });
+    expect(configModule.resolveActiveProfileId()).toBe('p_b');
+  });
+
+  it('未启用（无 enabled 字段）的旧档案视为启用', () => {
+    configModule.saveConfig({ llmProfiles: [profileA], llmActiveProfileId: 'p_a' });
+    expect(configModule.isProfileEnabled(profileA)).toBe(true);
+    expect(configModule.resolveActiveProfileId()).toBe('p_a');
+  });
+});
+
+describe('旧档迁移与音色配置归一化（T2）', () => {
+  const legacyProfile = {
+    id: 'p_old',
+    name: '旧档案',
+    apiKey: 'legacy-key',
+    baseUrl: 'https://old.test/v1',
+    model: 'old-model',
+  };
+
+  it('旧 6 字段档案升级：补 enabled=true / petAssetId 空串，并回写磁盘（幂等）', () => {
+    const diskPath = path.join(userDataDir, 'config.json');
+    fs.writeFileSync(
+      diskPath,
+      JSON.stringify({ llmProfiles: [legacyProfile], llmActiveProfileId: 'p_old' }),
+      'utf-8',
+    );
+
+    const profiles = configModule.loadConfig().llmProfiles ?? [];
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0].enabled).toBe(true);
+    expect(profiles[0].petAssetId).toBe('');
+    expect(profiles[0].apiKey).toBe('legacy-key'); // 原有字段不丢
+    expect(profiles[0].name).toBe('旧档案');
+
+    // 升级结果已回写磁盘
+    const onDisk = JSON.parse(fs.readFileSync(diskPath, 'utf-8'));
+    expect(onDisk.llmProfiles[0].enabled).toBe(true);
+    expect(onDisk.llmProfiles[0].petAssetId).toBe('');
+
+    // 幂等：再次加载不产生新的结构变化
+    expect((configModule.saveConfig({}).llmProfiles ?? [])[0].enabled).toBe(true);
+  });
+
+  it('旧配置缺少新增字段时补默认值（profileMessages/音色/开关）', () => {
+    const diskPath = path.join(userDataDir, 'config.json');
+    fs.writeFileSync(diskPath, JSON.stringify({ petWindow: { width: 280, height: 280, opacity: 1 } }), 'utf-8');
+
+    const cfg = configModule.loadConfig();
+    expect(cfg.profileMessages).toEqual({});
+    expect(cfg.downloadedVoices).toEqual([]);
+    expect(cfg.activeCloudVoiceId).toBe('');
+    expect(cfg.ttsCloudConfig).toEqual({ engine: 'openai', baseUrl: '', apiKey: '', model: '' });
+    expect(cfg.showThinking).toBe(false);
+    expect(cfg.thinkingLang).toBe('auto');
+    expect(cfg.moodFromChat).toBe(true);
+    expect(cfg.petTasks).toEqual([]);
+    expect(cfg.petWindow.width).toBe(280); // 旧配置不丢
+  });
+
+  it('音色库归一化：剔除非法条目、补默认值；云 TTS 凭证引擎缺省 openai', () => {
+    const diskPath = path.join(userDataDir, 'config.json');
+    fs.writeFileSync(
+      diskPath,
+      JSON.stringify({
+        downloadedVoices: [
+          { id: 'v1', name: '', installedAt: 1, config: { engine: 'cloud', voiceId: 'alloy' } },
+          { id: '', config: { engine: 'cloud', voiceId: 'x' } },
+          { id: 'v2', config: { voiceId: 'y' } }, // 缺 engine → 丢弃
+          'bad',
+        ],
+        ttsCloudConfig: { baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-x', model: 'tts-1' },
+      }),
+      'utf-8',
+    );
+
+    const cfg = configModule.loadConfig();
+    const voices = cfg.downloadedVoices ?? [];
+    expect(voices).toHaveLength(1);
+    expect(voices[0].id).toBe('v1');
+    expect(voices[0].name).toBe('v1'); // name 缺省回落 id
+    expect(cfg.ttsCloudConfig).toEqual({
+      engine: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-x',
+      model: 'tts-1',
+    });
+  });
+
+  it('配置文件损坏时回落默认值且不抛异常', () => {
+    const diskPath = path.join(userDataDir, 'config.json');
+    fs.writeFileSync(diskPath, '{ this is not json', 'utf-8');
+    const cfg = configModule.loadConfig();
+    expect(cfg.llmProfiles).toEqual([]);
+    expect(cfg.ttsCloudConfig?.engine).toBe('openai');
+  });
+
+  it('未绑定历史保留键与渲染端约定一致（跨进程漂移哨兵）', () => {
+    expect(configModule.UNBOUND_PROFILE_ID).toBe('__unbound__');
+  });
+
+  // 宠工坊窗口尺寸字段已随独立窗口一起移除（改为资源中心内嵌视图，无窗口尺寸可记忆）：
+  // 类型与所有写入路径都不再涉及该字段，故不再保留归一化用例。
+});

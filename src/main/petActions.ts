@@ -2,9 +2,33 @@ import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { loadConfig, saveConfig, PET_ACTIONS_MAX, type PetAction } from './config';
+import { probeImageBuffer } from './petPack';
+import { evaluatePetPack } from '../shared/petResource';
 
 function getActionsDir(): string {
   return path.join(app.getPath('userData'), 'pet-actions');
+}
+
+/**
+ * 上传/安装动作帧时的**宠物本体校验**（修复「任意图都能变成宠物动作」）：
+ * - 用与资源包同一套分类标准（src/shared/petResource）判定上传内容；
+ * - 只有**全部帧都被证明为非本体**（界面件/表情包/品牌/文档/音频）时才拒绝——
+ *   这类是明确的误用，给出显式原因；
+ * - 只要有任一帧属于本体或**无法定性**（unknown）就放行：用户主动上传属于显式意图，
+ *   探测能力不足不能当成拒绝理由（与资源包安装的 fail-closed 口径刻意区分）。
+ */
+function assertPetBodyFrames(files: Array<{ filename: string; data: Buffer }>): void {
+  const entries = files.map((f) => ({ path: f.filename, probe: probeImageBuffer(f.data, f.filename) }));
+  const evaluation = evaluatePetPack(entries);
+  if (evaluation.valid) return;
+  const rejected = evaluation.rejected;
+  const allProvenNonBody = rejected.length === entries.length && rejected.every((r) => r.role !== 'unknown');
+  if (!allProvenNonBody) return; // 含 unknown/未定性 → 尊重用户意图放行
+  const detail = rejected
+    .slice(0, 5)
+    .map((r) => `${r.path}（${r.role}：${r.evidence[0]}）`)
+    .join('；');
+  throw new Error(`这些图片不属于宠物本体资源，已拒绝添加：${detail}`);
 }
 
 /** 新增帧序列动作：图片写入 userData/pet-actions/<id>/，元数据写入 config。
@@ -23,6 +47,8 @@ export function addFramesAction(
   if (config.petActions.length >= PET_ACTIONS_MAX) {
     throw new Error(`动作数量已达上限（${PET_ACTIONS_MAX} 个），请先删除部分动作`);
   }
+  // 本体校验：只有「全部帧都被证明为非本体」时才拒绝（详见 assertPetBodyFrames 注释）
+  assertPetBodyFrames(files);
 
   const id = `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const dir = path.join(getActionsDir(), id);

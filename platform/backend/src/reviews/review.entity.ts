@@ -9,8 +9,8 @@ import {
 } from 'typeorm';
 import { User } from '../users/user.entity';
 
-/** 评价只针对独立资源（宠物/智能体）；动作随宠物，不单独评价 */
-export type AssetType = 'pet' | 'agent';
+/** 评价针对独立资源（宠物/智能体/音色）；动作随宠物，不单独评价 */
+export type AssetType = 'pet' | 'agent' | 'voice';
 
 @Entity('reviews')
 @Index(['assetType', 'assetId'])
@@ -25,8 +25,8 @@ export class Review {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  // PG enum 保留 'action' 值以避免 ALTER TYPE 迁移，新数据不再写入该值
-  @Column({ name: 'asset_type', type: 'enum', enum: ['pet', 'agent', 'action'] })
+  // PG enum 保留 'action' 值以避免 ALTER TYPE 迁移；'voice' 为音色板块（部署时 ALTER TYPE ADD VALUE）
+  @Column({ name: 'asset_type', type: 'enum', enum: ['pet', 'agent', 'action', 'voice'] })
   assetType: AssetType;
 
   @Column({ name: 'asset_id', type: 'uuid' })

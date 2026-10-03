@@ -6,7 +6,6 @@ import {
   FlatList,
   Modal,
   PermissionsAndroid,
-  Platform,
   Pressable,
   ScrollView,
   Share,
@@ -16,17 +15,27 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { supportsChat, streamChat, StreamInterruptError } from '../chat/llm';
+import { AbortedError, supportsChat, streamChat, StreamInterruptError } from '../chat/llm';
 import { scheduleUpload } from '../api/sync';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '../store/appStore';
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
-import { isSpeechAvailable, speak, startListening, stopListening, stopSpeak, subscribeVoice } from '../native/Voice';
+import { isSpeechAvailable, startListening, stopListening, subscribeVoice } from '../native/Voice';
+import { speakReply, stopAllVoice } from '../voiceEngine';
 import type { ChatMsg, LlmProfile } from '../types';
-import { buildMultiConfig, exportAgentJson, inspectMultiAgent, normalizeAgentText, mergeImportedProfiles, parseConfigText, replacePlaceholdersToRefs, safeRaw } from '../agentPort';
-import type { ImportOutcome, MultiAgentInspect } from '../agentPort';
-import { verifyDependency } from '../api/platform';
-import type { AgentMultiConfig, MultiAgentDependency } from '../types';
+import { exportAgentJson, isPersonaCard, normalizeAgentText, mergeImportedProfiles, parseConfigText, personaCardToAgent } from '../agentPort';
+import type { ImportOutcome } from '../agentPort';
+import type { CapabilityOffer } from '../agentPort';
+import {
+  capabilityDesc,
+  capabilityLabel,
+  detectCapabilities,
+  type CapabilityDetection,
+} from '../petCapabilities';
+import { extractTaskDirectives, detectPetIntent, stripTaskMarkers } from '../petTasks';
+import { createTaskFromDirective, handlePetIntent, mentionsDue } from '../petTaskScheduler';
+import type { AgentCapabilities, AgentCapabilityKind, AgentCapabilitySpec, WebSearchProvider, WebSearchSpec } from '../types';
+import { PROVIDER_LABEL, WEB_COST_HINT } from '../webSearch';
 import { WebView } from 'react-native-webview';
 import MarkdownText from '../components/MarkdownText';
 
@@ -120,15 +129,18 @@ const COPY_HTML =
   '<body><textarea id="t"></textarea><script>window.__copy=function(s){var e=document.getElementById("t");e.value=s;e.focus();e.select();' +
   'try{return document.execCommand("copy");}catch(err){try{navigator.clipboard.writeText(s);return true;}catch(e2){return false;}}};</script></body></html>';
 
-function Bubble({ msg, onRetry, onCopy }: { msg: ChatMsg; onRetry: () => void; onCopy: (t: string) => void }): React.JSX.Element {
+function Bubble({ msg, onRetry, onCopy, onLongPress }: { msg: ChatMsg; onRetry: () => void; onCopy: (t: string) => void; onLongPress?: (msg: ChatMsg) => void }): React.JSX.Element {
   const showThinking = useAppStore((s) => s.showThinking);
   const mine = msg.role === 'user';
   if (mine) {
     return (
       <View style={[styles.bubbleRow, styles.bubbleRowMine]}>
-        <View style={[styles.bubble, styles.bubbleMine]}>
+        <Pressable
+          style={[styles.bubble, styles.bubbleMine]}
+          onLongPress={onLongPress ? () => onLongPress(msg) : undefined}
+          delayLongPress={350}>
           <Text selectable style={styles.bubbleTextMine}>{msg.content}</Text>
-        </View>
+        </Pressable>
       </View>
     );
   }
@@ -136,7 +148,9 @@ function Bubble({ msg, onRetry, onCopy }: { msg: ChatMsg; onRetry: () => void; o
   // 也不让「隐形思考期」（模型仍返回 reasoning）误判为有内容而渲染空气泡
   const reasoning = showThinking ? msg.reasoning : undefined;
   const hasReasoning = !!reasoning && reasoning.trim().length > 0;
-  const hasContent = !!msg.content && msg.content.trim().length > 0;
+  // 展示用剥离：任务指令（[[TASK|…]]）及其流式未写完的尾巴都不给用户看
+  const shown = stripTaskMarkers(msg.content ?? '');
+  const hasContent = shown.trim().length > 0;
   // 思考过渡不占气泡：Trae 式「正在思考」+ 圆点
   const waiting = msg.pending && !hasReasoning && !hasContent && !msg.error;
   if (!msg.pending && !hasReasoning && !hasContent) return <></>;
@@ -147,13 +161,15 @@ function Bubble({ msg, onRetry, onCopy }: { msg: ChatMsg; onRetry: () => void; o
       ) : (
         <Pressable
           style={[styles.bubble, styles.bubbleTheirs]}
-          onPress={msg.error ? onRetry : undefined}>
+          onPress={msg.error ? onRetry : undefined}
+          onLongPress={onLongPress && !msg.streaming ? () => onLongPress(msg) : undefined}
+          delayLongPress={350}>
           {hasReasoning && reasoning && (
             <ThinkCard reasoning={reasoning} seconds={msg.thinkSeconds} streaming={msg.streaming} />
           )}
-          {hasContent && msg.content && (looksMarkdown(msg.content) ? (
+          {hasContent && (looksMarkdown(shown) ? (
             <MarkdownText
-              content={msg.content + (msg.streaming && !msg.error ? ' ▍' : '')}
+              content={shown + (msg.streaming && !msg.error ? ' ▍' : '')}
               baseStyle={[
                 msg.error ? styles.bubbleError : styles.bubbleText,
                 hasReasoning && !msg.error && styles.contentAfterThink,
@@ -167,7 +183,7 @@ function Bubble({ msg, onRetry, onCopy }: { msg: ChatMsg; onRetry: () => void; o
                 msg.error ? styles.bubbleError : styles.bubbleText,
                 hasReasoning && !msg.error && styles.contentAfterThink,
               ]}>
-              {msg.content}
+              {shown}
               {msg.streaming && !msg.error ? ' ▍' : ''}
             </Text>
           ))}
@@ -231,33 +247,40 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
   const profiles = useAppStore((s) => s.llmProfiles);
   const activeId = useAppStore((s) => s.llmActiveProfileId);
   const downloadedPets = useAppStore((s) => s.downloadedPets);
+  const downloadedVoices = useAppStore((s) => s.downloadedVoices);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState('');
   const [form, setForm] = useState(emptyForm());
   const [bindPetId, setBindPetId] = useState<string>('');
+  /** 编辑表单选中的专属朗读音色 id（''=跟随全局默认音色） */
+  const [bindVoiceId, setBindVoiceId] = useState<string>('');
   const [search, setSearch] = useState('');
-  // ── P1-2 多智能体编排配置向导状态 ──
-  const [multiRaw, setMultiRaw] = useState('');
-  const [multiFormat, setMultiFormat] = useState<'yaml' | 'json'>('yaml');
-  const [multiInspect, setMultiInspect] = useState<MultiAgentInspect | null>(null);
-  const [multiDeps, setMultiDeps] = useState<MultiAgentDependency[] | null>(null);
-  const [multiValues, setMultiValues] = useState<Record<string, string>>({});
-  const [multiError, setMultiError] = useState('');
-  const [testingRef, setTestingRef] = useState('');
-  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; status: number | null; latencyMs: number | null; error?: string }>>({});
+  // ── 主动能力（来自导入 JSON 的检测结果 + 用户勾选；见 petCapabilities.ts）──
+  /** 编辑表单里勾选的该智能体能力 */
+  const [formCaps, setFormCaps] = useState<AgentCapabilityKind[]>([]);
+  /** 该智能体自己的能力规格（间隔/时段/示例任务，来自它的 JSON） */
+  const [formCapSpec, setFormCapSpec] = useState<AgentCapabilitySpec>({});
+  /** 表单底部提示（导入检测到能力时说明「已为你勾选」） */
+  const [formCapHint, setFormCapHint] = useState('');
+  /** 批量导入后待确认的能力添加项（每个智能体一项） */
+  const [capOffers, setCapOffers] = useState<CapabilityOffer[] | null>(null);
+  /** 导入弹窗里每个智能体勾选的能力 */
+  const [capChecked, setCapChecked] = useState<Record<string, AgentCapabilityKind[]>>({});
+
+  // 从聊天页顶部每次进入都必须落在「智能体选择页（列表）」：
+  // Modal 关闭期间组件仍挂载、formOpen 会残留，重新打开时重置回列表
+  useEffect(() => {
+    if (visible) setFormOpen(false);
+  }, [visible]);
 
   const openAdd = (): void => {
     setEditingId('');
     setForm(emptyForm());
     setBindPetId('');
-    // 重置多智能体配置向导
-    setMultiRaw('');
-    setMultiFormat('yaml');
-    setMultiInspect(null);
-    setMultiDeps(null);
-    setMultiValues({});
-    setMultiError('');
-    setTestResults({});
+    setBindVoiceId('');
+    setFormCaps([]);
+    setFormCapSpec({});
+    setFormCapHint('');
     setFormOpen(true);
   };
 
@@ -278,27 +301,11 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
       exampleQuestions: (p.exampleQuestions ?? []).join('\n'),
     });
     setBindPetId(p.petAssetId ?? '');
-    // 回填多智能体配置（如存在）：展示原始占位符文本，并恢复已填凭证
-    setMultiError('');
-    setTestResults({});
-    if (p.multiConfig) {
-      const deps = p.multiConfig.deps ?? [];
-      setMultiRaw(safeRaw(p.multiConfig.raw, deps));
-      setMultiFormat(p.multiConfig.format ?? 'yaml');
-      setMultiDeps(deps);
-      const vals: Record<string, string> = {};
-      for (const d of deps) vals[d.ref] = p.multiConfig?.credentials?.[d.ref] ?? '';
-      setMultiValues(vals);
-      const displayRaw = safeRaw(p.multiConfig.raw, deps);
-      const parsed = parseConfigText(displayRaw);
-      setMultiInspect(parsed.ok ? inspectMultiAgent(parsed.value) : null);
-    } else {
-      setMultiRaw('');
-      setMultiFormat('yaml');
-      setMultiInspect(null);
-      setMultiDeps(null);
-      setMultiValues({});
-    }
+    setBindVoiceId(p.boundVoiceId ?? '');
+    // 回填该智能体的主动能力（来自导入 JSON 的检测结果与用户此前的勾选）
+    setFormCaps(p.capabilities?.enabled ?? []);
+    setFormCapSpec(p.capabilities?.spec ?? {});
+    setFormCapHint('');
     setFormOpen(true);
   };
 
@@ -312,27 +319,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
     }
     const store = useAppStore.getState();
     const petAssetId = bindPetId || undefined;
-    // 多智能体配置组装：有粘贴内容但未解析 → 阻止保存；解析过 → 占位符转 cred:// 引用 + 凭证
-    let multiConfig: AgentMultiConfig | undefined;
-    const rawText = multiRaw.trim();
-    if (rawText) {
-      if (!multiDeps) {
-        Alert.alert('提示', '请先点击「解析配置」识别多智能体结构与外部依赖');
-        return;
-      }
-      const replaced = replacePlaceholdersToRefs(rawText, multiDeps);
-      const credentials: Record<string, string> = {};
-      for (const d of multiDeps) {
-        const v = (multiValues[d.ref] ?? '').trim();
-        if (v) credentials[d.ref] = v;
-      }
-      multiConfig = {
-        raw: replaced,
-        format: multiFormat,
-        deps: multiDeps.map((d) => ({ ...d })),
-        credentials,
-      };
-    }
     const newFields = {
       avatar: form.avatar.trim() || undefined,
       intro: form.intro.trim() || undefined,
@@ -342,6 +328,11 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
       greeting: form.greeting.trim() || undefined,
       exampleQuestions: linesToArray(form.exampleQuestions),
     };
+    // 主动能力（来自导入 JSON 的检测 + 用户勾选）：规格用该智能体自己的（间隔/时段/示例任务）
+    const capabilities: AgentCapabilities | undefined =
+      formCaps.length || Object.keys(formCapSpec).length
+        ? { enabled: formCaps, spec: { ...formCapSpec, source: formCapSpec.source ?? 'manual' } }
+        : undefined;
     if (editingId) {
       const next = store.llmProfiles.map((p) =>
         p.id === editingId
@@ -353,7 +344,8 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
               model,
               systemPrompt: form.systemPrompt.trim(),
               petAssetId,
-              multiConfig,
+              boundVoiceId: bindVoiceId || undefined,
+              capabilities,
               ...newFields,
             }
           : p,
@@ -380,8 +372,9 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
         model,
         systemPrompt: form.systemPrompt.trim(),
         petAssetId,
+        boundVoiceId: bindVoiceId || undefined,
         enabled: true,
-        multiConfig,
+        capabilities,
         ...newFields,
       };
       if (petAssetId) {
@@ -523,93 +516,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
     Alert.alert('已复制', `已创建「${p.name} 副本」`);
   };
 
-  // ── P1-2 多智能体编排：解析识别 → 依赖补全 → 连通性测试 ──
-
-  /** 解析用户粘贴的多智能体配置：识别结构 → 提取依赖 */
-  const handleParseMulti = (): void => {
-    const text = multiRaw.trim();
-    if (!text) {
-      Alert.alert('提示', '请先粘贴多智能体配置（YAML 或 JSON）');
-      return;
-    }
-    const parsed = parseConfigText(text);
-    if (!parsed.ok) {
-      setMultiError(parsed.error);
-      setMultiInspect(null);
-      setMultiDeps(null);
-      return;
-    }
-    const built = buildMultiConfig(text, parsed.format);
-    if (!built.ok) {
-      setMultiError(built.error);
-      setMultiInspect(null);
-      setMultiDeps(null);
-      return;
-    }
-    setMultiError('');
-    setMultiFormat(built.cfg.format);
-    setMultiInspect(built.inspect);
-    setMultiDeps(built.cfg.deps);
-    // 保留之前填过的凭证值（按 ref 对齐）
-    setMultiValues((prev) => {
-      const next: Record<string, string> = {};
-      for (const d of built.cfg.deps) next[d.ref] = prev[d.ref] ?? '';
-      return next;
-    });
-    setTestResults({});
-    Alert.alert(
-      built.inspect.detected ? '已识别多智能体' : '已解析配置',
-      built.inspect.detected
-        ? '已识别多智能体编排结构，请在下方「外部依赖补全」逐项填写真实信息'
-        : '未检测到多智能体结构，将作为普通配置保存',
-    );
-  };
-
-  /** 清除多智能体配置向导（含已填凭证与测试结果） */
-  const clearMulti = (): void => {
-    setMultiRaw('');
-    setMultiFormat('yaml');
-    setMultiInspect(null);
-    setMultiDeps(null);
-    setMultiValues({});
-    setMultiError('');
-    setTestResults({});
-  };
-
-  /** 更新依赖的用途说明 */
-  const setDepUsage = (idx: number, usage: string): void => {
-    setMultiDeps((prev) => (prev ? prev.map((d, i) => (i === idx ? { ...d, usage } : d)) : prev));
-  };
-
-  /** 测试单条依赖连通性：后端代发探测请求 */
-  const handleTestDependency = async (dep: MultiAgentDependency): Promise<void> => {
-    const raw = (multiValues[dep.ref] ?? '').trim() || dep.example;
-    // 拼出探测目标：优先用户填写的整串里的 URL，否则用示例地址
-    const urlMatch = raw.match(/https?:\/\/[^\s，,]+/);
-    const url = urlMatch ? urlMatch[0] : raw;
-    if (!/^https?:\/\//.test(url)) {
-      Alert.alert('无法测试', '该依赖没有可探测的 URL，请填写有效地址');
-      return;
-    }
-    setTestingRef(dep.ref);
-    try {
-      const res = await verifyDependency({
-        url,
-        protocol: dep.protocol,
-        auth: dep.auth,
-        apiKey: dep.auth === 'none' ? undefined : (multiValues[dep.ref]?.trim() || undefined),
-      });
-      setTestResults((prev) => ({ ...prev, [dep.ref]: res }));
-    } catch (e) {
-      setTestResults((prev) => ({
-        ...prev,
-        [dep.ref]: { ok: false, status: null, latencyMs: null, error: e instanceof Error ? e.message : String(e) },
-      }));
-    } finally {
-      setTestingRef('');
-    }
-  };
-
   // ── P1 导入导出：导出剥离凭证，导入按名称合并 ──
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
@@ -647,13 +553,70 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
     if (!importOutcome) return;
     useAppStore.getState().patch({ llmProfiles: importOutcome.list });
     scheduleUpload('config');
+    const offers = importOutcome.capabilityOffers;
     setImportOpen(false);
     setImportText('');
     setImportOutcome(null);
+    // 检测到自带主动能力的智能体：弹「是否为它添加这些能力」（检测到的默认勾选，可取消）
+    if (offers?.length) {
+      const checked: Record<string, AgentCapabilityKind[]> = {};
+      for (const o of offers) checked[o.profileId] = [...o.kinds];
+      setCapChecked(checked);
+      setCapOffers(offers);
+    }
   };
 
-  /** 表单导入：解析 JSON / YAML（兼容数组与 {profiles}/{llmProfiles} 三种形状），
-   *  单智能体回填当前表单；多智能体/编排配置转入下方向导，由「解析配置」接手 */
+  /** 切换导入弹窗里某个智能体的某项能力 */
+  const toggleOfferCap = (profileId: string, kind: AgentCapabilityKind): void => {
+    setCapChecked((prev) => {
+      const cur = prev[profileId] ?? [];
+      return { ...prev, [profileId]: cur.includes(kind) ? cur.filter((k) => k !== kind) : [...cur, kind] };
+    });
+  };
+
+  /** 应用导入弹窗的选择：把能力写进对应智能体（规格保留它自己 JSON 里的间隔/时段/示例任务） */
+  const applyCapabilityOffers = (): void => {
+    if (!capOffers) return;
+    const store = useAppStore.getState();
+    const byId = new Map(capOffers.map((o) => [o.profileId, o]));
+    const next = store.llmProfiles.map((p) => {
+      const o = byId.get(p.id);
+      if (!o) return p;
+      return {
+        ...p,
+        capabilities: { enabled: capChecked[p.id] ?? [], spec: { ...o.spec, source: 'import' as const } },
+      };
+    });
+    store.patch({ llmProfiles: next });
+    scheduleUpload('config');
+    setCapOffers(null);
+  };
+
+  /** 编辑表单：切换某项能力 */
+  const toggleFormCap = (kind: AgentCapabilityKind): void => {
+    setFormCaps((prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]));
+  };
+
+  /** 编辑表单：更新联网查询的搜索服务配置（提供商 / Key / 接口地址） */
+  const setWebSpec = (patch: Partial<WebSearchSpec>): void => {
+    setFormCapSpec((prev) => {
+      const cur: WebSearchSpec = prev.web ?? { provider: 'bocha', apiKey: '' };
+      return { ...prev, web: { ...cur, ...patch } };
+    });
+  };
+
+  /** 编辑表单：切换该智能体的搭话间隔（10/30/60/120 循环） */
+  const cycleCapInterval = (): void => {
+    const options = [10, 30, 60, 120];
+    const cur = formCapSpec.intervalMinutes ?? 30;
+    const idx = options.indexOf(cur);
+    const next = options[(idx + 1) % options.length];
+    setFormCapSpec((prev) => ({ ...prev, intervalMinutes: next }));
+  };
+
+  /** 表单导入：解析 JSON / YAML（兼容数组与 {profiles}/{llmProfiles} 三种形状，以及人设卡 agent_name/persona），
+   *  单智能体回填当前表单；多条配置请改用列表页「导入」。
+   *  完全未识别出任何字段时报错并保留原表单（此前会把编辑中的内容清成空白，表现成「进入新增智能体」）。 */
   const doFormImport = (): void => {
     const parsed = parseConfigText(formImportText);
     if (!parsed.ok) {
@@ -668,69 +631,96 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
     else if (v && typeof v === 'object' && Array.isArray((v as Record<string, unknown>).profiles)) arr = (v as { profiles: unknown[] }).profiles;
     else if (v && typeof v === 'object' && Array.isArray((v as Record<string, unknown>).llmProfiles)) arr = (v as { llmProfiles: unknown[] }).llmProfiles;
     else arr = [v];
-    const isMulti =
-      arr.length > 1 ||
-      arr.some((it) => {
-        const o = it as Record<string, unknown> | null;
-        return !!o && typeof o === 'object' && (o.multi_agent || o.multiAgent || o.orchestrator || o.workflow || o.kind === 'multi_agent');
-      });
-    if (isMulti) {
-      // 多智能体/编排配置 → 转入编排向导，让用户点「解析配置」
-      setMultiRaw(formImportText);
-      setMultiInspect(null);
-      setMultiDeps(null);
-      setMultiError('');
-      setTestResults({});
-      setFormImportOpen(false);
-      setFormImportText('');
-      setFormImportError('');
-      Alert.alert('已填入多智能体编排向导', '识别到多智能体/编排配置，已粘贴到下方「多智能体编排配置」，请点击「解析配置」继续；若仅需单个智能体，请粘贴单条配置');
+    const isOrchestrationConfig = arr.some((it) => {
+      const o = it as Record<string, unknown> | null;
+      return !!o && typeof o === 'object' && (o.multi_agent || o.multiAgent || o.orchestrator || o.workflow || o.kind === 'multi_agent');
+    });
+    if (isOrchestrationConfig) {
+      setFormImportError('不再支持多智能体编排配置。请粘贴单个智能体的配置（name / baseUrl / model / systemPrompt 等）或人设卡（agent_name / persona）');
+      return;
+    }
+    if (arr.length > 1) {
+      setFormImportError(`识别到 ${arr.length} 条智能体配置：请改用列表页的「导入」批量导入，本表单只能回填一个智能体`);
       return;
     }
     const d = (arr[0] ?? {}) as Record<string, unknown>;
+    // 人设卡（agent_name / persona…）：映射到表单字段；显式字段优先，人设对象兜底
+    const card = isPersonaCard(d) ? personaCardToAgent(d) : null;
+    const name = s(d.name) || card?.name || '';
+    const systemPrompt = s(d.systemPrompt ?? d.system_prompt ?? d.prompt ?? d.system) || card?.systemPrompt || '';
+    const role = s(d.role) || card?.role || '';
+    const style = s(d.style) || card?.style || '';
+    const greeting = s(d.greeting) || card?.greeting || '';
     const tags = [...new Set(toArr(d.domainTags ?? d.tags).map((t) => t.trim()).filter(Boolean))].join('，');
-    const qs = toArr(d.exampleQuestions ?? d.questions).map((t) => t.trim()).filter(Boolean).join('\n');
+    const qs = toArr(d.exampleQuestions ?? d.questions).map((t) => t.trim()).filter(Boolean).join('\n') || (card?.exampleQuestions ?? []).join('\n');
+    // 完全未识别出任何可用字段：报错并保持原表单，避免把编辑内容清成空白
+    if (![name, systemPrompt, role, style, greeting, tags, qs, s(d.model), s(d.apiKey ?? d.api_key), s(d.baseUrl ?? d.base_url)].some((x) => x.length > 0)) {
+      setFormImportError('未能识别配置字段：请粘贴智能体配置（name / baseUrl / model / systemPrompt 等），或人设卡（agent_name / persona）');
+      return;
+    }
     let bind = s(d.petAssetId);
     if (!bind) {
       const pa = d.petAsset as Record<string, unknown> | string | null | undefined;
       bind = typeof pa === 'string' ? pa : pa && typeof pa === 'object' ? s((pa as Record<string, unknown>).id) : '';
     }
     setForm({
-      name: s(d.name),
+      name,
       apiKey: s(d.apiKey ?? d.api_key),
-      baseUrl: s(d.baseUrl ?? d.base_url) || 'https://api.openai.com/v1',
-      model: s(d.model),
-      systemPrompt: s(d.systemPrompt ?? d.system_prompt ?? d.prompt ?? d.system),
+      baseUrl: s(d.baseUrl ?? d.base_url) || (card?.baseUrl ?? '') || 'https://api.openai.com/v1',
+      model: s(d.model) || (card?.model ?? ''),
+      systemPrompt,
       avatar: s(d.avatar),
       intro: s(d.intro),
       domainTags: tags,
-      role: s(d.role),
-      style: s(d.style),
-      greeting: s(d.greeting),
+      role,
+      style,
+      greeting,
       exampleQuestions: qs,
     });
-    setBindPetId(bind);
+    setBindPetId(bind || (editingId ? bindPetId : ''));
+    // 主动能力检测：该 JSON 声明了「主动发起对话 / 定时任务」时，勾选能力并说明（用户可取消）
+    const det: CapabilityDetection = detectCapabilities(d);
+    if (det.kinds.length) {
+      setFormCaps(det.kinds);
+      setFormCapSpec(det.spec);
+      setFormCapHint(
+        `检测到该智能体声明了这些能力${det.reasons.length ? `（${det.reasons.join('；')}）` : ''}，已为你勾选，可在此调整`,
+      );
+    }
     setFormImportOpen(false);
     setFormImportText('');
     setFormImportError('');
-    Alert.alert('已填充', `已导入「${s(d.name) || '未命名'}」到表单，检查确认后保存即可。`);
+    Alert.alert('已填充', `已导入「${name || '未命名'}」到表单，检查确认后保存即可。`);
   };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <>
+      <Modal visible={visible} animationType="slide" onRequestClose={() => (formOpen ? setFormOpen(false) : onClose())}>
       <View
         style={[
           pm.container,
           { paddingTop: insets.top + 10, paddingBottom: (kbVisible ? kbHeight : insets.bottom) + 6 },
         ]}>
         <View style={pm.header}>
-          <Pressable onPress={onClose} hitSlop={8}>
-            <Text style={pm.headerBtn}>关闭</Text>
-          </Pressable>
-          <Text style={pm.title}>智能体管理</Text>
-          <Pressable onPress={openAdd} hitSlop={8}>
-            <Text style={[pm.headerBtn, pm.headerBtnPrimary]}>新增</Text>
-          </Pressable>
+          {formOpen ? (
+            // 编辑/新增页：左上角是「返回」，回到智能体选择页而不是直接关闭整个弹层
+            <Pressable onPress={() => setFormOpen(false)} hitSlop={8}>
+              <Text style={pm.headerBtn}>‹ 返回</Text>
+            </Pressable>
+          ) : (
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Text style={pm.headerBtn}>关闭</Text>
+            </Pressable>
+          )}
+          <Text style={pm.title}>{formOpen ? (editingId ? '编辑智能体' : '新增智能体') : '智能体管理'}</Text>
+          {formOpen ? (
+            // 编辑页不显示「新增」，用等宽占位保持标题居中
+            <View style={pm.headerBtnSpace} />
+          ) : (
+            <Pressable onPress={openAdd} hitSlop={8}>
+              <Text style={[pm.headerBtn, pm.headerBtnPrimary]}>新增</Text>
+            </Pressable>
+          )}
         </View>
 
         {formOpen ? (
@@ -743,7 +733,7 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
             </View>
             {formImportOpen ? (
               <View style={pm.importBox}>
-                <Text style={pm.importTip}>粘贴单个智能体的 JSON / YAML（兼容数组与 profiles / llmProfiles 形状、可带代码块包裹）。字段解析后将直接回填本表单；多智能体/编排配置会自动转入下方「多智能体编排配置」向导。</Text>
+                <Text style={pm.importTip}>粘贴单个智能体的 JSON / YAML（兼容数组与 profiles / llmProfiles 形状、支持人设卡 agent_name / persona、可带代码块包裹）。字段解析后将直接回填本表单；若含多条配置，请改用列表页的「导入」批量导入。</Text>
                 <TextInput
                   style={pm.importInput}
                   multiline
@@ -805,110 +795,117 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
             )}
             <Text style={pm.fieldHint}>一个智能体必须且只能绑定一个宠物形象</Text>
 
-            {/* ── P1-2 多智能体编排配置向导 ── */}
-            <Text style={pm.sectionDivider}>多智能体编排配置（可选）</Text>
-            <Text style={pm.multiTip}>
-              {'支持 YAML / JSON。粘贴后点「解析配置」：自动识别是否多智能体（kind: multi_agent / agents / orchestrator / workflow），提取 ${VAR}、{{VAR}}、env:VAR、secret:VAR 外部依赖；为每条依赖填写真实信息并测试连通性后保存，凭证以内部引用存储、导出时自动剥离。'}
-            </Text>
-            <TextInput
-              style={pm.multiEditor}
-              multiline
-              value={multiRaw}
-              onChangeText={setMultiRaw}
-              placeholder={'kind: multi_agent\nname: 宠物管家团\norchestrator:\n  type: supervisor\n  model: ${MODEL_API}\nagents:\n  - id: health\n    endpoint: ${HEALTH_AGENT_API}\n    api_key: ${HEALTH_AGENT_KEY}'}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <View style={pm.multiBtns}>
-              <Pressable
-                style={[pm.btn, pm.btnGhost, pm.multiBtn]}
-                onPress={handleParseMulti}
-                disabled={!multiRaw.trim()}>
-                <Text style={pm.btnGhostText}>解析配置</Text>
-              </Pressable>
-              {multiRaw.trim() && multiDeps ? (
-                <Pressable style={[pm.btn, pm.btnGhost, pm.multiBtn]} onPress={clearMulti}>
-                  <Text style={[pm.btnGhostText, pm.multiBtnDanger]}>清除</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            {multiError ? <Text style={pm.multiError}>{multiError}</Text> : null}
+            {/* ── 朗读音色：默认跟随全局，或指定某个已下载音色（系统/云/GPT-SoVITS）── */}
+            <Text style={pm.fieldLabel}>朗读音色</Text>
+            <Pressable style={[pm.bindRow, !bindVoiceId && pm.bindRowActive]} onPress={() => setBindVoiceId('')}>
+              <Text style={[pm.bindRowName, !bindVoiceId && pm.bindRowNameActive]} numberOfLines={1}>
+                默认（跟随设置页的全局音色）
+              </Text>
+              {!bindVoiceId ? <Text style={pm.bindCheck}>✓</Text> : null}
+            </Pressable>
+            {downloadedVoices.length === 0 ? (
+              <Text style={pm.fieldHint}>还没有已下载的音色，可去抽屉「音色」板块安装；保持默认则所有智能体共用全局音色</Text>
+            ) : (
+              downloadedVoices.map((v) => {
+                const selected = bindVoiceId === v.id;
+                const tag = v.config.engine === 'gptsovits' ? 'GPT-SoVITS' : v.config.engine === 'system' ? '系统' : '云';
+                return (
+                  <Pressable
+                    key={v.id}
+                    style={[pm.bindRow, selected && pm.bindRowActive]}
+                    onPress={() => setBindVoiceId(selected ? '' : v.id)}>
+                    <Text style={[pm.bindRowName, selected && pm.bindRowNameActive]} numberOfLines={1}>
+                      {v.name}
+                    </Text>
+                    <Text style={pm.voiceTag}>{tag}</Text>
+                    {selected && <Text style={pm.bindCheck}>✓</Text>}
+                  </Pressable>
+                );
+              })
+            )}
+            <Text style={pm.fieldHint}>该智能体朗读回复时固定用此音色；云 / GPT-SoVITS 音色未配置好或被删除时自动回退全局音色</Text>
 
-            {multiInspect ? (
-              <View style={pm.multiInspect}>
-                <Text style={pm.multiInspectTitle}>识别结果</Text>
-                <View style={pm.multiInspectTags}>
-                  <Text style={[pm.multiTag, multiInspect.detected ? pm.multiTagGreen : pm.multiTagGray]}>
-                    {multiInspect.detected ? '多智能体' : '普通配置'}
+            {/* ── 智能体能力（常驻：新增/编辑任何智能体都可设置）── */}
+            <Text style={pm.sectionDivider}>智能体能力</Text>
+            <Text style={pm.fieldHint}>
+              这些能力属于该智能体本身：导入的人设卡若声明了这些能力，导入时会自动勾选并带上它的规格；也可以在这里为任何智能体手动开启或关闭。
+            </Text>
+            {formCapHint ? <Text style={pm.capHint}>{formCapHint}</Text> : null}
+            {(['proactive', 'tasks', 'web', 'weather', 'stock', 'football'] as AgentCapabilityKind[]).map((k) => (
+              <View key={k}>
+                {k === 'weather' ? (
+                  <Text style={[pm.fieldHint, { marginBottom: 8 }]}>
+                    以下「天气 / 股票 / 竞彩」是平台免费技能：登录账号即可使用，开启后无需配置任何 Key，由平台服务器代为查询。
                   </Text>
-                  {multiInspect.kind ? <Text style={pm.multiTag}>kind: {multiInspect.kind}</Text> : null}
-                  {multiInspect.orchestratorType ? (
-                    <Text style={[pm.multiTag, pm.multiTagPurple]}>编排器: {multiInspect.orchestratorType}</Text>
-                  ) : null}
-                  {multiInspect.members.length > 0 ? (
-                    <Text style={pm.multiTag}>成员: {multiInspect.members.map((m) => m.id).join(' / ')}</Text>
-                  ) : null}
-                  {multiInspect.workflowSteps.length > 0 ? (
-                    <Text style={pm.multiTag}>流程: {multiInspect.workflowSteps.join(' → ')}</Text>
-                  ) : null}
-                </View>
-                {multiInspect.members.length > 0 ? (
-                  <Text style={pm.multiInspectHint}>将按编排配置调用多个智能体；子智能体无需单独维护，凭证由下方依赖统一管理。</Text>
                 ) : null}
+                <View style={pm.capRow}>
+                  <View style={pm.capInfo}>
+                    <Text style={pm.capName}>{capabilityLabel(k)}</Text>
+                    <Text style={pm.capDesc}>{capabilityDesc(k)}</Text>
+                  </View>
+                  <Switch
+                    value={formCaps.includes(k)}
+                    onValueChange={() => toggleFormCap(k)}
+                    trackColor={{ false: '#D9D9D9', true: '#4D6BFE' }}
+                    thumbColor="#fff"
+                    style={{ transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }] }}
+                  />
+                </View>
+              </View>
+            ))}
+            {formCaps.includes('web') ? (
+              <View style={pm.webBox}>
+                <Text style={pm.fieldLabel}>搜索服务</Text>
+                <View style={pm.webChips}>
+                  {(['bocha', 'serper', 'tavily'] as WebSearchProvider[]).map((p) => {
+                    const on = (formCapSpec.web?.provider ?? 'bocha') === p;
+                    return (
+                      <Pressable key={p} style={[pm.webChip, on && pm.webChipOn]} onPress={() => setWebSpec({ provider: p })}>
+                        <Text style={[pm.webChipText, on && pm.webChipTextOn]}>{PROVIDER_LABEL[p]}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={pm.fieldLabel}>搜索服务 API Key</Text>
+                <TextInput
+                  style={pm.webInput}
+                  value={formCapSpec.web?.apiKey ?? ''}
+                  onChangeText={(v) => setWebSpec({ apiKey: v })}
+                  placeholder="粘贴你在该搜索服务申请的 Key"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                />
+                <Text style={pm.fieldLabel}>接口地址（可选，走代理/自建网关时填）</Text>
+                <TextInput
+                  style={pm.webInput}
+                  value={formCapSpec.web?.endpoint ?? ''}
+                  onChangeText={(v) => setWebSpec({ endpoint: v })}
+                  placeholder="留空使用官方地址"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {!formCapSpec.web?.apiKey?.trim() ? (
+                  <Text style={pm.webWarn}>还没填 API Key，联网查询不会生效（它仍可正常聊天）</Text>
+                ) : null}
+                <Text style={pm.webCost}>{WEB_COST_HINT}</Text>
               </View>
             ) : null}
-
-            {multiDeps && multiDeps.length > 0 ? (
-              <Text style={pm.sectionDivider}>外部依赖补全（{multiDeps.length} 项）</Text>
+            {formCaps.includes('proactive') ? (
+              <Pressable onPress={cycleCapInterval}>
+                <Text style={pm.fieldLabel}>搭话间隔（点击切换）</Text>
+                <Text style={pm.capValue}>每 {formCapSpec.intervalMinutes ?? 30} 分钟最多一次</Text>
+              </Pressable>
             ) : null}
-            {multiDeps?.map((dep, idx) => {
-              const result = testResults[dep.ref];
-              return (
-                <View key={dep.ref} style={pm.depCard}>
-                  <View style={pm.depHead}>
-                    <Text style={pm.depRef}>{dep.ref}</Text>
-                    <Text style={pm.depKey} numberOfLines={1}>{dep.key}</Text>
-                    <Text style={pm.depTag}>
-                      {dep.type === 'model' ? '大模型' : dep.type === 'agent_api' ? '子智能体' : dep.type === 'tool_api' ? '工具 API' : dep.type === 'memory' ? '记忆库' : '其他'}
-                    </Text>
-                  </View>
-                  <Text style={pm.depMeta}>
-                    {dep.protocol} / {dep.auth === 'api_key' ? 'API Key' : dep.auth === 'bearer' ? 'Bearer' : dep.auth === 'oauth' ? 'OAuth' : '免鉴权'}
-                  </Text>
-                  <Text style={pm.fieldLabel}>用途</Text>
-                  <TextInput
-                    style={pm.depInput}
-                    value={dep.usage}
-                    onChangeText={(v) => setDepUsage(idx, v)}
-                  />
-                  <Text style={pm.fieldLabel}>凭证值</Text>
-                  <View style={pm.depValueRow}>
-                    <TextInput
-                      style={[pm.depInput, { flex: 1, marginRight: 8 }]}
-                      value={multiValues[dep.ref] ?? ''}
-                      onChangeText={(v) => setMultiValues((prev) => ({ ...prev, [dep.ref]: v }))}
-                      placeholder={dep.example}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <Pressable
-                      style={[pm.btn, pm.btnGhost, pm.multiBtn]}
-                      onPress={() => void handleTestDependency(dep)}
-                      disabled={testingRef === dep.ref}>
-                      <Text style={pm.btnGhostText}>{testingRef === dep.ref ? '测试中…' : '测试连通'}</Text>
-                    </Pressable>
-                  </View>
-                  {result ? (
-                    <Text style={[pm.depResult, result.ok ? pm.depResultOk : pm.depResultFail]}>
-                      {result.ok ? `✓ HTTP ${result.status}（${result.latencyMs}ms）` : `✗ ${result.error ?? `HTTP ${result.status}`}`}
-                    </Text>
-                  ) : null}
-                  {dep.type === 'model' ? (
-                    <Text style={pm.depHint}>验证该模型服务的地址 / 模型名 / 密钥是否可用（示例仅作占位）</Text>
-                  ) : null}
-                </View>
-              );
-            })}
+            {formCaps.includes('proactive') && formCapSpec.wakingHours ? (
+              <Text style={pm.fieldHint}>
+                搭话时段（该智能体 JSON 声明）：{formCapSpec.wakingHours[0]}:00–{formCapSpec.wakingHours[1]}:00
+              </Text>
+            ) : null}
+            {formCaps.includes('tasks') && formCapSpec.exampleTasks?.length ? (
+              <Text style={pm.fieldHint}>它会沿用这些场景表达：{formCapSpec.exampleTasks.slice(0, 3).join('、')}</Text>
+            ) : null}
+
             <View style={pm.formBtns}>
               <Pressable style={[pm.btn, pm.btnGhost]} onPress={() => setFormOpen(false)}>
                 <Text style={pm.btnGhostText}>取消</Text>
@@ -922,16 +919,23 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
           <View style={pm.list}>
             {importOpen ? (
               <View style={pm.importBox}>
-                <Text style={pm.importTip}>粘贴从本应用或桌面端导出的智能体配置（JSON）。按名称合并：同名更新配置，新名称新增为独立智能体。导出文件不包含 API Key，导入后请补全。</Text>
-                <TextInput
-                  style={pm.importInput}
-                  multiline
-                  value={importText}
-                  onChangeText={setImportText}
-                  placeholder="在此粘贴 JSON…"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
+                {/* 内容区可滚动、按钮固定在底部：粘贴长 JSON 时输入框不再把按钮顶出屏幕，
+                    保证「解析 / 确认导入」始终可见可点（此前按钮被顶到屏幕外且无法滚动到） */}
+                <ScrollView style={pm.importScroll} keyboardShouldPersistTaps="handled">
+                  <Text style={pm.importTip}>粘贴从本应用或桌面端导出的智能体配置（JSON），或人设卡（agent_name / persona）。按名称合并：同名更新配置，新名称新增为独立智能体。导出文件不包含 API Key，导入后请补全。</Text>
+                  <TextInput
+                    style={pm.importInput}
+                    multiline
+                    value={importText}
+                    onChangeText={setImportText}
+                    placeholder="在此粘贴 JSON…"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  {importOutcome ? (
+                    <Text style={pm.importPreview}>预览：新增 {importOutcome.added} 个 · 更新 {importOutcome.updated} 个{importOutcome.missingKeys ? ` · 缺密钥 ${importOutcome.missingKeys} 个` : ''}</Text>
+                  ) : null}
+                </ScrollView>
                 <View style={pm.importBtns}>
                   <Pressable style={[pm.btn, pm.btnGhost]} onPress={() => { setImportOpen(false); setImportText(''); setImportOutcome(null); }}>
                     <Text style={pm.btnGhostText}>取消</Text>
@@ -943,9 +947,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
                     <Text style={pm.btnPrimaryText}>确认导入</Text>
                   </Pressable>
                 </View>
-                {importOutcome ? (
-                  <Text style={pm.importPreview}>预览：新增 {importOutcome.added} 个 · 更新 {importOutcome.updated} 个{importOutcome.missingKeys ? ` · 缺密钥 ${importOutcome.missingKeys} 个` : ''}</Text>
-                ) : null}
               </View>
             ) : (
               <>
@@ -993,6 +994,11 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
                         {boundPet ? ` · ${boundPet.name}` : ' · 未绑定形象'}
                       </Text>
                       {item.multiConfig ? <Text style={pm.multiBadge}>多智能体</Text> : null}
+                      {item.capabilities?.enabled?.length ? (
+                        <Text style={pm.capBadge}>
+                          能力：{item.capabilities.enabled.map((k) => capabilityLabel(k)).join(' / ')}
+                        </Text>
+                      ) : null}
                       {(item.domainTags?.length || item.style) ? (
                         <Text style={pm.rowTags} numberOfLines={1}>
                           {item.domainTags?.length ? item.domainTags.join(' / ') : ''}
@@ -1031,6 +1037,48 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
         <Text style={pm.hint}>修改会自动云同步，桌面端登录同一账号即可共用</Text>
       </View>
     </Modal>
+    {/* 导入后能力确认弹层：检测到主动能力的智能体，问用户是否为它添加（默认勾选，可取消） */}
+    {capOffers ? (
+      <Modal visible transparent animationType="fade" onRequestClose={() => setCapOffers(null)}>
+        <Pressable style={pm.modalMask} onPress={() => setCapOffers(null)}>
+          <Pressable style={pm.modalCard} onPress={() => undefined}>
+            <Text style={pm.modalTitle}>为导入的智能体添加这些能力？</Text>
+            {capOffers.map((o) => (
+              <View key={o.profileId} style={pm.offerBlock}>
+                <Text style={pm.offerName}>{o.name}</Text>
+                {o.reasons.length ? (
+                  <Text style={pm.fieldHint}>检测到：{o.reasons.join('；')}</Text>
+                ) : null}
+                {o.kinds.map((k) => (
+                  <Pressable key={k} style={pm.capRow} onPress={() => toggleOfferCap(o.profileId, k)}>
+                    <View style={pm.capInfo}>
+                      <Text style={pm.capName}>{capabilityLabel(k)}</Text>
+                      <Text style={pm.capDesc}>{capabilityDesc(k)}</Text>
+                    </View>
+                    <Text style={(capChecked[o.profileId] ?? []).includes(k) ? pm.offerChecked : pm.offerUnchecked}>
+                      {(capChecked[o.profileId] ?? []).includes(k) ? '✓ 添加' : '不添加'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ))}
+            <Text style={pm.fieldHint}>这些能力直接合成进该智能体：搭话间隔 / 时段 / 示例任务都沿用它的 JSON 声明，可随时在「编辑」里调整或关闭。</Text>
+            {capOffers.some((o) => (capChecked[o.profileId] ?? []).includes('web')) ? (
+              <Text style={pm.webWarn}>联网查询还需要在「编辑 → 智能体能力」里填一个搜索服务的 API Key（博查/Serper/Tavily）才会生效。</Text>
+            ) : null}
+            <View style={pm.modalBtns}>
+              <Pressable style={[pm.btn, pm.btnGhost]} onPress={() => setCapOffers(null)}>
+                <Text style={pm.btnGhostText}>全部不添加</Text>
+              </Pressable>
+              <Pressable style={[pm.btn, pm.btnPrimary]} onPress={applyCapabilityOffers}>
+                <Text style={pm.btnPrimaryText}>添加选中能力</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    ) : null}
+    </>
   );
 }
 
@@ -1039,7 +1087,6 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
   const profiles = useAppStore((s) => s.llmProfiles);
   const activeId = useAppStore((s) => s.llmActiveProfileId);
   const [input, setInput] = useState('');
-  const [inputFocused, setInputFocused] = useState(false);
   const [sending, setSending] = useState(false);
   const [managerVisible, setManagerVisible] = useState(false);
   const [listening, setListening] = useState(false);
@@ -1047,6 +1094,10 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
   const copyWebRef = useRef<React.ElementRef<typeof WebView>>(null);
   const [copyToast, setCopyToast] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 生成中止控制器：发送/重试时新建，用户点「停止」时 abort（保留已生成内容） */
+  const abortRef = useRef<AbortController | null>(null);
+  /** 长按气泡操作菜单（复制 / 重新生成），DeepSeek 式长按弹出 */
+  const [msgMenuId, setMsgMenuId] = useState<string | null>(null);
   /** 复制文本：注入隐藏 WebView 执行 execCommand('copy')（RN 内核无剪贴板，热更期不引原生模块） */
   const copyText = (t: string): void => {
     try {
@@ -1085,9 +1136,11 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
     });
   }, []);
 
-  // 执行一次助手流式回复：思考阶段单独计时；切后台/网络中断自动重试一次
+  // 执行一次助手流式回复：思考阶段单独计时；切后台/网络中断自动重试一次；用户可点「停止」中止
   const runAssistant = async (assistantId: string, history: ChatMsg[], allowRetry: boolean): Promise<void> => {
     setSending(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     const startedAt = Date.now();
     let thinkStart = 0;
     let thinkEnd = 0;
@@ -1103,7 +1156,7 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
           if (thinkStart && !thinkEnd) thinkEnd = Date.now();
           useAppStore.getState().appendMessageChunk(assistantId, { contentDelta: d });
         },
-      });
+      }, ctrl.signal);
       const cur = useAppStore.getState();
       const target = cur.messages.find((m) => m.id === assistantId);
       const hasReasoning = !!(target?.reasoning?.trim() || reasoning?.trim());
@@ -1119,6 +1172,30 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
       if (!target?.content && content) patch.content = content;
       if (!target?.reasoning && reasoning) patch.reasoning = reasoning;
       cur.patchMessage(assistantId, patch);
+      // 模型建任务：回复末尾的隐藏任务指令（[[TASK|…]]）落库排期，正文剥离后再展示；
+      // 排期结果另起一条可见确认（成功/重复/超限都要说清楚，避免「口头答应却没排上」）
+      const full = target?.content || content || '';
+      const { clean, directives } = extractTaskDirectives(full);
+      if (clean !== full) cur.patchMessage(assistantId, { content: clean });
+      if (directives.length) {
+        const profileId = useAppStore.getState().llmActiveProfileId;
+        const userText = [...cleanHistory].reverse().find((m) => m.role === 'user')?.content ?? '';
+        // 模型自己已经用它的口吻说清了时间 → 不再补系统口径的确认（用户只看到智能体的话）
+        const pending: string[] = [];
+        for (const d of directives) {
+          const r = await createTaskFromDirective(profileId, d, userText);
+          if (!r.ok || !mentionsDue(clean)) pending.push(r.text);
+        }
+        if (pending.length) {
+          useAppStore.getState().appendMessages([
+            {
+              id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+              role: 'assistant',
+              content: pending.join('\n'),
+            },
+          ]);
+        }
+      }
       // 互动实装：聊天成功好感+1（好感度不受状态开关影响，见宠物页说明）
       useAppStore.getState().addAffection(1);
       // 心情与对话关联：按回复情绪词调整心情（设置里可关闭；需宠物状态功能开启）
@@ -1130,12 +1207,24 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
         if (negative && !positive) useAppStore.getState().adjustMood(-8);
         else if (positive && !negative) useAppStore.getState().adjustMood(8);
       }
-      // 开启朗读时读出回复（错误提示不读，带音色/语速/音调设置）
+      // 开启朗读时读出回复（错误提示不读；云音色/系统音色由引擎按设置自动选择）
       const st = useAppStore.getState();
       if (st.ttsEnabled) {
-        void speak(content, { rate: st.speechRate, pitch: st.speechPitch, voice: st.speechVoice || undefined });
+        void speakReply(content);
       }
     } catch (e) {
+      if (e instanceof AbortedError) {
+        // 用户主动停止：保留已生成内容，不标错；若还什么都没生成就整条移除占位
+        const cur = useAppStore.getState();
+        const target = cur.messages.find((m) => m.id === assistantId);
+        const partial = (target?.content ?? '').trim() || (target?.reasoning ?? '').trim();
+        if (partial) {
+          cur.patchMessage(assistantId, { pending: false, streaming: false });
+        } else {
+          cur.removeMessage(assistantId);
+        }
+        return;
+      }
       if (allowRetry && e instanceof StreamInterruptError) {
         // 留 1.2 秒网络恢复窗口（切后台回来/基站切换后立刻重连大概率再断），再清空占位重发（只一次）
         await new Promise((r) => setTimeout(() => r(null), 1200));
@@ -1161,6 +1250,7 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
       useAppStore.getState().patchMessage(assistantId, patch);
     } finally {
       setSending(false);
+      abortRef.current = null;
       scheduleUpload('chat_history');
     }
   };
@@ -1182,6 +1272,36 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
     // 严格绑定：无形象智能体不能使用，拦截发送
     if (!activePetReady()) return;
     setInput('');
+    // 宠物定时任务：本地识别「定时提醒 / 到点主动搭话 / 任务管理」指令，
+    // 动作由 App 直接落地（不经过模型，离线可用）；回复措辞由该智能体按人设产出，
+    // 无 API / 调用失败才回退中性文案（见 petTaskScheduler 的 speak）
+    const intent = detectPetIntent(text);
+    if (intent) {
+      const st0 = useAppStore.getState();
+      const assistantId = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      st0.appendMessages([
+        { role: 'user', content: text },
+        { id: assistantId, role: 'assistant', content: '', pending: true, streaming: false },
+      ]);
+      setSending(true);
+      followRef.current = true;
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
+      try {
+        const reply = await handlePetIntent(intent, st0.llmActiveProfileId);
+        useAppStore.getState().patchMessage(assistantId, { content: reply, pending: false, streaming: false });
+      } catch (e) {
+        useAppStore.getState().patchMessage(assistantId, {
+          content: `出错了：${e instanceof Error ? e.message : String(e)}`,
+          pending: false,
+          streaming: false,
+          error: true,
+        });
+      } finally {
+        setSending(false);
+        scheduleUpload('chat_history');
+      }
+      return;
+    }
     const store0 = useAppStore.getState();
     const history: ChatMsg[] = [...store0.messages, { role: 'user', content: text }];
     const assistantId = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1225,7 +1345,7 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
         buttonNegative: '拒绝',
       });
       if (granted !== PermissionsAndroid.RESULTS.GRANTED) return;
-      await stopSpeak();
+      stopAllVoice();
       await startListening();
     } catch (e) {
       Alert.alert('无法开始识别', e instanceof Error ? e.message : String(e));
@@ -1257,26 +1377,18 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
     ]);
   };
 
-  const canSend = !!input.trim() && !sending;
-
-  /** 复制全部聊天记录：拼接当前对话（含深度思考）为纯文本，走系统分享（可复制/发送/保存） */
-  const copyAllChat = (): void => {
-    const s = useAppStore.getState();
-    if (!s.messages.length) return;
-    const agentName = profile?.name ?? '智能体';
-    const lines: string[] = [];
-    for (const m of s.messages) {
-      const content = String(m.content ?? '').trim();
-      const think = (m.reasoning ?? '').trim();
-      const parts: string[] = [];
-      if (think) parts.push(`【深度思考】${think}`);
-      if (content) parts.push(content);
-      if (m.error && !content) parts.push('（本条发送失败）');
-      if (m.role === 'user') lines.push(`我：${content}`);
-      else lines.push(`${agentName}：${parts.join('\n')}`);
-    }
-    Share.share({ message: lines.join('\n\n'), title: `${agentName} 聊天记录` }).catch(() => undefined);
+  /** 重新生成：以该 AI 消息之前的历史重新请求（与点错误气泡重试同逻辑，供长按菜单调用） */
+  const regenerateMsg = (id: string): void => {
+    setMsgMenuId(null);
+    retryMsg(id);
   };
+
+  /** 长按气泡菜单：当前选中的消息 */
+  const menuMsg = msgMenuId ? messages.find((m) => m.id === msgMenuId) ?? null : null;
+  /** 重新生成只对该条 AI 回复有意义（取其之前的历史重问一次） */
+  const menuCanRegenerate = !!menuMsg && menuMsg.role === 'assistant' && !menuMsg.pending && !sending;
+
+  const canSend = !!input.trim() && !sending;
 
   return (
     <View style={styles.container}>
@@ -1298,9 +1410,6 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
           </Text>
         </Pressable>
         <View style={styles.headerSideRight}>
-          <Pressable onPress={copyAllChat} hitSlop={12} disabled={!messages.length} style={{ marginRight: 14 }}>
-            <Text style={[styles.headerAction, !messages.length && styles.headerActionDisabled]}>复制</Text>
-          </Pressable>
           <Pressable onPress={confirmClear} hitSlop={12} disabled={!messages.length}>
             <Text style={[styles.headerAction, !messages.length && styles.headerActionDisabled]}>清空</Text>
           </Pressable>
@@ -1321,8 +1430,25 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
         data={data}
         inverted
         keyExtractor={(m, i) => m.id ?? String(i)}
-        renderItem={({ item }) => item.id ? <Bubble msg={item} onRetry={() => retryMsg(item.id!)} onCopy={copyText} /> : <Bubble msg={item} onRetry={() => undefined} onCopy={copyText} />}
-        ListEmptyComponent={<Text style={styles.empty}>和宠物聊点什么吧</Text>}
+        renderItem={({ item }) => item.id ? <Bubble msg={item} onRetry={() => retryMsg(item.id!)} onCopy={copyText} onLongPress={(m) => setMsgMenuId(m.id ?? null)} /> : <Bubble msg={item} onRetry={() => undefined} onCopy={copyText} />}
+        ListEmptyComponent={
+          // 空会话开场（DeepSeek 式）：智能体欢迎语 + 示例问题快捷按钮，点击即发送。
+          // inverted 列表的空态会整体颠倒，需 scaleY 翻转回来
+          <View style={styles.emptyWrap}>
+            <Text style={styles.empty}>
+              {profile?.greeting?.trim() || `和${profile?.name ?? '宠物'}聊点什么吧`}
+            </Text>
+            {(profile?.exampleQuestions ?? []).slice(0, 4).map((q) => (
+              <Pressable
+                key={q}
+                style={styles.exampleQ}
+                onPress={() => void send(q)}
+                disabled={sending}>
+                <Text style={styles.exampleQText}>{q}</Text>
+              </Pressable>
+            ))}
+          </View>
+        }
         // 微信式跟随：贴底(offset<60)时内容增长自动滚到最新；上滑看历史则暂停跟随，滑回底部自动恢复
         onScroll={(e) => { followRef.current = e.nativeEvent.contentOffset.y < 60; }}
         scrollEventThrottle={16}
@@ -1331,25 +1457,29 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
         }}
       />
 
-      {/* 隐藏复制引擎：1×1 WebView 提供剪贴板写入（execCommand('copy')），支持代码块/链接一键复制 */}
-      <WebView
-        ref={copyWebRef}
-        style={styles.hiddenWeb}
-        originWhitelist={['*']}
-        javaScriptEnabled
-        onError={() => undefined}
-        source={{ html: COPY_HTML }}
-      />
+      {/* 隐藏复制引擎：1×1 WebView 提供剪贴板写入（execCommand('copy')），支持代码块/链接一键复制。
+          必须包在绝对定位的 1×1 宿主里：WebView 自身设 position:absolute 在 Fabric 下不生效，
+          会按流式布局占据大半屏，把聊天列表挤成上半屏、下方留出一大片空白 */}
+      <View style={styles.hiddenWebHost} pointerEvents="none">
+        <WebView
+          ref={copyWebRef}
+          style={styles.hiddenWeb}
+          originWhitelist={['*']}
+          javaScriptEnabled
+          onError={() => undefined}
+          source={{ html: COPY_HTML }}
+        />
+      </View>
       {copyToast && (
         <View style={styles.copyToast} pointerEvents="none">
           <Text style={styles.copyToastText}>已复制</Text>
         </View>
       )}
 
-      {/* Trae 式输入卡：大圆角灰卡内含输入框与工具行（模型 chip / 按住说话 / 圆形发送钮）
-          仅当键盘可见且输入框聚焦时才让出键盘空间，失焦/事件丢失时绝不残留大 padding，
-          避免底栏被撑高、聊天区只剩上半屏、下方出现无法点击滚动的空白 */}
-      <View style={[styles.inputWrap, { paddingBottom: kbVisible && inputFocused ? kbHeight : insets.bottom + 6 }]}>
+      {/* Trae 式输入卡：大圆角灰卡内含输入框与工具行（模型 chip / 按住说话 / 圆形发送钮）。
+          底部留白严格由键盘真实可见性驱动（kbVisible 经原生 IME 状态看门狗校正），
+          键盘收起时立即归零，绝不残留大 padding 把聊天区顶上去、下方留出点不动的空白 */}
+      <View style={[styles.inputWrap, { paddingBottom: kbVisible ? kbHeight : insets.bottom + 6 }]}>
         <View style={styles.inputCard}>
           <TextInput
             style={styles.input}
@@ -1358,8 +1488,6 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
             value={input}
             onChangeText={setInput}
             multiline
-            onFocus={() => setInputFocused(true)}
-            onBlur={() => setInputFocused(false)}
           />
           <View style={styles.inputTools}>
             <Pressable style={styles.modelChip} onPress={() => setManagerVisible(true)} hitSlop={4}>
@@ -1375,16 +1503,50 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
               onPressOut={micPressOut}>
               <Text style={styles.micPillText}>{listening ? '松开' : '按住'}</Text>
             </Pressable>
-            <Pressable
-              style={[styles.sendCircle, !canSend && styles.sendCircleDisabled]}
-              onPress={() => void send()}
-              disabled={!canSend}
-              hitSlop={4}>
-              <Text style={styles.sendIcon}>↑</Text>
-            </Pressable>
+            {sending ? (
+              // 生成中：发送钮变为停止钮（DeepSeek 式），点击中止并保留已生成内容
+              <Pressable
+                style={[styles.sendCircle, styles.stopCircle]}
+                onPress={() => abortRef.current?.abort()}
+                hitSlop={4}>
+                <Text style={styles.stopIcon}>■</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={[styles.sendCircle, !canSend && styles.sendCircleDisabled]}
+                onPress={() => void send()}
+                disabled={!canSend}
+                hitSlop={4}>
+                <Text style={styles.sendIcon}>↑</Text>
+              </Pressable>
+            )}
           </View>
         </View>
       </View>
+
+      {/* 长按气泡操作菜单（DeepSeek 式）：复制全文 / 重新生成（仅 AI 回复） */}
+      <Modal transparent animationType="fade" visible={!!menuMsg} onRequestClose={() => setMsgMenuId(null)}>
+        <Pressable style={styles.msgMenuMask} onPress={() => setMsgMenuId(null)}>
+          <View style={styles.msgMenuCard}>
+            <Pressable
+              style={styles.msgMenuItem}
+              onPress={() => {
+                if (menuMsg) copyText(menuMsg.role === 'assistant' ? stripTaskMarkers(menuMsg.content ?? '') : menuMsg.content ?? '');
+                setMsgMenuId(null);
+              }}>
+              <Text style={styles.msgMenuText}>复制</Text>
+            </Pressable>
+            {menuCanRegenerate && (
+              <Pressable style={styles.msgMenuItem} onPress={() => menuMsg?.id && regenerateMsg(menuMsg.id)}>
+                <Text style={styles.msgMenuText}>重新生成</Text>
+              </Pressable>
+            )}
+            <Pressable style={styles.msgMenuItem} onPress={() => setMsgMenuId(null)}>
+              <Text style={[styles.msgMenuText, styles.msgMenuCancel]}>取消</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
 
       <ProfileManager visible={managerVisible} onClose={() => setManagerVisible(false)} />
     </View>
@@ -1409,6 +1571,10 @@ const styles = StyleSheet.create({
   guideText: { color: '#9A6B00', fontSize: 12, lineHeight: 18 },
   list: { flex: 1, paddingHorizontal: 12 },
   empty: { textAlign: 'center', color: '#AAA', marginTop: 40 },
+  // 空会话开场（inverted 列表需 scaleY 翻转）
+  emptyWrap: { transform: [{ scaleY: -1 }], alignItems: 'center', paddingHorizontal: 24 },
+  exampleQ: { backgroundColor: '#F2F3F5', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9, marginTop: 10, alignSelf: 'stretch' },
+  exampleQText: { fontSize: 13, color: '#4B4B4B', textAlign: 'center' },
   bubbleRow: { flexDirection: 'row', marginVertical: 5 },
   bubbleRowMine: { justifyContent: 'flex-end' },
   bubble: { maxWidth: '86%', borderRadius: 16, paddingVertical: 10, paddingHorizontal: 14 },
@@ -1445,6 +1611,15 @@ const styles = StyleSheet.create({
   sendCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#4D6BFE', alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
   sendCircleDisabled: { backgroundColor: '#C9CDD6' },
   sendIcon: { fontSize: 17, color: '#FFFFFF', fontWeight: '700', marginTop: -2 },
+  // 生成中的停止钮（DeepSeek 式）：深色方块
+  stopCircle: { backgroundColor: '#1A1A1A' },
+  stopIcon: { fontSize: 12, color: '#FFFFFF', fontWeight: '700' },
+  // 长按气泡操作菜单
+  msgMenuMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 48 },
+  msgMenuCard: { backgroundColor: '#fff', borderRadius: 14, overflow: 'hidden' },
+  msgMenuItem: { paddingVertical: 13, alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
+  msgMenuText: { fontSize: 15, color: '#1A1A1A' },
+  msgMenuCancel: { color: '#999' },
   // 智能体切换弹窗
   switcherMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', padding: 28 },
   switcherCard: { backgroundColor: '#fff', borderRadius: 16, padding: 18, width: '100%' },
@@ -1457,7 +1632,9 @@ const styles = StyleSheet.create({
   switcherEmpty: { fontSize: 13, color: '#AAA', textAlign: 'center', paddingVertical: 20 },
   switcherHint: { fontSize: 11, color: '#AAA', marginTop: 10, textAlign: 'center' },
   // 隐藏复制引擎与「已复制」提示
-  hiddenWeb: { position: 'absolute', width: 1, height: 1, opacity: 0, left: -100, top: 0 },
+  // 宿主容器负责脱离布局流（绝对定位 + 1×1 + 裁剪），WebView 只负责填满宿主
+  hiddenWebHost: { position: 'absolute', width: 1, height: 1, left: -1000, top: 0, overflow: 'hidden' },
+  hiddenWeb: { width: 1, height: 1, opacity: 0 },
   copyToast: { position: 'absolute', alignSelf: 'center', bottom: 130, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 18, paddingHorizontal: 18, paddingVertical: 9 },
   copyToastText: { color: '#fff', fontSize: 13 },
 });
@@ -1468,6 +1645,7 @@ const pm = StyleSheet.create({
   title: { fontSize: 16, fontWeight: '700', color: '#333' },
   headerBtn: { fontSize: 14, color: '#666', paddingHorizontal: 4 },
   headerBtnPrimary: { color: '#1C6EF2', fontWeight: '600' },
+  headerBtnSpace: { width: 36 },
   list: { flex: 1, padding: 12 },
   listInner: { flex: 1 },
   search: { backgroundColor: '#F2F3F5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, marginBottom: 10 },
@@ -1494,11 +1672,22 @@ const pm = StyleSheet.create({
   chipOn: { backgroundColor: '#E8EDFB', borderColor: '#4D6BFE' },
   chipText: { fontSize: 12, color: '#666' },
   chipTextOn: { color: '#4D6BFE', fontWeight: '600' },
+  // 联网查询配置（智能体能力 → web）
+  webBox: { borderWidth: 1, borderColor: '#E6EAF2', backgroundColor: '#FAFBFE', borderRadius: 10, paddingHorizontal: 10, paddingBottom: 10, marginTop: 6 },
+  webChips: { flexDirection: 'row', flexWrap: 'wrap' },
+  webChip: { borderRadius: 14, borderWidth: 1, borderColor: '#DDD', paddingHorizontal: 12, paddingVertical: 5, marginRight: 8, marginBottom: 6, backgroundColor: '#fff' },
+  webChipOn: { backgroundColor: '#E8EDFB', borderColor: '#4D6BFE' },
+  webChipText: { fontSize: 12, color: '#666' },
+  webChipTextOn: { color: '#4D6BFE', fontWeight: '600' },
+  webInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, backgroundColor: '#fff' },
+  webWarn: { fontSize: 12, color: '#B54708', marginTop: 8, lineHeight: 17 },
+  webCost: { fontSize: 11, color: '#AAA', marginTop: 8, lineHeight: 16 },
   bindRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
   bindRowActive: { backgroundColor: '#F0F6FF', borderRadius: 8, paddingHorizontal: 8, marginHorizontal: -8 },
   bindRowName: { fontSize: 14, color: '#1A1A1A', flex: 1, marginRight: 8 },
   bindRowNameActive: { color: '#4D6BFE', fontWeight: '600' },
   bindCheck: { fontSize: 16, color: '#4D6BFE', fontWeight: '600' },
+  voiceTag: { fontSize: 11, color: '#8A8F99', backgroundColor: '#F2F3F6', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginRight: 8, overflow: 'hidden' },
   formBtns: { flexDirection: 'row', marginTop: 18, marginBottom: 30 },
   btn: { flex: 1, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
   btnGhost: { borderWidth: 1, borderColor: '#DDD', marginRight: 10 },
@@ -1510,40 +1699,31 @@ const pm = StyleSheet.create({
   toolBtn: { backgroundColor: '#F2F3F5', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7, marginRight: 10 },
   toolBtnText: { fontSize: 13, color: '#1C6EF2', fontWeight: '500' },
   importBox: { flex: 1, paddingHorizontal: 4, paddingTop: 8 },
+  importScroll: { flex: 1 },
   importTip: { fontSize: 12, color: '#888', lineHeight: 18, marginBottom: 10 },
-  importInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, minHeight: 180, textAlignVertical: 'top', marginBottom: 12, backgroundColor: '#FAFAFA' },
+  importInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, minHeight: 180, maxHeight: 300, textAlignVertical: 'top', marginBottom: 12, backgroundColor: '#FAFAFA' },
   importBtns: { flexDirection: 'row', marginBottom: 10 },
   importPreview: { fontSize: 12, color: '#4D6BFE', fontWeight: '500' },
   formSectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   importFormBtn: { fontSize: 13, color: '#1C6EF2', fontWeight: '600' },
   importError: { fontSize: 12, color: '#E5484D', marginBottom: 8 },
-  // ── P1-2 多智能体编排配置向导 ──
-  multiBadge: { fontSize: 10, color: '#8B3DFF', backgroundColor: '#F3E8FF', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden', alignSelf: 'flex-start', marginTop: 3 },
   sectionDivider: { fontSize: 14, fontWeight: '700', color: '#333', marginTop: 18, marginBottom: 6 },
-  multiTip: { fontSize: 12, color: '#888', lineHeight: 18, marginBottom: 8 },
-  multiEditor: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 12, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), minHeight: 150, maxHeight: 240, textAlignVertical: 'top', backgroundColor: '#FAFAFA' },
-  multiBtns: { flexDirection: 'row', marginTop: 4, marginBottom: 2 },
-  multiBtn: { flex: 0, paddingHorizontal: 16, marginRight: 10 },
-  multiBtnDanger: { color: '#E5484D' },
-  multiError: { fontSize: 12, color: '#E5484D', marginTop: 8, lineHeight: 17 },
-  multiInspect: { backgroundColor: '#F6F8FF', borderRadius: 10, padding: 10, marginTop: 10 },
-  multiInspectTitle: { fontSize: 12, fontWeight: '600', color: '#5F6368', marginBottom: 8 },
-  multiInspectTags: { flexDirection: 'row', flexWrap: 'wrap' },
-  multiTag: { fontSize: 11, color: '#4B5563', backgroundColor: '#EEF0F3', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginRight: 6, marginBottom: 4, overflow: 'hidden' },
-  multiTagGreen: { backgroundColor: '#E6F7EC', color: '#1A7F37' },
-  multiTagGray: { backgroundColor: '#F0F0F0', color: '#666' },
-  multiTagPurple: { backgroundColor: '#F3E8FF', color: '#8B3DFF' },
-  multiInspectHint: { fontSize: 11, color: '#888', marginTop: 6, lineHeight: 16 },
-  depCard: { borderWidth: 1, borderColor: '#EEE', borderRadius: 10, padding: 10, marginTop: 8 },
-  depHead: { flexDirection: 'row', alignItems: 'center' },
-  depRef: { fontSize: 11, color: '#B45309', backgroundColor: '#FEF3E2', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2, overflow: 'hidden' },
-  depKey: { fontSize: 13, fontWeight: '600', color: '#1A1A1A', marginLeft: 8, flexShrink: 1 },
-  depTag: { fontSize: 11, color: '#4D6BFE', backgroundColor: '#E8EDFB', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 'auto', overflow: 'hidden' },
-  depMeta: { fontSize: 12, color: '#999', marginTop: 4 },
-  depInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: '#FFF' },
-  depValueRow: { flexDirection: 'row', alignItems: 'center' },
-  depResult: { fontSize: 12, marginTop: 6 },
-  depResultOk: { color: '#1A7F37' },
-  depResultFail: { color: '#E5484D' },
-  depHint: { fontSize: 11, color: '#AAA', marginTop: 4, lineHeight: 15 },
+  // 多智能体徽标（历史数据：档案里仍可能带编排配置，列表上如实标注其运行模式）
+  multiBadge: { fontSize: 10, color: '#8B3DFF', backgroundColor: '#F3E8FF', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden', alignSelf: 'flex-start', marginTop: 3 },
+  // ── 主动能力（常驻表单区块 / 导入能力确认弹层）──
+  capHint: { fontSize: 12, color: '#1A7F37', lineHeight: 17, marginBottom: 6 },
+  capRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
+  capInfo: { flex: 1, paddingRight: 10 },
+  capName: { fontSize: 13, fontWeight: '600', color: '#1A1A1A' },
+  capDesc: { fontSize: 11, color: '#999', marginTop: 2, lineHeight: 15 },
+  capValue: { fontSize: 13, color: '#4D6BFE', marginBottom: 4 },
+  capBadge: { fontSize: 10, color: '#1A7F37', backgroundColor: '#E6F7EC', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden', alignSelf: 'flex-start', marginTop: 3 },
+  modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', paddingHorizontal: 24 },
+  modalCard: { backgroundColor: '#fff', borderRadius: 14, padding: 16, maxHeight: '80%' },
+  modalTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 },
+  modalBtns: { flexDirection: 'row', marginTop: 12 },
+  offerBlock: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#EEE', paddingTop: 8, marginTop: 8 },
+  offerName: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
+  offerChecked: { fontSize: 12, color: '#1A7F37', fontWeight: '600' },
+  offerUnchecked: { fontSize: 12, color: '#999' },
 });

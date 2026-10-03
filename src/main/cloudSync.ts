@@ -26,8 +26,12 @@ const timers: Partial<Record<SyncKind, NodeJS.Timeout>> = {};
 
 // 聊天历史由 main.ts 创建的 ConversationManager 单例持有，此处通过注入解耦
 interface ChatHistoryStore {
+  /** 导出当前档案的历史（旧版 /sync/chat-history 单列表接口） */
   exportHistory(): Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** 导出全部档案的历史（新版 config.profileMessages 载荷） */
+  exportAllProfiles(): Record<string, Array<{ role: 'user' | 'assistant'; content: string }>>;
   restoreFromCloud(messages: unknown): boolean;
+  restoreAllProfilesFromCloud(value: unknown): number;
 }
 let chatStore: ChatHistoryStore | null = null;
 
@@ -52,24 +56,50 @@ export async function pullAfterLogin(): Promise<{
   const cfg = loadConfig();
   const restored: { petState?: AppConfig['petState']; petReinstalled?: boolean } = {};
 
-  // 1. 配置（LLM profiles + 聊天人设 + 当前宠物引用）
+  // 1. 配置（LLM profiles = 智能体 + 多档聊天记录 + 音色库 + 聊天人设 + 当前宠物引用）
   try {
     const remote = await platformClient.syncGet('config');
     if (remote?.data) {
       const data = remote.data as Partial<AppConfig> & { currentPet?: CurrentPetRef | null };
-      // 1a. LLM 档案：本地为空时从云端恢复
-      if (!(cfg.llmProfiles?.length) && Array.isArray(data.llmProfiles) && data.llmProfiles.length) {
+      // 1a. LLM 档案：本地为空时从云端恢复（外部边界清洗：云端旧档可能缺字段，一律归零为空串）
+      if (!(loadConfig().llmProfiles?.length) && Array.isArray(data.llmProfiles) && data.llmProfiles.length) {
         saveConfig({
-          llmProfiles: data.llmProfiles,
+          llmProfiles: data.llmProfiles.map((p) => ({
+            ...p,
+            apiKey: p.apiKey ?? '',
+            baseUrl: p.baseUrl ?? '',
+            model: p.model ?? '',
+            systemPrompt: p.systemPrompt ?? '',
+          })),
           llmActiveProfileId: data.llmActiveProfileId,
           petSelfDescription: data.petSelfDescription,
           installedAgentConfig: data.installedAgentConfig,
         });
         console.log(`[cloudSync] 已从云端恢复 LLM 配置（${data.llmProfiles.length} 个档案）`);
       }
-      // 1b. 当前宠物：本地无宠物（或本地资源文件已丢失，如重装/换机）时按云端 ID 重新下载安装
+      // 1a2. 音色：本地无已安装音色时整体恢复；云 TTS 凭证本地为空时恢复（apiKey 服务端已解密）
+      const cfgNow = loadConfig();
+      if (!(cfgNow.downloadedVoices?.length) && Array.isArray(data.downloadedVoices) && data.downloadedVoices.length) {
+        saveConfig({
+          downloadedVoices: data.downloadedVoices,
+          activeCloudVoiceId: data.activeCloudVoiceId ?? '',
+        });
+        console.log(`[cloudSync] 已从云端恢复音色库（${data.downloadedVoices.length} 个音色）`);
+      }
+      const cloudTts = data.ttsCloudConfig;
+      if (!loadConfig().ttsCloudConfig?.apiKey && cloudTts?.apiKey) {
+        saveConfig({ ttsCloudConfig: cloudTts });
+        console.log('[cloudSync] 已从云端恢复云 TTS 服务配置');
+      }
+      // 1a3. 多档聊天记录：本地一个档案记录都没有时整体采用云端版本
+      if (data.profileMessages && chatStore) {
+        const restored = chatStore.restoreAllProfilesFromCloud(data.profileMessages);
+        if (restored) console.log(`[cloudSync] 已从云端恢复 ${restored} 个档案的聊天记录`);
+      }
+      // 1b. 当前宠物：本地无宠物（或本地资源文件已丢失，如重装/换机）时按云端 ID 重新下载安装。
+      // 正在使用内置演示宠物时不触发（否则会被云端宠物覆盖并清掉内置动作与绑定）
       const localPetMissing =
-        !cfg.petAssetId || !cfg.petAssetPath || !fs.existsSync(cfg.petAssetPath);
+        !cfg.builtinPet && (!cfg.petAssetId || !cfg.petAssetPath || !fs.existsSync(cfg.petAssetPath));
       if (data.currentPet?.id && localPetMissing) {
         try {
           await platformClient.install('pet', data.currentPet.id);
@@ -115,14 +145,24 @@ export async function uploadNow(kind: SyncKind): Promise<void> {
   if (!loggedIn()) return;
   try {
     if (kind === 'config') {
-      // 仅同步跨设备相关的配置：LLM 档案（Key 服务端加密）+ 当前档案 + 聊天人设/宠物自我描述 + 当前宠物引用
       const cfg = loadConfig();
+      // 防护：本地一个档案都没有时不覆盖云端（云端可能正是用户误删前的数据，下次登录可恢复）
+      if (!cfg.llmProfiles?.length) {
+        console.log('[cloudSync] 本地智能体列表为空，跳过 config 上传（不覆盖云端），下次登录可恢复');
+        return;
+      }
+      // 仅同步跨设备相关的配置：智能体档案（Key 服务端加密）+ 当前档案 + 多档聊天记录 +
+      // 音色库与云 TTS 凭证（apiKey 服务端加密）+ 聊天人设/宠物自我描述 + 当前宠物引用
       const currentPet: CurrentPetRef | null = cfg.petAssetId
         ? { id: cfg.petAssetId, name: cfg.petAssetName, format: cfg.petAssetFormat }
         : null;
       await platformClient.syncPut('config', {
         llmProfiles: cfg.llmProfiles ?? [],
         llmActiveProfileId: cfg.llmActiveProfileId ?? '',
+        profileMessages: chatStore?.exportAllProfiles() ?? {},
+        downloadedVoices: cfg.downloadedVoices ?? [],
+        activeCloudVoiceId: cfg.activeCloudVoiceId ?? '',
+        ttsCloudConfig: cfg.ttsCloudConfig ?? null,
         petSelfDescription: cfg.petSelfDescription ?? '',
         installedAgentConfig: cfg.installedAgentConfig ?? null,
         currentPet,

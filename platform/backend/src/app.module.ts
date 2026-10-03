@@ -13,6 +13,8 @@ import { SyncModule } from './sync/sync.module';
 import { AppUpdateModule } from './app-update/app-update.module';
 import { MultiChatModule } from './multi-chat/multi-chat.module';
 import { CrashReportModule } from './crash/crash-report.module';
+import { ToolsModule } from './tools/tools.module';
+import { VoicesModule } from './voices/voices.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { CrashReportModule } from './crash/crash-report.module';
     AppUpdateModule,
     MultiChatModule,
     CrashReportModule,
+    ToolsModule,
+    VoicesModule,
   ],
 })
 export class AppModule {}

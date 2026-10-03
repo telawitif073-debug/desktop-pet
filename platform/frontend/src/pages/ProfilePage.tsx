@@ -1,7 +1,7 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Radio, Space, Spin, Tabs, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, EditOutlined, SwapOutlined } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { assetUrl, deleteAsset, deleteDownloaded, listDownloaded, listMine, updateAsset } from '../api';
 import type { Asset, AssetType, DownloadedEntry } from '../types';
 import { formatDate, getErrorMessage } from '../utils';
@@ -12,6 +12,7 @@ const electronPlatform = window.electronAPI?.platform;
 const ACTIVE_ID_PATTERN = /[\\/](?:pets|agents)[\\/]([0-9a-f-]{36})[\\/]/i;
 
 export default function ProfilePage() {
+  const navigate = useNavigate();
   const [type, setType] = useState<AssetType>('pet');
   const [items, setItems] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,7 +78,7 @@ export default function ProfilePage() {
 
   const statusTag = (status: string) => <Tag color={status === 'approved' ? 'green' : status === 'rejected' ? 'red' : 'gold'}>{status === 'approved' ? '已通过' : status === 'rejected' ? '已驳回' : '审核中'}</Tag>;
 
-  return <div className="content-wrap"><div className="page-heading profile-heading"><div><span className="eyebrow">YOUR LIBRARY</span><Typography.Title>我的资源</Typography.Title><Typography.Paragraph>管理你上传的作品，查看审核状态并继续完善它们。</Typography.Paragraph></div><Button type="primary"><Link to="/upload">上传新资源</Link></Button></div>{contextHolder}<Tabs activeKey={type} onChange={(value) => setType(value as AssetType)} items={[{ key: 'pet', label: '宠物资源' }, { key: 'agent', label: '智能体' }]} />{loading ? <div className="loading-state"><Spin /></div> : items.length ? <div className="mine-list">{items.map((asset) => <Card key={asset.id} className="mine-card" variant="borderless"><div><Typography.Title level={5}>{asset.name}</Typography.Title><Typography.Paragraph ellipsis={{ rows: 1 }} type="secondary">{asset.description || '暂无描述'}</Typography.Paragraph>{statusTag(asset.status)}</div><Space><Button icon={<EditOutlined />} onClick={() => openEdit(asset)}>编辑</Button><Popconfirm title="确定删除这个资源吗？" onConfirm={() => remove(asset.id)}><Button danger icon={<DeleteOutlined />}>删除</Button></Popconfirm></Space></Card>)}</div> : <Empty description="你还没有上传资源" />}
+  return <div className="content-wrap"><div className="page-heading profile-heading"><div><span className="eyebrow">YOUR LIBRARY</span><Typography.Title>我的资源</Typography.Title><Typography.Paragraph>管理你上传的作品，查看审核状态并继续完善它们。</Typography.Paragraph></div><Button type="primary" onClick={() => navigate('/workshop?tab=publish')}>上传新资源</Button></div>{contextHolder}<Tabs activeKey={type} onChange={(value) => setType(value as AssetType)} items={[{ key: 'pet', label: '宠物资源' }, { key: 'agent', label: '智能体' }]} />{loading ? <div className="loading-state"><Spin /></div> : items.length ? <div className="mine-list">{items.map((asset) => <Card key={asset.id} className="mine-card" variant="borderless"><div><Typography.Title level={5}>{asset.name}</Typography.Title><Typography.Paragraph ellipsis={{ rows: 1 }} type="secondary">{asset.description || '暂无描述'}</Typography.Paragraph>{statusTag(asset.status)}</div><Space><Button icon={<EditOutlined />} onClick={() => openEdit(asset)}>编辑</Button><Popconfirm title="确定删除这个资源吗？" onConfirm={() => remove(asset.id)}><Button danger icon={<DeleteOutlined />}>删除</Button></Popconfirm></Space></Card>)}</div> : <Empty description="你还没有上传资源" />}
 
       <section className="downloaded-section">
         <div className="page-heading"><Typography.Title level={3}>已下载资源</Typography.Title><Typography.Paragraph>下载的资源会安装到桌面宠物客户端的数据目录，在这里可以随时换回喜欢的形象。</Typography.Paragraph></div>

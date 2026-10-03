@@ -31,10 +31,226 @@ button {
   font-family: inherit;
 }
 
-/* 宠物画布定位：默认铺满宠物区；气泡窗口扩展时通过 --bubble-extra 整体下移，
-   使画布底边与窗口底边重合（窗口底边锁定 ⇒ 宠物屏幕位置不变），顶部腾出气泡带 */
+/* 宠物画布定位：在 pet-stage 内绝对定位左缘对齐；气泡预留带激活时通过 --bubble-extra
+   整体下移（stage 自身向上长高、底边贴窗底 ⇒ 宠物屏幕位置不变），顶部腾出气泡带 */
 #pet-stage > canvas {
   position: absolute;
   left: 0;
   top: var(--bubble-extra, 0px);
+}
+
+/* ── 聊天面板：Markdown / 思考卡 / 等待指示（T5 对话体验，口径对齐手机端）──────── */
+
+.bubble-theirs {
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border-bottom-left-radius: 2px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+  background: #3a3a3a;
+  color: #eee;
+}
+
+.bubble-theirs.bubble-error {
+  background: #4a2b2b;
+  color: #ff9f9f;
+}
+
+.retry-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #ffb3b3;
+  opacity: 0.85;
+}
+
+/* Markdown 正文：允许选中复制（窗口其余部分保持禁选，避免与拖拽冲突） */
+.md-body {
+  user-select: text;
+}
+
+.md-body > *:first-child {
+  margin-top: 0;
+}
+
+.md-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.md-body p {
+  margin: 4px 0;
+}
+
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  margin: 8px 0 4px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.md-body ul, .md-body ol {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.md-body li {
+  margin: 2px 0;
+}
+
+.md-body blockquote {
+  margin: 4px 0;
+  padding: 2px 8px;
+  border-left: 2px solid #666;
+  color: #cfcfcf;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.md-body code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.md-body pre {
+  position: relative;
+  margin: 6px 0;
+  padding: 8px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #1b1b1b;
+  overflow-x: auto;
+}
+
+.md-body pre code {
+  padding: 0;
+  background: none;
+  font-size: 12px;
+}
+
+.md-body a {
+  color: #6cb6ff;
+  text-decoration: underline;
+}
+
+.md-body table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.md-body th, .md-body td {
+  border: 1px solid #444;
+  padding: 2px 6px;
+}
+
+.md-body hr {
+  border: none;
+  border-top: 1px solid #444;
+  margin: 6px 0;
+}
+
+/* 代码块复制按钮（渲染后注入，不写进 HTML） */
+.md-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 1px 6px;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  background: #2c2c2c;
+  color: #bbb;
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+
+.md-body pre:hover .md-copy {
+  opacity: 1;
+}
+
+.md-after-think {
+  margin-top: 6px;
+}
+
+/* 思考过程卡片 */
+.think-card {
+  margin-bottom: 6px;
+  border: 1px solid #3d3d3d;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.think-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #9a9a9a;
+  cursor: pointer;
+}
+
+.think-body {
+  max-height: 180px;
+  padding: 6px 8px;
+  border-top: 1px solid #383838;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #b5b5b5;
+  white-space: pre-wrap;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.think-chevron {
+  opacity: 0.7;
+}
+
+/* Trae 式等待指示：无气泡，「正在思考」+ 三个由浅到深的圆点波浪 */
+.wait-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+}
+
+.wait-title {
+  font-size: 12px;
+  color: #8f8f8f;
+}
+
+.wait-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.wait-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #9b9b9b;
+  animation: wait-dot 0.9s infinite ease-in-out;
+}
+
+.wait-dots i:nth-child(1) {
+  background: #c9c9c9;
+}
+
+.wait-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+  background: #9b9b9b;
+}
+
+.wait-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+  background: #6b6b6b;
+}
+
+@keyframes wait-dot {
+  0%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-3px); opacity: 1; }
 }

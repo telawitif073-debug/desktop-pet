@@ -1,68 +1,76 @@
 /**
- * 键盘高度 hook：返回当前键盘高度（DIP）与可见性。
- * RN 0.87 边到边模式下系统不再为 IME 收缩窗口，需要 JS 自行给底部留白，
- * 让输入栏始终贴在键盘上方（微信效果）。键盘收起时返回 0。
+ * 键盘高度 hook：返回当前键盘高度（DIP）与可见性，供输入区留白使用。
  *
- * 自愈设计（核心）：keyboardDidHide 在某些收起方式（下滑/切换输入法/后台切回）下可能不触发，
- * 若只靠它清零，kbHeight 会残留大值把输入区撑到半屏、聊天列表被压成只剩上半屏、下方出现
- * 一大片既点不动也滚不动的空白（用户此前反馈的两类界面问题均源于此）。
- * 因此采用多信号冗余，任何一路生效都能保证最终归零：
- *  1. keyboardDidShow/Hide：弹出即给高度，收起即清零（主信号）；
- *  2. 窗口高度变化（adjustResize）：键盘收起必然把窗口恢复回全高，据此强制清零（自愈）；
- *  3. AppState 回前台强制清零：后台期间系统收掉键盘但事件可能丢失。
- * 注：keyboardWillHide 仅 iOS 有效，Android 不触发，不使用。
+ * 背景：本应用开启 edge-to-edge（gradle.properties edgeToEdgeEnabled=true），
+ * 系统不再为输入法收缩窗口，必须由 JS 自行在底部留出键盘高度的空白。
+ *
+ * 关键设计——看门狗校正（解决历史顽疾）：
+ * keyboardDidHide 在部分机型 / 收起方式（下滑收起、切换输入法、切后台再回来）下会丢失，
+ * 事件一旦丢失，kbHeight 会残留一个键盘高度的值，把输入区顶到半屏：
+ * 聊天列表被压成只剩上半屏、下方留出一大片既点不动也滚不动的空白。
+ * 因此除事件外，另用原生 IME 真实状态（Keyboard.isVisible / metrics）每 500ms 校正一次：
+ * 连续两次探测到「不可见」才归零，避免弹出动画期间的瞬时误判造成底栏抖动。
+ * 只要原生状态正确，无论事件是否送达，最终都能收敛到正确留白。
  */
 import { useEffect, useState } from 'react';
 import { AppState, Dimensions, Keyboard, KeyboardEvent, Platform } from 'react-native';
 
 /** 键盘高度上限：杜绝任何异常大值把底栏推到屏幕外 */
 const MAX_RATIO = 0.55;
+/** 看门狗轮询间隔 */
+const WATCH_MS = 500;
 
 export function useKeyboardHeight(): { kbHeight: number; kbVisible: boolean } {
-  const [height, setHeight] = useState(0);
-  const [visible, setVisible] = useState(false);
+  const [kbHeight, setKbHeight] = useState(0);
+  const [kbVisible, setKbVisible] = useState(false);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const maxH = Math.round(Dimensions.get('window').height * MAX_RATIO);
-    const reset = (): void => {
-      setHeight(0);
-      setVisible(false);
+    const apply = (h: number, visible: boolean): void => {
+      setKbHeight(visible ? Math.min(h, maxH) : 0);
+      setKbVisible(visible);
     };
+    const hide = (): void => apply(0, false);
 
+    // 主信号：键盘事件（响应最快，弹出即时给出准确高度）
     const showSub = Keyboard.addListener('keyboardDidShow', (e: KeyboardEvent) => {
-      setHeight(Math.min(e.endCoordinates.height, maxH));
-      setVisible(true);
+      apply(e.endCoordinates.height, true);
     });
-    const hideSub = Keyboard.addListener('keyboardDidHide', reset);
+    const hideSub = Keyboard.addListener('keyboardDidHide', hide);
 
-    // 窗口高度信号：adjustResize 下键盘弹出压缩窗口、收起恢复全高。
-    // 以会话内最大窗口高为全高基准，窗口恢复到全高（差值 ≤40）即视为键盘收起 → 清零，
-    // 从而在 keyboardDidHide 丢失时也能自愈。
-    let maxWinH = Dimensions.get('window').height;
-    const dimSub = Dimensions.addEventListener('change', ({ window }: { window: { height: number } }) => {
-      if (window.height > maxWinH) maxWinH = window.height;
-      const delta = maxWinH - window.height;
-      if (delta > 80) {
-        setHeight(Math.min(delta, maxH));
-        setVisible(true);
-      } else if (delta <= 40) {
-        reset();
-      }
-    });
-
-    // 后台切回前台强制清零（系统可能已收键盘但事件未发出）
+    // 后台切回前台强制清零：后台期间系统收掉键盘，事件可能不送达
     const appSub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') reset();
+      if (s === 'active') hide();
     });
+
+    // 兜底信号：以原生 IME 状态为准做校正，事件丢失时自动归零
+    let missCount = 0;
+    const timer = setInterval(() => {
+      let visible: boolean;
+      let h = 0;
+      try {
+        visible = Keyboard.isVisible();
+        h = Keyboard.metrics()?.height ?? 0;
+      } catch {
+        return; // 该 RN 版本无此 API：退回纯事件驱动
+      }
+      if (visible) {
+        missCount = 0;
+        if (h > 0) apply(h, true);
+      } else {
+        missCount += 1;
+        if (missCount >= 2) hide();
+      }
+    }, WATCH_MS);
 
     return () => {
+      clearInterval(timer);
       showSub.remove();
       hideSub.remove();
-      dimSub.remove();
       appSub.remove();
     };
   }, []);
 
-  return { kbHeight: height, kbVisible: visible };
+  return { kbHeight, kbVisible };
 }

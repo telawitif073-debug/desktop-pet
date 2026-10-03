@@ -1,0 +1,361 @@
+{
+  "schemaVersion": 1,
+  "id": "xuemian168-qqpet-automation-active-play",
+  "name": "qqpet_automation · active/play",
+  "description": "来自 GitHub 开源项目 xuemian168/qqpet_automation 的美术资源（active/play），经并集包围盒归一化后导入；原素材 8 段动画、30 帧。",
+  "author": "xuemian168/qqpet_automation 上游作者（GitHub）",
+  "license": "NOASSERTION — 上游 xuemian168/qqpet_automation（仓库级未声明，但根目录许可文件为宽松许可：MIT, Apache-2.0）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "e9b5a62e3bb9f49cadb82c6b9c9d5291fffeadf496159072e3609406e7b30503"
+  },
+  "actions": [
+    {
+      "id": "play-danrendoule00",
+      "name": "玩耍",
+      "interaction": "play",
+      "frameRate": 5.0,
+      "frames": [
+        {
+          "file": "actions/play-danrendoule00/frame_000.png",
+          "sha256": "ecd53dee72855d576186119f6795545b2f431b9eabe711b4077e325a1c39467e"
+        },
+        {
+          "file": "actions/play-danrendoule00/frame_001.png",
+          "sha256": "929f7df83c20dc65cb6e64c333877a2e85362d6145c05436bdf50314b75259b9"
+        }
+      ]
+    },
+    {
+      "id": "feed-danrendoule",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/feed-danrendoule/frame_000.png",
+          "sha256": "a54d33e0435628d73f31212866eb51fc030a29ace433307ebb108b448d5d9a15"
+        },
+        {
+          "file": "actions/feed-danrendoule/frame_001.png",
+          "sha256": "29224a2ba79cfd7d95d09f038c78ecfe00348ddf2c9dcbda13018e7c3c7eb954"
+        },
+        {
+          "file": "actions/feed-danrendoule/frame_002.png",
+          "sha256": "fabf94c76770862fc4b7608cbd1a57740ecc655f7b2eb36114b3eb9f4186405a"
+        },
+        {
+          "file": "actions/feed-danrendoule/frame_003.png",
+          "sha256": "caf308b90775623495bac00f07540565371f41bcbb6daa8bab72e13bbff23e75"
+        }
+      ]
+    },
+    {
+      "id": "rest-duolaoshu",
+      "name": "休息",
+      "interaction": "rest",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/rest-duolaoshu/frame_000.png",
+          "sha256": "f0efa599bb9a094028e5bed1cec8525c0d7333601be75fc8f06e31664e5b4027"
+        },
+        {
+          "file": "actions/rest-duolaoshu/frame_001.png",
+          "sha256": "da2489d421825bc5576128b15e71e1f3c0c49b99ed10b9a6c860f12128045e37"
+        },
+        {
+          "file": "actions/rest-duolaoshu/frame_002.png",
+          "sha256": "132d5c0f701925d7f5730609a460475cec6a2802b906ce34722b15f14c80b05d"
+        },
+        {
+          "file": "actions/rest-duolaoshu/frame_003.png",
+          "sha256": "2b12c5b10e8a277a65c4f35d166e5c00aeb34824499961afa43111a66a935d06"
+        }
+      ]
+    },
+    {
+      "id": "fanhui",
+      "name": "fanhui",
+      "interaction": "none",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/fanhui/frame_000.png",
+          "sha256": "5d3ee5e37178b438eb14c42f9289192cad0d9e756eb10504b797fd8b0c67f484"
+        },
+        {
+          "file": "actions/fanhui/frame_001.png",
+          "sha256": "cf52fa6a9782dd9a35cb564f2d04fa01bf3782f7e4c7668d2be9dc0f2fb30f72"
+        },
+        {
+          "file": "actions/fanhui/frame_002.png",
+          "sha256": "8e4902d8cf993db02150758a74e46b56688046499b0eb22a773f6531fa8217c9"
+        },
+        {
+          "file": "actions/fanhui/frame_003.png",
+          "sha256": "71e3e64d4d698fb012fd42c58f47583160bc9d9ea90d2d2e3d842632b0a97edb"
+        }
+      ]
+    },
+    {
+      "id": "fish",
+      "name": "fish",
+      "interaction": "none",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/fish/frame_000.png",
+          "sha256": "8902f4d642497aa2b8255807f230ff06c110d12234d66f0a59fb78d1e4e1c281"
+        },
+        {
+          "file": "actions/fish/frame_001.png",
+          "sha256": "4c20e3cd3255a1ae02913a95a79dfdd57ba04ce77cf80ded35f98f215613ea69"
+        },
+        {
+          "file": "actions/fish/frame_002.png",
+          "sha256": "99f995241d78d5292c004d6ac7fa4b181a77398b1b4f538dece13fa57b73f070"
+        },
+        {
+          "file": "actions/fish/frame_003.png",
+          "sha256": "3fcb4fcb3aa754bcd7ba7a7f8d78b247b2f609bef873cbf76e0fbf79ffe04057"
+        }
+      ]
+    },
+    {
+      "id": "guess",
+      "name": "guess",
+      "interaction": "none",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/guess/frame_000.png",
+          "sha256": "e5520645a4e01ba63789ab6ed05ff0d26141b178983605f06c9a6d0071944c4d"
+        },
+        {
+          "file": "actions/guess/frame_001.png",
+          "sha256": "39feafc153f128f65014b0a53da9e41358d5280ddd7c1e7df62537a4806f3851"
+        },
+        {
+          "file": "actions/guess/frame_002.png",
+          "sha256": "7289821de93091e3520437ad4fa7817b67171760619ebeaddd50695a288bdf1a"
+        },
+        {
+          "file": "actions/guess/frame_003.png",
+          "sha256": "ad7fd5eb3eea673dabc1d5836806b7daf7d51d7536d6a5fe86a60f90481d9f1a"
+        }
+      ]
+    },
+    {
+      "id": "nongchang",
+      "name": "nongchang",
+      "interaction": "none",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/nongchang/frame_000.png",
+          "sha256": "92055ca55c759fd6bfe150b2e5402c14302b5774d6eb17d0ddb931b5ddaff590"
+        },
+        {
+          "file": "actions/nongchang/frame_001.png",
+          "sha256": "11b78e58c20be930bcdd810a70820af8e76605bfca2b39e8268d2f078637de01"
+        },
+        {
+          "file": "actions/nongchang/frame_002.png",
+          "sha256": "b75132da93cda11d486fb9c424e8ec8915b2ed1a58572955cfc95e02e893f533"
+        },
+        {
+          "file": "actions/nongchang/frame_003.png",
+          "sha256": "f8b45dfebec6839caffa54eea6c65d60c51f9c965b1aa38f04208fb57f1f42ab"
+        }
+      ]
+    },
+    {
+      "id": "paopao",
+      "name": "paopao",
+      "interaction": "none",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/paopao/frame_000.png",
+          "sha256": "ce8e0ceebccec1dea5f147d3a9d8ae146f99fa9974eb067caa2f798dffa34a89"
+        },
+        {
+          "file": "actions/paopao/frame_001.png",
+          "sha256": "845a9ef00e17c9c83e528270640efe04e8609e57d55af6c95fd54e5f893e0f6b"
+        },
+        {
+          "file": "actions/paopao/frame_002.png",
+          "sha256": "bfd7a59104ea2738c45b74ae2625e8369a0d19bab6efd5642c17284f9d71a696"
+        },
+        {
+          "file": "actions/paopao/frame_003.png",
+          "sha256": "5341fd6e25ea414ffb4d36818c701764f6a0127a07b51a1d3abbf2c8675448e3"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "xuemian168/qqpet_automation",
+    "url": "https://github.com/xuemian168/qqpet_automation",
+    "stars": 190,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.260649,
+    "rank": 179,
+    "license": "NOASSERTION",
+    "licenseTier": "A",
+    "licenseReason": "仓库级未声明，但根目录许可文件为宽松许可：MIT, Apache-2.0",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "qq-pet-macos/src/assets/active/play/danrendoule00.gif#frame0",
+    "actionSources": [
+      {
+        "action": "play-danrendoule00",
+        "interaction": "play",
+        "sourcePath": "qq-pet-macos/src/assets/active/play/danrendoule00.gif",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/play/danrendoule00.gif"
+        ],
+        "sourceFrames": 2,
+        "importedFrames": 2,
+        "frameRate": 5.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "feed-danrendoule",
+        "interaction": "feed",
+        "sourcePath": "qq-pet-macos/src/assets/active/play/danrendoule00.png",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/play/danrendoule00.png",
+          "qq-pet-macos/src/assets/active/play/danrendoule01.png",
+          "qq-pet-macos/src/assets/active/play/danrendoule02.png",
+          "qq-pet-macos/src/assets/active/play/danrendoule03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "rest-duolaoshu",
+        "interaction": "rest",
+        "sourcePath": "qq-pet-macos/src/assets/active/play/duolaoshu00.png",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/play/duolaoshu00.png",
+          "qq-pet-macos/src/assets/active/play/duolaoshu01.png",
+          "qq-pet-macos/src/assets/active/play/duolaoshu02.png",
+          "qq-pet-macos/src/assets/active/play/duolaoshu03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "fanhui",
+        "interaction": "none",
+        "sourcePath": "qq-pet-macos/src/assets/active/play/fanhui00.png",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/play/fanhui00.png",
+          "qq-pet-macos/src/assets/active/play/fanhui01.png",
+          "qq-pet-macos/src/assets/active/play/fanhui02.png",
+          "qq-pet-macos/src/assets/active/play/fanhui03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "fish",
+        "interaction": "none",
+        "sourcePath": "qq-pet-macos/src/assets/active/play/fish00.png",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/play/fish00.png",
+          "qq-pet-macos/src/assets/active/play/fish01.png",
+          "qq-pet-macos/src/assets/active/play/fish02.png",
+          "qq-pet-macos/src/assets/active/play/fish03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "guess",
+        "interaction": "none",
+        "sourcePath": "qq-pet-macos/src/assets/active/play/guess00.png",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/play/guess00.png",
+          "qq-pet-macos/src/assets/active/play/guess01.png",
+          "qq-pet-macos/src/assets/active/play/guess02.png",
+          "qq-pet-macos/src/assets/active/play/guess03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "nongchang",
+        "interaction": "none",
+        "sourcePath": "qq-pet-macos/src/assets/active/play/nongchang00.png",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/play/nongchang00.png",
+          "qq-pet-macos/src/assets/active/play/nongchang01.png",
+          "qq-pet-macos/src/assets/active/play/nongchang02.png",
+          "qq-pet-macos/src/assets/active/play/nongchang03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "paopao",
+        "interaction": "none",
+        "sourcePath": "qq-pet-macos/src/assets/active/play/paopao00.png",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/play/paopao00.png",
+          "qq-pet-macos/src/assets/active/play/paopao01.png",
+          "qq-pet-macos/src/assets/active/play/paopao02.png",
+          "qq-pet-macos/src/assets/active/play/paopao03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      }
+    ]
+  }
+}

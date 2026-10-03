@@ -1,15 +1,18 @@
 /**
- * DeepSeek 式侧边抽屉（替代原商店 Tab）：左上汉堡按钮或左缘右滑打开；
+ * DeepSeek 式侧边抽屉（替代原商店 Tab）：左上汉堡按钮或聊天页全屏右滑打开，抽屉内左滑返回；
  * 内容 = 资源商店（宠物/智能体搜索、安装），最下层左侧用户头像 → 用户设置，右侧 … → 用户设置。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as platform from '../api/platform';
 import { scheduleUpload } from '../api/sync';
 import { useAppStore } from '../store/appStore';
 import { cacheAssetFile, normalizeFileUrl } from '../pet/petFiles';
-import { normalizeFormat, type AssetItem } from '../types';
+import { normalizeFormat, type AssetItem, type InstalledVoice } from '../types';
+import { cloudVoiceReady, previewInstalled, stopAllVoice } from '../voiceEngine';
+import { VOICE_GUIDE } from './voiceGuide';
+import PublishVoiceModal from './PublishVoiceModal';
 
 const DRAWER_W = Math.min(Dimensions.get('window').width * 0.82, 340);
 
@@ -76,7 +79,7 @@ export default function StoreDrawer({
   onOpenAdmin: () => void;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<'pet' | 'agent'>('pet');
+  const [tab, setTab] = useState<'pet' | 'agent' | 'voice'>('pet');
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<AssetItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -85,6 +88,12 @@ export default function StoreDrawer({
   const [detail, setDetail] = useState<DetailAsset | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
+  // ── 音色板块独立数据（voices 接口结构与 pets/agents 不同，单独一套 state） ──
+  const [voiceItems, setVoiceItems] = useState<platform.VoiceAssetItem[]>([]);
+  const [voiceDetail, setVoiceDetail] = useState<platform.VoiceAssetItem | null>(null);
+  const [previewingId, setPreviewingId] = useState('');
+  const [publishVisible, setPublishVisible] = useState(false);
+  const [helpModal, setHelpModal] = useState(false);
   const [agentConfig, setAgentConfig] = useState<Record<string, unknown> | null>(null);
   const [agentCfgText, setAgentCfgText] = useState('');
   const [showCfg, setShowCfg] = useState(false);
@@ -104,6 +113,10 @@ export default function StoreDrawer({
     [llmProfilesForPick, apiPickTargetId],
   );
   const currentPetId = useAppStore((s) => s.petAsset?.id);
+  const downloadedPets = useAppStore((s) => s.downloadedPets);
+  const downloadedVoices = useAppStore((s) => s.downloadedVoices);
+  const activeCloudVoiceId = useAppStore((s) => s.activeCloudVoiceId);
+  const token = useAppStore((s) => s.token);
   const username = useAppStore((s) => s.user?.username ?? '用户');
   const isAdmin = useAppStore((s) => s.user?.role === 'admin');
   const slide = useRef(new Animated.Value(-DRAWER_W)).current;
@@ -113,13 +126,33 @@ export default function StoreDrawer({
     Animated.timing(slide, { toValue: visible ? 0 : -DRAWER_W - 20, duration: 220, useNativeDriver: true }).start();
   }, [visible, slide]);
 
+  // 商店页全屏左滑返回聊天：只在移动阶段捕获，且只认领明显横向为主的左滑
+  //（点击无位移不受影响；垂直滚动列表纵向位移占优，不会被抢）。
+  // onClose 经 ref 调用：PanResponder 只创建一次，避免闭包捕获到首渲染的旧引用。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const swipeClosePan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (_e, g) => g.dx < -24 && Math.abs(g.dy) < Math.abs(g.dx) * 0.5,
+      onPanResponderRelease: (_e, g) => {
+        if (g.dx < -40) onCloseRef.current();
+      },
+    }),
+  ).current;
+
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
-      const res = await platform.listAssets(tab, search.trim() || undefined);
-      setItems(res.items);
+      if (tab === 'voice') {
+        const res = await platform.listVoices(search.trim() ? { search: search.trim() } : undefined);
+        setVoiceItems(res.items);
+      } else {
+        const res = await platform.listAssets(tab, search.trim() || undefined);
+        setItems(res.items);
+      }
     } catch {
-      setItems([]);
+      if (tab === 'voice') setVoiceItems([]);
+      else setItems([]);
     } finally {
       setLoading(false);
     }
@@ -140,6 +173,12 @@ export default function StoreDrawer({
       setAgentCfgText('');
       setShowCfg(false);
       try {
+        if (tab === 'voice') {
+          const d = await platform.getVoiceDetail(item.id);
+          setVoiceDetail(d);
+          setDetailLoading(false);
+          return;
+        }
         const d = (await platform.getAssetDetail(tab, item.id)) as DetailAsset;
         setDetail(d);
         // 智能体：额外拉取配置 JSON（fileUrl 即配置包），用于展示提示词/依赖/JSON
@@ -157,6 +196,7 @@ export default function StoreDrawer({
         }
       } catch {
         setDetail(null);
+        setVoiceDetail(null);
       } finally {
         setDetailLoading(false);
       }
@@ -167,9 +207,11 @@ export default function StoreDrawer({
   const backToList = useCallback((): void => {
     setSelected(null);
     setDetail(null);
+    setVoiceDetail(null);
     setAgentConfig(null);
     setAgentCfgText('');
     setShowCfg(false);
+    stopAllVoice();
   }, []);
 
   const install = async (item: AssetItem): Promise<void> => {
@@ -272,8 +314,97 @@ export default function StoreDrawer({
     scheduleUpload('config');
   };
 
+  // ── 音色：列表/详情项转本机 InstalledVoice（试听与安装共用） ──
+  const voiceItemToInstalled = (v: platform.VoiceAssetItem): InstalledVoice => ({
+    id: v.id,
+    name: v.name,
+    description: v.description ?? undefined,
+    config: v.configSchema,
+    sampleUrl: v.fileUrl ? platform.assetUrl(v.fileUrl) : null,
+    version: v.version,
+    installedAt: Date.now(),
+    fromStore: true,
+  });
+
+  const previewVoice = async (v: platform.VoiceAssetItem): Promise<void> => {
+    if (previewingId) return;
+    stopAllVoice();
+    setPreviewingId(v.id);
+    try {
+      await previewInstalled(voiceItemToInstalled(v));
+    } catch (e) {
+      Alert.alert('试听失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setPreviewingId('');
+    }
+  };
+
+  const activateVoice = (id: string): void => {
+    const s = useAppStore.getState();
+    s.patch({ activeCloudVoiceId: id });
+    scheduleUpload('config');
+    if (!s.ttsEnabled) {
+      Alert.alert('已启用该音色', '音色已选为当前朗读声音。朗读开关目前是关闭的，可到「设置 → 语音朗读」开启后听到效果。');
+    }
+  };
+
+  /** 安装音色：拉配置（不含 Key）入库；云音色未配 Key 时引导去设置 */
+  const installVoice = async (v: platform.VoiceAssetItem): Promise<void> => {
+    setBusyId(v.id);
+    try {
+      const r = await platform.downloadVoice(v.id);
+      const iv: InstalledVoice = {
+        id: v.id,
+        name: r.name,
+        description: v.description ?? undefined,
+        config: r.config,
+        sampleUrl: r.sampleUrl,
+        version: r.version,
+        installedAt: Date.now(),
+        fromStore: true,
+      };
+      const s = useAppStore.getState();
+      s.patch({ downloadedVoices: [...s.downloadedVoices.filter((x) => x.id !== iv.id), iv] });
+      scheduleUpload('config');
+      const ready = iv.config.engine !== 'system' && cloudVoiceReady(iv);
+      if (iv.config.engine === 'gptsovits' && !ready) {
+        Alert.alert(
+          '音色已安装',
+          `「${iv.name}」由 GPT-SoVITS 引擎合成（免费、无需 Key）。请先在你电脑上部署 GPT-SoVITS 并开启 api_v2（默认端口 9880），再到「设置 → 语音朗读 → 云 TTS 服务配置」选 GPT-SoVITS 引擎并填入电脑局域网地址，详见音色板块的帮助指南。`,
+          [
+            { text: '去配置', onPress: onOpenSettings },
+            { text: '稍后' },
+          ],
+        );
+        return;
+      }
+      if (iv.config.engine === 'cloud' && !ready) {
+        Alert.alert(
+          '音色已安装',
+          `「${iv.name}」是云音色，需要用你自己的 TTS 服务凭证合成声音。请先到「设置 → 语音朗读 → 云 TTS 服务配置」填写服务地址、模型和 API Key，再回来启用。`,
+          [
+            { text: '去配置', onPress: onOpenSettings },
+            { text: '稍后' },
+          ],
+        );
+        return;
+      }
+      Alert.alert('音色已安装', `「${iv.name}」已保存到本机，是否立即设为宠物的朗读声音？`, [
+        { text: '立即启用', onPress: () => activateVoice(iv.id) },
+        { text: '试听', onPress: () => void previewVoice(v) },
+        { text: '稍后' },
+      ]);
+    } catch (e) {
+      Alert.alert('安装失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId('');
+    }
+  };
+
   const detailItem = selected;
   const detailIsCurrent = tab === 'pet' && !!detailItem && currentPetId === detailItem.id;
+  // 已下载判断：只要已下载到本机就视为「已安装」，不再显示可安装（当前形象单独标识）
+  const detailIsDownloaded = tab === 'pet' && !!detailItem && downloadedPets.some((p) => p.id === detailItem.id);
   // 详情大图：previewUrl 优先；image 形态宠物的旧数据 previewUrl 为空，降级用 fileUrl（本身就是图片）
   const detailImgSource = (() => {
     if (!detail || imgError) return null;
@@ -291,16 +422,114 @@ export default function StoreDrawer({
   })();
   const depNames = tab === 'agent' && detail ? extractAgentDeps(detail, agentConfig) : [];
 
+  // ── 音色详情派生 ──
+  const voiceDetailInstalled = voiceDetail ? downloadedVoices.some((x) => x.id === voiceDetail.id) : false;
+  const voiceDetailActive = voiceDetail ? activeCloudVoiceId === voiceDetail.id : false;
+  const voiceDetailReady = voiceDetail ? cloudVoiceReady(voiceItemToInstalled(voiceDetail)) : false;
+  const voiceCfg = voiceDetail?.configSchema;
+
   return (
-    <View style={[styles.root, visible ? styles.rootActive : styles.rootHidden]} pointerEvents={visible ? 'auto' : 'none'}>
+    <View style={[styles.root, visible ? styles.rootActive : styles.rootHidden]} pointerEvents={visible ? 'auto' : 'none'} {...swipeClosePan.panHandlers}>
       <Pressable style={styles.mask} onPress={onClose} />
       <Animated.View style={[styles.drawer, { width: DRAWER_W, transform: [{ translateX: slide }], paddingTop: insets.top + 10, paddingBottom: insets.bottom + 10 }]}>
-        {detailItem ? (
+        {detailItem || voiceDetail ? (
           <View style={{ flex: 1 }}>
             <Pressable style={styles.detailBack} onPress={backToList} hitSlop={8}>
               <Text style={styles.detailBackText}>‹ 返回</Text>
             </Pressable>
-            {detailLoading || !detail ? (
+            {voiceDetail ? (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+                <View style={styles.voiceHero}>
+                  <Text style={styles.voiceHeroIcon}>🎙</Text>
+                </View>
+                <View style={styles.detailBadgeRow}>
+                  <View style={styles.detailBadge}>
+                    <Text style={styles.detailBadgeText}>{voiceCfg?.engine === 'cloud' ? '云音色' : '系统音色'}</Text>
+                  </View>
+                  <Text style={styles.detailVersion}>v{voiceDetail.version}</Text>
+                  {voiceDetail.status && voiceDetail.status !== 'approved' && (
+                    <Text style={[styles.detailVersion, { color: '#E8803A' }]}>
+                      {voiceDetail.status === 'pending' ? ' · 审核中' : ' · 未通过'}
+                    </Text>
+                  )}
+                </View>
+                <Text style={styles.detailName}>{voiceDetail.name}</Text>
+                <Text style={[styles.detailDesc, !voiceDetail.description && styles.detailDescEmpty]}>
+                  {voiceDetail.description || '作者还没有添加描述。'}
+                </Text>
+                <View style={styles.detailStatsRow}>
+                  <Text style={styles.detailStat}>{voiceDetail.downloads} 次下载</Text>
+                  {voiceDetail.author?.username ? <Text style={styles.detailStat}>作者:{voiceDetail.author.username}</Text> : null}
+                </View>
+
+                <View style={styles.agentCard}>
+                  <Text style={styles.agentCardTitle}>音色参数</Text>
+                  <View style={styles.depRow}>
+                    <Text style={styles.depDot}>•</Text>
+                    <Text style={styles.depName}>合成引擎：{voiceCfg?.engine === 'cloud' ? '云端 TTS（OpenAI 兼容 /audio/speech）' : 'Android 系统 TTS（离线）'}</Text>
+                  </View>
+                  <View style={styles.depRow}>
+                    <Text style={styles.depDot}>•</Text>
+                    <Text style={styles.depName}>音色 ID：{String(voiceCfg?.voiceId ?? '-')}</Text>
+                  </View>
+                  {voiceCfg?.engine === 'cloud' && (
+                    <>
+                      <View style={styles.depRow}>
+                        <Text style={styles.depDot}>•</Text>
+                        <Text style={styles.depName}>默认模型：{voiceCfg.model?.trim() || '跟随云服务配置'}</Text>
+                      </View>
+                      <View style={styles.depRow}>
+                        <Text style={styles.depDot}>•</Text>
+                        <Text style={styles.depName}>服务地址：{voiceCfg.baseUrl?.trim() || '跟随云服务配置'}</Text>
+                      </View>
+                    </>
+                  )}
+                  {voiceCfg?.instructions?.trim() ? (
+                    <View style={styles.depRow}>
+                      <Text style={styles.depDot}>•</Text>
+                      <Text style={styles.depName}>风格指令：{voiceCfg.instructions}</Text>
+                    </View>
+                  ) : null}
+                  {voiceCfg?.engine === 'cloud' && !voiceDetailReady && (
+                    <Text style={styles.voiceWarn}>该音色需要先在「设置 → 语音朗读 → 云 TTS 服务配置」填入你自己的服务地址与 API Key</Text>
+                  )}
+                </View>
+
+                <Pressable
+                  style={[styles.voicePreviewBtn, previewingId === voiceDetail.id && styles.installDisabled]}
+                  disabled={previewingId === voiceDetail.id}
+                  onPress={() => void previewVoice(voiceDetail)}
+                >
+                  <Text style={styles.voicePreviewText}>
+                    {previewingId === voiceDetail.id ? '播放中…' : voiceDetail.fileUrl ? '▶ 试听样本' : '▶ 合成试听'}
+                  </Text>
+                </Pressable>
+
+                {voiceDetailActive ? (
+                  <View style={[styles.installBig, styles.installDisabled]}>
+                    <Text style={styles.installBigText}>使用中</Text>
+                  </View>
+                ) : voiceDetailInstalled ? (
+                  <Pressable
+                    style={[styles.installBig, (!voiceDetailReady && voiceCfg?.engine === 'cloud') && styles.installDisabled]}
+                    disabled={!!busyId || (!voiceDetailReady && voiceCfg?.engine === 'cloud')}
+                    onPress={() => activateVoice(voiceDetail.id)}
+                  >
+                    <Text style={styles.installBigText}>
+                      {voiceCfg?.engine === 'cloud' && !voiceDetailReady ? '未配置云服务 Key' : '启用该音色'}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    style={[styles.installBig, busyId === voiceDetail.id && styles.installDisabled]}
+                    disabled={!!busyId}
+                    onPress={() => void installVoice(voiceDetail)}
+                  >
+                    <Text style={styles.installBigText}>{busyId === voiceDetail.id ? '安装中…' : '安装音色'}</Text>
+                  </Pressable>
+                )}
+              </ScrollView>
+            ) : detailLoading || !detail ? (
               <ActivityIndicator style={{ marginTop: 48 }} />
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
@@ -377,12 +606,12 @@ export default function StoreDrawer({
                   </>
                 )}
                 <Pressable
-                  style={[styles.installBig, detailIsCurrent && styles.installDisabled]}
-                  disabled={!!busyId || detailIsCurrent}
-                  onPress={() => void install(detailItem)}
+                  style={[styles.installBig, (detailIsCurrent || detailIsDownloaded) && styles.installDisabled]}
+                  disabled={!!busyId || detailIsCurrent || detailIsDownloaded}
+                  onPress={() => void install(detail as DetailAsset)}
                 >
                   <Text style={styles.installBigText}>
-                    {detailIsCurrent ? '已安装 · 当前形象' : busyId === detailItem.id ? '安装中…' : '安装'}
+                    {detailIsCurrent ? '已安装 · 当前形象' : detailIsDownloaded ? '已下载' : busyId === detail.id ? '安装中…' : '安装'}
                   </Text>
                 </Pressable>
               </ScrollView>
@@ -394,7 +623,7 @@ export default function StoreDrawer({
               <Text style={styles.searchIcon}>⌕</Text>
               <TextInput
                 style={styles.search}
-                placeholder="搜索宠物 / 智能体…"
+                placeholder={tab === 'voice' ? '搜索音色…' : '搜索宠物 / 智能体…'}
                 placeholderTextColor="#B2B2B2"
                 value={search}
                 onChangeText={setSearch}
@@ -404,15 +633,76 @@ export default function StoreDrawer({
             </View>
 
             <View style={styles.tabs}>
-              {(['pet', 'agent'] as const).map((t) => (
+              {(['pet', 'agent', 'voice'] as const).map((t) => (
                 <Pressable key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
-                  <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>{t === 'pet' ? '宠物' : '智能体'}</Text>
+                  <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
+                    {t === 'pet' ? '宠物' : t === 'agent' ? '智能体' : '音色'}
+                  </Text>
                 </Pressable>
               ))}
             </View>
 
+            {tab === 'voice' && (
+              <View style={styles.voiceActionRow}>
+                <Pressable
+                  style={[styles.voicePublishEntry, !token && styles.entryDisabled]}
+                  disabled={!token}
+                  onPress={() => (token ? setPublishVisible(true) : Alert.alert('请先登录', '发布音色需要先登录平台账号'))}
+                >
+                  <Text style={styles.voicePublishEntryText}>＋ 发布我的音色</Text>
+                </Pressable>
+                <Pressable style={styles.voiceHelpEntry} onPress={() => setHelpModal(true)}>
+                  <Text style={styles.voiceHelpEntryText}>配置 / 训练说明</Text>
+                </Pressable>
+              </View>
+            )}
+
             {loading ? (
               <ActivityIndicator style={styles.loading} />
+            ) : tab === 'voice' ? (
+              <FlatList
+                data={voiceItems}
+                keyExtractor={(item) => item.id}
+                ListEmptyComponent={<Text style={styles.empty}>暂无音色，来发布第一个吧</Text>}
+                renderItem={({ item }) => {
+                  const installed = downloadedVoices.some((x) => x.id === item.id);
+                  const active = activeCloudVoiceId === item.id;
+                  const isCloud = item.configSchema?.engine === 'cloud';
+                  const meta = `${isCloud ? '云音色' : '系统音色'} · ${item.downloads} 次下载 · v${item.version}`;
+                  return (
+                    <View style={styles.item}>
+                      <Pressable style={{ flex: 1 }} onPress={() => void openDetail(item as unknown as AssetItem)}>
+                        <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.itemMeta}>{meta}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.voiceMiniBtn, previewingId === item.id && styles.installDisabled]}
+                        disabled={previewingId === item.id}
+                        onPress={() => void previewVoice(item)}
+                      >
+                        <Text style={styles.voiceMiniText}>{previewingId === item.id ? '…' : '试听'}</Text>
+                      </Pressable>
+                      {active ? (
+                        <View style={[styles.installBtn, styles.installDisabled]}>
+                          <Text style={styles.installText}>使用中</Text>
+                        </View>
+                      ) : installed ? (
+                        <Pressable style={styles.installBtn} onPress={() => activateVoice(item.id)}>
+                          <Text style={styles.installText}>启用</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          style={[styles.installBtn, busyId === item.id && styles.installDisabled]}
+                          disabled={!!busyId}
+                          onPress={() => void installVoice(item)}
+                        >
+                          <Text style={styles.installText}>{busyId === item.id ? '…' : '安装'}</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  );
+                }}
+              />
             ) : (
               <FlatList
                 data={items}
@@ -420,6 +710,10 @@ export default function StoreDrawer({
                 ListEmptyComponent={<Text style={styles.empty}>暂无资源</Text>}
                 renderItem={({ item }) => {
                   const isCurrent = tab === 'pet' && currentPetId === item.id;
+                  // 已下载到本机的宠物不再显示「安装」（删除本机形象后才恢复可安装）
+                  const isDownloaded = tab === 'pet' && downloadedPets.some((p) => p.id === item.id);
+                  const btnDisabled = !!busyId || isCurrent || isDownloaded;
+                  const btnText = isCurrent ? '当前' : isDownloaded ? '已下载' : busyId === item.id ? '…' : '安装';
                   const meta =
                     tab === 'agent'
                       ? `智能体${typeof item.downloads === 'number' ? ` · ${item.downloads} 次下载` : ''}`
@@ -430,8 +724,8 @@ export default function StoreDrawer({
                         <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
                         <Text style={styles.itemMeta}>{meta}</Text>
                       </Pressable>
-                      <Pressable style={[styles.installBtn, isCurrent && styles.installDisabled]} onPress={() => void install(item)} disabled={!!busyId || isCurrent}>
-                        <Text style={styles.installText}>{isCurrent ? '当前' : busyId === item.id ? '…' : '安装'}</Text>
+                      <Pressable style={[styles.installBtn, btnDisabled && styles.installDisabled]} onPress={() => void install(item)} disabled={btnDisabled}>
+                        <Text style={styles.installText}>{btnText}</Text>
                       </Pressable>
                     </View>
                   );
@@ -482,6 +776,38 @@ export default function StoreDrawer({
               ))}
               <Pressable style={styles.apiPickCancel} onPress={() => setApiPickVisible(false)} hitSlop={8}>
                 <Text style={styles.apiPickCancelText}>暂不选择，稍后在智能体管理中配置</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        {/* 发布音色 */}
+        <PublishVoiceModal
+          visible={publishVisible}
+          onClose={() => setPublishVisible(false)}
+          onPublished={() => {
+            setPublishVisible(false);
+            void load();
+          }}
+        />
+
+        {/* 音色配置 / 训练说明 */}
+        <Modal transparent animationType="fade" visible={helpModal} onRequestClose={() => setHelpModal(false)}>
+          <View style={styles.apiPickMask}>
+            <View style={[styles.apiPickPanel, { maxHeight: '78%' }]}>
+              <Text style={styles.apiPickTitle}>音色如何配置与训练</Text>
+              <ScrollView style={{ marginTop: 8 }} showsVerticalScrollIndicator={false}>
+                {VOICE_GUIDE.map((section, i) => (
+                  <View key={i} style={{ marginBottom: 12 }}>
+                    <Text style={styles.guideH}>{section.h}</Text>
+                    {section.ps.map((p, j) => (
+                      <Text key={j} style={styles.guideP}>{p}</Text>
+                    ))}
+                  </View>
+                ))}
+              </ScrollView>
+              <Pressable style={[styles.installBig, { marginTop: 10 }]} onPress={() => setHelpModal(false)}>
+                <Text style={styles.installBigText}>我知道了</Text>
               </Pressable>
             </View>
           </View>
@@ -563,4 +889,26 @@ const styles = StyleSheet.create({
   apiPickModel: { fontSize: 12, color: '#7A7F8C', marginTop: 2 },
   apiPickCancel: { marginTop: 14, alignItems: 'center' },
   apiPickCancelText: { fontSize: 13, color: '#4D6BFE' },
+  // ── 音色板块 ──
+  voiceHero: { width: '100%', height: 120, borderRadius: 12, backgroundColor: '#E9EDFE', alignItems: 'center', justifyContent: 'center' },
+  voiceHeroIcon: { fontSize: 48 },
+  voicePreviewBtn: { borderWidth: 1, borderColor: '#4D6BFE', borderRadius: 24, alignItems: 'center', paddingVertical: 10, marginTop: 16 },
+  voicePreviewText: { color: '#4D6BFE', fontSize: 14, fontWeight: '600' },
+  voiceWarn: { fontSize: 12, color: '#E8803A', lineHeight: 17, marginTop: 8 },
+  voiceActionRow: { flexDirection: 'row', gap: 8, marginTop: 10, marginBottom: 2 },
+  voicePublishEntry: { flex: 1, backgroundColor: '#4D6BFE', borderRadius: 14, paddingVertical: 7, alignItems: 'center' },
+  voiceHelpEntry: { backgroundColor: '#ECEDEF', borderRadius: 14, paddingVertical: 7, paddingHorizontal: 12, justifyContent: 'center' },
+  voicePublishEntryText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  voiceHelpEntryText: { color: '#555', fontSize: 12 },
+  entryDisabled: { backgroundColor: '#D5D8DE' },
+  voiceMiniBtn: { borderWidth: 1, borderColor: '#4D6BFE', borderRadius: 14, paddingVertical: 5, paddingHorizontal: 10, marginLeft: 8 },
+  voiceMiniText: { color: '#4D6BFE', fontSize: 12 },
+  guideH: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', marginBottom: 4 },
+  guideP: { fontSize: 12, color: '#555', lineHeight: 18 },
+  // ── 发布音色弹层 ──
+  pubLabel: { fontSize: 12, color: '#666', fontWeight: '600', marginTop: 10, marginBottom: 4 },
+  pubInput: { backgroundColor: '#F2F3F6', borderRadius: 8, paddingHorizontal: 10, fontSize: 13, color: '#222', paddingVertical: 7 },
+  pubArea: { height: 92, textAlignVertical: 'top' },
+  pubError: { color: '#E5484D', fontSize: 12, marginTop: 6, lineHeight: 16 },
+  pubHint: { color: '#8A8F99', fontSize: 11, marginTop: 4, lineHeight: 15 },
 });

@@ -57,15 +57,17 @@ async function main() {
   }
 
   // ---- 示例宠物资源 ----
+  // fileUrl 必须指向**可渲染的图片**：早先指向纯文本桩，商店卡片既无预览图、安装后也不可用。
+  // 这里使用随项目自产的原创演示形象（CC0，见 resources/builtin-pets 生成脚本）。
   if ((await petsRepo.count()) === 0) {
     await petsRepo.save(
       petsRepo.create({
-        name: '示例橘猫宠物',
-        description: '平台自带的示例宠物资源，用于验证下载与安装流程。',
+        name: '示例桌宠·芽芽猫',
+        description: '平台自带的示例宠物形象（原创绘制），用于验证商店浏览、下载与安装流程。',
         authorId: admin.id,
-        category: '动画',
-        tags: ['示例', '猫'],
-        fileUrl: '/uploads/sample-pet-asset.txt',
+        category: '桌宠',
+        tags: ['示例', '猫', '原创'],
+        fileUrl: '/uploads/sample-pet-asset.png',
         version: '1.0.0',
         status: 'approved',
       }),

@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "id": "xuemian168-qqpet-automation-active-work",
+  "name": "qqpet_automation · active/work",
+  "description": "来自 GitHub 开源项目 xuemian168/qqpet_automation 的美术资源（active/work），经并集包围盒归一化后导入；原素材 4 段动画、12 帧。",
+  "author": "xuemian168/qqpet_automation 上游作者（GitHub）",
+  "license": "NOASSERTION — 上游 xuemian168/qqpet_automation（仓库级未声明，但根目录许可文件为宽松许可：MIT, Apache-2.0）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "f93c4ec980afe3a302d3d4f0448db139cd8b742cd2616c09f58e09626e69e371"
+  },
+  "actions": [
+    {
+      "id": "feed-dagong00",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 6.7,
+      "frames": [
+        {
+          "file": "actions/feed-dagong00/frame_000.png",
+          "sha256": "bad3db6170e3d0d3c0acd5b33bdac6c88d3f9ebc51cc69b7f5412878dca29e12"
+        },
+        {
+          "file": "actions/feed-dagong00/frame_001.png",
+          "sha256": "29055da5d91e8d8f1313db839ee200b876b84363729982f25bbbf61019da51f4"
+        }
+      ]
+    },
+    {
+      "id": "rest-dagong",
+      "name": "休息",
+      "interaction": "rest",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/rest-dagong/frame_000.png",
+          "sha256": "a8c250683e8bf5881cad251f45d406d55488c44716226f448a94e013134f0999"
+        },
+        {
+          "file": "actions/rest-dagong/frame_001.png",
+          "sha256": "a3b3db552239db060aa4369eb686719a4512170651a70de44367177c2f23d154"
+        },
+        {
+          "file": "actions/rest-dagong/frame_002.png",
+          "sha256": "0a244509704c0a2dd757b2d94390ede2a650fc54bf0a73dd96ffdc847fca0c08"
+        },
+        {
+          "file": "actions/rest-dagong/frame_003.png",
+          "sha256": "84d004bf77f631c61df192a2055dc5cb3800338ac68a878246a152142906cbd4"
+        }
+      ]
+    },
+    {
+      "id": "play-dagong00",
+      "name": "玩耍",
+      "interaction": "play",
+      "frameRate": 6.7,
+      "frames": [
+        {
+          "file": "actions/play-dagong00/frame_000.png",
+          "sha256": "3b707e7f48af85dbf69ddd9556c993f29b1ebe35bdb9dcc4719e0df350634716"
+        },
+        {
+          "file": "actions/play-dagong00/frame_001.png",
+          "sha256": "87c1342e2d56ac760745b08ff46acab68339c86a9e627fcbe25090d5fe16e5f4"
+        }
+      ]
+    },
+    {
+      "id": "dagong",
+      "name": "dagong",
+      "interaction": "none",
+      "frameRate": 8.0,
+      "frames": [
+        {
+          "file": "actions/dagong/frame_000.png",
+          "sha256": "67b3b028706c31347c20407ebe182c8e2502fb5987c34cd0d13910431a37dd58"
+        },
+        {
+          "file": "actions/dagong/frame_001.png",
+          "sha256": "5a92e33deab11bb2f71e9c49384bb41ab4869b0cd4b8e28e5376e7f12656e0d9"
+        },
+        {
+          "file": "actions/dagong/frame_002.png",
+          "sha256": "1895ad1d62687eb2570324ddaf18c3cf18b96f9db46923651965c1468b23e2fc"
+        },
+        {
+          "file": "actions/dagong/frame_003.png",
+          "sha256": "fa17ad3bafce5f73e6db607a53e4aa00bdc90273c92632ab3735923f61f0030c"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "xuemian168/qqpet_automation",
+    "url": "https://github.com/xuemian168/qqpet_automation",
+    "stars": 190,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.260649,
+    "rank": 179,
+    "license": "NOASSERTION",
+    "licenseTier": "A",
+    "licenseReason": "仓库级未声明，但根目录许可文件为宽松许可：MIT, Apache-2.0",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "qq-pet-macos/src/assets/active/work/dagong00.gif#frame0",
+    "actionSources": [
+      {
+        "action": "feed-dagong00",
+        "interaction": "feed",
+        "sourcePath": "qq-pet-macos/src/assets/active/work/dagong00.gif",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/work/dagong00.gif"
+        ],
+        "sourceFrames": 2,
+        "importedFrames": 2,
+        "frameRate": 6.7,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "rest-dagong",
+        "interaction": "rest",
+        "sourcePath": "qq-pet-macos/src/assets/active/work/dagong00.png",
+        "sourceFiles": [
+          "qq-pet-macos/src/assets/active/work/dagong00.png",
+          "qq-pet-macos/src/assets/active/work/dagong01.png",
+          "qq-pet-macos/src/assets/active/work/dagong02.png",
+          "qq-pet-macos/src/assets/active/work/dagong03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "play-dagong00",
+        "interaction": "play",
+        "sourcePath": "qq_pet_asar/src/assets/active/work/dagong00.gif",
+        "sourceFiles": [
+          "qq_pet_asar/src/assets/active/work/dagong00.gif"
+        ],
+        "sourceFrames": 2,
+        "importedFrames": 2,
+        "frameRate": 6.7,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      },
+      {
+        "action": "dagong",
+        "interaction": "none",
+        "sourcePath": "qq_pet_asar/src/assets/active/work/dagong00.png",
+        "sourceFiles": [
+          "qq_pet_asar/src/assets/active/work/dagong00.png",
+          "qq_pet_asar/src/assets/active/work/dagong01.png",
+          "qq_pet_asar/src/assets/active/work/dagong02.png",
+          "qq_pet_asar/src/assets/active/work/dagong03.png"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 8.0,
+        "normalizeMode": "alpha",
+        "scale": 3.0,
+        "sampled": false
+      }
+    ]
+  }
+}

@@ -6,6 +6,7 @@ import RootNavigator from './src/navigation/RootNavigator';
 import { useAppStore } from './src/store/appStore';
 import { flushAllOnQuit } from './src/api/sync';
 import { reportCrash } from './src/diagnostics/crashReport';
+import VoicePlayer from './src/components/VoicePlayer';
 
 /**
  * 全局未处理 JS 错误捕获（非致命）：把崩溃栈写入 last-crash + 弹窗提示用户，
@@ -68,6 +69,7 @@ export default function App(): React.JSX.Element {
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
       <RootNavigator />
+      <VoicePlayer />
     </SafeAreaProvider>
   );
 }

@@ -7,7 +7,8 @@ import petImg from './assets/pet.png';
 import coreJsUrl from './assets/live2dcubismcore.min.js?url';
 import { usePetStore } from './store/petStore';
 import { useChatStore } from './store/chatStore';
-import { speak } from './renderer/speech';
+import { speak, speakContextFromConfig } from './renderer/speech';
+import { resolveInteractionTrigger } from './shared/petPlayback';
 import { syncAmbientSenses } from './renderer/ambientSense';
 import ChatPanel from './components/ChatPanel';
 import ActionsPanel from './components/ActionsPanel';
@@ -28,6 +29,12 @@ interface PetFeatures {
   affectionEnabled: boolean;
 }
 const DEFAULT_FEATURES: PetFeatures = { feedEnabled: true, restEnabled: true, playEnabled: true, affectionEnabled: true };
+
+// 面板内容布局高（与主进程 CHAT_WINDOW_SIZE 同源；窗口物理尺寸恒定 650x690，
+// 面板态 650x450 内容贴窗底渲染，顶部 240px 透明）
+const CHAT_PANEL_H = 450;
+// 气泡预留带高度（与主进程 BUBBLE_RESERVE 同源，90px；窗口 690 高 = 视觉上限 600 + 90）
+const BUBBLE_RESERVE_PX = 90;
 
 // Cubism Core（Live2D 官方运行时）：需在加载 Live2D 模型前以 <script> 注入全局 window.Live2DCubismCore
 let cubismCorePromise: Promise<void> | null = null;
@@ -59,6 +66,7 @@ const App = () => {
   const [chatOpen, setChatOpen] = useState(false);
   const chatOpenRef = useRef(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsOpenRef = useRef(false);
   // 动作系统：列表 ref（播放查找）+ 播放函数 ref（由 initPixi effect 注入，需访问 Pixi 实例）
   const petActionsRef = useRef<PetAction[]>([]);
   // 互动功能绑定的动作 id（资源库动作上传时可绑定喂食/休息/玩耍），随动作列表一起刷新
@@ -69,7 +77,15 @@ const App = () => {
   const stopActionRef = useRef<(() => void) | null>(null);
   // 当前形象导出闭包（三形态初始化就绪后赋值）：自我形象识别用
   const selfieExportRef = useRef<(() => string | null) | null>(null);
+  // 渲染层视口自适应（Ctrl+滚轮缩放）：由 PIXI/three/live2d 各分支注入，
+  // 收到 pet:zoom-changed 时平滑 renderer.resize，不重建渲染器；面板模式下复位到基础尺寸
+  const applyViewportRef = useRef<((w: number, h: number) => void) | null>(null);
   const [petSettings, setPetSettings] = useState<PetWindowSettings>({ width: 300, height: 300, opacity: 1 });
+  // 固定窗模型：OS 窗口恒 650x690，舞台像素尺寸=视觉 side（滚轮缩放经 IPC 实时更新）；
+  // 面板模式容器固定用 petSettings.width。初值与 petSettings 默认一致，配置到达后同步
+  const [stageSize, setStageSize] = useState({ w: 300, h: 300 });
+  // 最新视觉 side（滚轮缩放只走 IPC 不更新 petSettings；面板关闭复位视口时以此为准）
+  const petSideRef = useRef(300);
   const [petFeatures, setPetFeatures] = useState<PetFeatures>(DEFAULT_FEATURES);
   // decay 定时器内通过 ref 读取，避免闭包过期（开关变更不重建 Pixi 实例）
   const featuresRef = useRef<PetFeatures>(DEFAULT_FEATURES);
@@ -93,12 +109,22 @@ const App = () => {
   }, []);
 
   const { hunger, mood, energy, affection, lastFeedAt, lastPlayAt, lastRestAt, moving, feed, play, rest, decay, setMoving } = usePetStore();
-  const { triggerGreeting } = useChatStore();
   // 持续感知（麦克风语音对话/摄像头定时看一眼）：按商店设置启停，config 变化实时生效
   const petSenses = useChatStore((s) => s.config?.petSenses);
   useEffect(() => {
     syncAmbientSenses(petSenses ?? undefined);
   }, [petSenses]);
+  // 宠物状态总开关（聊天设置 → 对话体验）：关闭后数值不衰减、不显示、互动按钮隐藏。
+  // 定时器内通过 ref 读取，避免开关变更触发 PIXI/three 主 effect 重建
+  const petSystemEnabled = useChatStore((s) => s.config?.petSystemEnabled !== false);
+  const petSystemRef = useRef(true);
+  useEffect(() => {
+    petSystemRef.current = petSystemEnabled;
+    if (!petSystemEnabled) {
+      // 关闭时四维数值归位默认（历史低值不再影响疲劳状态与漫步判定）
+      usePetStore.getState().resetVitals({ feed: false, play: false, rest: false });
+    }
+  }, [petSystemEnabled]);
   // 启动即加载聊天配置（此前仅打开聊天面板时才加载，导致持续聆听/感知开机不生效）
   useEffect(() => {
     void useChatStore.getState().loadConfig();
@@ -166,10 +192,10 @@ const App = () => {
 
   // 智能体主动发起的对话：气泡展示 10s 后自动消失（同时已写入聊天历史）
   const [agentMessage, setAgentMessage] = useState<string | null>(null);
-  // 气泡窗口扩展：气泡显示期间主进程把窗口向上扩展 extra px（底边锁定，宠物屏幕位置
-  // 不变），画布经 CSS 变量 --bubble-extra 整体下移贴窗口底，顶部腾出的区域放气泡
-  const [bubbleExtra, setBubbleExtra] = useState(0);
-  // 气泡边界钳制：头顶上方空间不足时避免被窗口边缘裁剪
+  // 气泡预留带（纯渲染层布局，窗口尺寸恒定 650x690）：气泡显示且宠物态时，stage 顶部
+  // 保留 90px、画布下移贴 stage 底，头顶空间恒可容纳气泡，无需任何窗口 resize
+  const bubbleReserve = agentMessage && !chatOpen && !actionsOpen ? BUBBLE_RESERVE_PX : 0;
+  // 气泡边界钳制：头顶上方空间不足时避免被 stage 边缘裁剪
   const bubbleRef = useRef<HTMLDivElement | null>(null);
   const [bubblePos, setBubblePos] = useState<{ top: number; left: number } | null>(null);
   useLayoutEffect(() => {
@@ -179,39 +205,43 @@ const App = () => {
       return;
     }
     const { width, height } = el.getBoundingClientRect();
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-    // headAnchor 是画布本地坐标，画布顶部在窗口内偏移 bubbleExtra，需先换算
-    // 首选头顶上方；放不下时整体压到窗口顶部之下（不再向上溢出）
-    const top = Math.max(4, Math.min(bubbleExtra + headAnchor.y - 6 - height, H - height - 4));
-    const left = Math.max(4, Math.min(headAnchor.x - width / 2, W - width - 4));
+    // 坐标均相对 pet-stage：画布在 stage 内 left=0、top=bubbleReserve；
+    // stage 宽=视觉 side，高=side+预留带
+    const stageW = stageSize.w;
+    const stageH = stageSize.h + BUBBLE_RESERVE_PX;
+    // 首选头顶上方（预留带内）；放不下时压到 stage 顶部之内（不溢出）
+    const top = Math.max(0, Math.min(BUBBLE_RESERVE_PX + headAnchor.y - 6 - height, stageH - height));
+    const left = Math.max(0, Math.min(headAnchor.x - width / 2, stageW - width));
     setBubblePos({ top, left });
-  }, [agentMessage, headAnchor, bubbleExtra]);
-  // 气泡显示期间请求窗口扩展；面板展开（窗口已高）或气泡消失时恢复
+  }, [agentMessage, headAnchor, stageSize.w, stageSize.h]);
+
+  // 视觉 side 同步到舞台：启动配置加载、设置页滑杆（petSettings 变化）、面板关闭回宠物态。
+  // 注意舞台取值用 petSideRef：滚轮缩放只走 IPC 不更新 petSettings（避免触发渲染主 effect
+  // 全量重建），关面板时必须恢复到最新缩放值而非过期的配置值。固定窗模型不监听 resize。
   useEffect(() => {
-    const wantsExpand = !!agentMessage && !chatOpen && !actionsOpen;
-    let cancelled = false;
-    window.electronAPI?.pet
-      .setBubbleExpand(wantsExpand)
-      .then((extra) => {
-        if (!cancelled) setBubbleExtra(wantsExpand ? extra || 0 : 0);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [agentMessage, chatOpen, actionsOpen]);
-  // 主进程主动复位扩展（拖拽开始/窗口重排）：画布偏移同步归零
+    if (petSettings.width !== petSideRef.current) petSideRef.current = petSettings.width;
+    if (!chatOpen && !actionsOpen) {
+      const side = petSideRef.current;
+      setStageSize({ w: side, h: side });
+      applyViewportRef.current?.(side, side);
+    }
+  }, [petSettings, chatOpen, actionsOpen]);
+
+  // Ctrl+滚轮缩放：主进程持久化后广播新 side，渲染端平滑 resize 渲染器，不重建 PIXI/three
   useEffect(() => {
-    const cleanup = window.electronAPI?.pet.onBubbleExpandChanged((extra) => setBubbleExtra(extra || 0));
+    const cleanup = window.electronAPI?.pet.onZoomChanged((side) => {
+      petSideRef.current = side;
+      setStageSize({ w: side, h: side });
+      applyViewportRef.current?.(side, side);
+    });
     return cleanup;
   }, []);
   const agentMsgTimerRef = useRef<number | null>(null);
   useEffect(() => {
     const cleanup = window.electronAPI?.onAgentMessage((text) => {
       setAgentMessage(text);
-      // 宠物语音：主动消息同步朗读
-      speak(text, useChatStore.getState().config?.speech);
+      // 宠物语音：主动消息同步朗读（智能体专属音色 → 全局云音色 → Edge → 系统）
+      speak(text, speakContextFromConfig(useChatStore.getState().config));
       if (agentMsgTimerRef.current) window.clearTimeout(agentMsgTimerRef.current);
       agentMsgTimerRef.current = window.setTimeout(() => setAgentMessage(null), 10_000);
     });
@@ -224,6 +254,9 @@ const App = () => {
   // 整页点击穿透：仅宠物本体（像素级命中）与 data-interactive 元素可交互
   useEffect(() => {
     let dragging = false;
+    // Ctrl+滚轮缩放：累积 deltaY 按鼠标滚轮一格(≈100)量化一档，120ms 节流（触控板连续小值平滑收敛）
+    let wheelAccum = 0;
+    let lastWheelZoomAt = 0;
     // 重载/重建后与主进程对齐初始穿透状态（渲染端默认整页穿透，mousemove 随后自动修正）
     window.electronAPI?.window.setIgnoreMouseEvents(true);
     const setIgnore = (v: boolean) => {
@@ -288,47 +321,60 @@ const App = () => {
       }
     };
     const onLeave = () => { if (!dragging) setIgnore(true); };
+    const onWheel = (e: WheelEvent) => {
+      // 防误触：需 Ctrl（macOS 触控板捏合为 ctrlKey，兼容 Cmd）；面板/UI 上不缩放
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const overUI = !!(e.target as Element | null)?.closest?.('[data-interactive]');
+      if (overUI || chatOpenRef.current || actionsOpenRef.current) return;
+      e.preventDefault();
+      wheelAccum += e.deltaY;
+      const now = performance.now();
+      if (Math.abs(wheelAccum) >= 100 && now - lastWheelZoomAt >= 120) {
+        void window.electronAPI?.window.zoomPet(wheelAccum < 0 ? 1 : -1);
+        wheelAccum = 0;
+        lastWheelZoomAt = now;
+      }
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mousedown', onDown);
     window.addEventListener('mouseup', onUp);
     window.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('wheel', onWheel, { passive: false });
     document.documentElement.addEventListener('mouseleave', onLeave);
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('contextmenu', onContextMenu);
+      window.removeEventListener('wheel', onWheel);
       document.documentElement.removeEventListener('mouseleave', onLeave);
       window.electronAPI?.window.endDrag();
     };
   }, []);
 
-  // Handle proactive greeting trigger from main process (8.4)
-  useEffect(() => {
-    const cleanup = window.electronAPI?.onGreetingTrigger(() => {
-      if (!chatOpen) {
-        handleToggleChat(true);
-      }
-      triggerGreeting();
-    });
-    return cleanup;
-  }, [chatOpen, triggerGreeting]);
-
   const handleToggleChat = useCallback(async (open: boolean) => {
-    await window.electronAPI?.window.toggleChat(open);
+    // ref 先于主进程 setBounds 置位，保证开合瞬间的 resize 事件按面板模式处理
     chatOpenRef.current = open;
+    if (open) actionsOpenRef.current = false;
+    await window.electronAPI?.window.toggleChat(open);
     setChatOpen(open);
-    if (open) setActionsOpen(false); // 与动作管理面板互斥
-  }, []);
+    if (open) {
+      setActionsOpen(false); // 与动作管理面板互斥
+      // 面板为 650x450 固定布局：画布回到基础宠物尺寸，避免被缩放后的大画布裁切
+      applyViewportRef.current?.(petSettings.width, petSettings.height);
+    }
+  }, [petSettings.width, petSettings.height]);
 
   const handleToggleActions = useCallback(async (open: boolean) => {
+    actionsOpenRef.current = open;
+    if (open) chatOpenRef.current = false;
     await window.electronAPI?.window.toggleActions(open);
     setActionsOpen(open);
     if (open) {
-      chatOpenRef.current = false;
       setChatOpen(false);
+      applyViewportRef.current?.(petSettings.width, petSettings.height);
     }
-  }, []);
+  }, [petSettings.width, petSettings.height]);
 
   // 动作列表加载 + 变更监听（删除正在播放的动作时立即停止并复位宠物；同步互动绑定供自动播放使用）
   useEffect(() => {
@@ -356,14 +402,23 @@ const App = () => {
     };
   }, [handleToggleActions]);
 
-  // 互动时自动播放动作：优先播放在资源库中绑定给该功能的动作，未绑定回退同名动作（喂食→吃饭、休息→休息、玩耍→玩耍）
+  // 互动时自动播放动作：统一走标准动作模型（src/shared/petPlayback）的决策——
+  // 绑定优先 → 互动池（不连播当前动作）→ 显式失败原因（不再静默"什么都不播"）。
+  // 池划分沿用配置迁移规则：显式 interaction 字段，其次历史同名约定（吃饭/休息/玩耍）。
   const autoPlayAction = useCallback((kind: 'feed' | 'rest' | 'play') => {
     const actions = petActionsRef.current;
-    const boundId = bindingsRef.current[kind];
-    const bound = boundId ? actions.find((a) => a.id === boundId) : undefined;
-    const fallbackName = kind === 'feed' ? '吃饭' : kind === 'rest' ? '休息' : '玩耍';
-    const action = bound ?? actions.find((a) => a.name === fallbackName);
-    if (action) playActionRef.current?.(action.id);
+    const currentId = playingActionIdRef.current;
+    const decision = resolveInteractionTrigger({
+      kind,
+      boundActionId: bindingsRef.current[kind],
+      actions,
+      currentActionName: currentId ? actions.find((a) => a.id === currentId)?.name : undefined,
+    });
+    if (!decision.ok || !decision.actionId) {
+      console.warn('[pet] 互动触发无可播动作：', decision.reason, decision.evidence);
+      return;
+    }
+    playActionRef.current?.(decision.actionId);
   }, []);
 
   // 右键宠物弹出的原生菜单动作（主进程 Menu 触发）
@@ -372,18 +427,31 @@ const App = () => {
       if (action === 'feed') { feed(); autoPlayAction('feed'); }
       else if (action === 'play') { play(); autoPlayAction('play'); }
       else if (action === 'rest') { rest(); autoPlayAction('rest'); }
-      else if (action === 'open-store') window.electronAPI?.platform.openStore();
+      // 资源中心入口由主进程直接开窗（右键菜单 → openStoreWindow），此处只处理宠物互动与聊天
       else if (action === 'toggle-chat') handleToggleChat(!chatOpenRef.current);
     });
     return cleanup;
   }, [feed, play, rest, handleToggleChat, autoPlayAction]);
 
+  // 配置广播：创作中心等其他窗口改动配置（智能体档案/音色等）后同步刷新本窗口
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onConfigChanged((next) =>
+      useChatStore.setState({ config: next }),
+    );
+    return () => cleanup?.();
+  }, []);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const { width, height } = petSettings;
+    // 视口尺寸：初始化取配置值；滚轮缩放时由各分支的 applyViewport 闭包就地更新。
+    // 用 let 而非解构 const：playAction/ticker 等后定义闭包即可始终读到最新画布尺寸，
+    // 缩放只走 renderer.resize，不重建 PIXI/three、不重载纹理、不重复触发形象识别。
+    let width = petSettings.width;
+    let height = petSettings.height;
     let app: PIXI.Application | null = null;
+    applyViewportRef.current = null;
     let isCancelled = false;
     let pet: PIXI.Sprite | null = null;
     // 帧序列/GIF 动作精灵（AnimatedSprite 或 GifSprite，二者均为 Sprite 子类）
@@ -577,6 +645,31 @@ const App = () => {
         const { hunger } = stateRef.current;
         pet.tint = hunger < 30 ? 0xaaaaaa : 0xffffff;
       });
+
+      // 滚轮缩放：渲染器原地 resize + 本体/动作精灵等比重排与命中框重算
+      applyViewportRef.current = (w, h) => {
+        if (!app) return;
+        width = w;
+        height = h;
+        app.renderer.resize(w, h);
+        if (pet) {
+          const fit = Math.min((w - pad * 2) / natW, (h - pad * 2) / natH);
+          pet.scale.set(fit);
+          pet.x = w / 2;
+          pet.y = h / 2;
+          const spriteW = natW * fit;
+          const spriteH = natH * fit;
+          setHitRect({ left: w / 2 - spriteW / 2, top: h / 2 - spriteH / 2, w: spriteW, h: spriteH });
+        }
+        if (actionSprite) {
+          const baseW = actionSprite.width / (Math.abs(actionSprite.scale.x) || 1);
+          const baseH = actionSprite.height / (Math.abs(actionSprite.scale.y) || 1);
+          const fit = Math.min((w - 60) / baseW, (h - 60) / baseH);
+          actionSprite.scale.set(fit);
+          actionSprite.x = w / 2;
+          actionSprite.y = h / 2;
+        }
+      };
     };
 
     // ---- three.js 3D 宠物（petAssetFormat === 'model3d'）：与 Pixi 渲染二选一 ----
@@ -666,25 +759,43 @@ const App = () => {
           idleAction.play();
         }
 
-        // 命中矩形：缩放居中后的包围盒 8 角投影到画布像素（3D 无像素图，矩形命中）
-        const wMin = new THREE.Vector3().subVectors(box.min, center).multiplyScalar(modelScale);
-        const wMax = new THREE.Vector3().subVectors(box.max, center).multiplyScalar(modelScale);
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const x of [wMin.x, wMax.x]) {
-          for (const y of [wMin.y, wMax.y]) {
-            for (const z of [wMin.z, wMax.z]) {
-              const p = new THREE.Vector3(x, y, z).project(camera);
-              const px = (p.x * 0.5 + 0.5) * width;
-              const py = (-p.y * 0.5 + 0.5) * height;
-              if (px < minX) minX = px;
-              if (px > maxX) maxX = px;
-              if (py < minY) minY = py;
-              if (py > maxY) maxY = py;
+        // 命中矩形：缩放居中后的包围盒 8 角投影到画布像素（3D 无像素图，矩形命中）。
+        // 抽为函数：滚轮缩放重设相机/模型比例后需用同一逻辑重算命中框。
+        const updateHitRect = (scaleNow: number) => {
+          const wMin = new THREE.Vector3().subVectors(box.min, center).multiplyScalar(scaleNow);
+          const wMax = new THREE.Vector3().subVectors(box.max, center).multiplyScalar(scaleNow);
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const x of [wMin.x, wMax.x]) {
+            for (const y of [wMin.y, wMax.y]) {
+              for (const z of [wMin.z, wMax.z]) {
+                const p = new THREE.Vector3(x, y, z).project(camera);
+                const px = (p.x * 0.5 + 0.5) * width;
+                const py = (-p.y * 0.5 + 0.5) * height;
+                if (px < minX) minX = px;
+                if (px > maxX) maxX = px;
+                if (py < minY) minY = py;
+                if (py > maxY) maxY = py;
+              }
             }
           }
-        }
-        setHitRect({ left: minX, top: minY, w: maxX - minX, h: maxY - minY });
+          setHitRect({ left: minX, top: minY, w: maxX - minX, h: maxY - minY });
+        };
+        updateHitRect(modelScale);
         hitAlphaRef.current = null;
+
+        // 滚轮缩放：渲染器/相机比例/模型缩放/命中框联动，不重新加载 GLTF
+        applyViewportRef.current = (w, h) => {
+          width = w;
+          height = h;
+          renderer.setSize(w, h);
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+          const visibleH = 2 * 5 * Math.tan((45 / 2) * (Math.PI / 180));
+          const ms = (visibleH * ((h - 60) / h)) / maxDim;
+          model.scale.setScalar(ms);
+          model.position.set(-center.x * ms, -center.y * ms, -center.z * ms);
+          updateHitRect(ms);
+        };
 
         // 形象导出闭包：手动渲染一帧后同步读取像素（规避 preserveDrawingBuffer 空帧问题）
         selfieExportRef.current = () => {
@@ -853,6 +964,30 @@ const App = () => {
         let liteFrames: PIXI.AnimatedSprite | null = null;
         const swayMotion = lite.model?.sway;
 
+        // 滚轮缩放：根容器/帧动作/命中框按新视口重排（ticker 的 sway 基准读外层 let width）
+        const reflowLite = (w: number, h: number) => {
+          if (!app) return;
+          app.renderer.resize(w, h);
+          const f = Math.min((w - 60) / modelW, (h - 60) / modelH);
+          root.scale.set(f);
+          root.position.set(w / 2, h / 2);
+          if (liteFrames) {
+            const baseW = liteFrames.width / (Math.abs(liteFrames.scale.x) || 1);
+            const baseH = liteFrames.height / (Math.abs(liteFrames.scale.y) || 1);
+            const ff = Math.min((w - 60) / baseW, (h - 60) / baseH);
+            liteFrames.scale.set(ff);
+            liteFrames.x = w / 2;
+            liteFrames.y = h / 2;
+          }
+          const bb = root.getBounds();
+          setHitRect({ left: bb.minX, top: bb.minY, w: bb.maxX - bb.minX, h: bb.maxY - bb.minY });
+        };
+        applyViewportRef.current = (w, h) => {
+          width = w;
+          height = h;
+          reflowLite(w, h);
+        };
+
         const removeLiteFrames = () => {
           if (!liteFrames) return;
           liteFrames.stop();
@@ -863,8 +998,7 @@ const App = () => {
         };
         const resetLiteRoot = () => {
           root.rotation = 0;
-          root.scale.set(fit);
-          root.position.set(width / 2, height / 2);
+          reflowLite(width, height);
         };
 
         app.ticker.add(() => {
@@ -973,8 +1107,11 @@ const App = () => {
           return;
         }
         model.anchor.set(0.5, 0.5);
+        // 本地基准尺寸（scale 写入前捕获，滚轮缩放按此重算比例）
+        const modelBaseW = model.width;
+        const modelBaseH = model.height;
         // 等比缩放居中（四周留白 30px）
-        const fit = Math.min((width - 60) / model.width, (height - 60) / model.height);
+        const fit = Math.min((width - 60) / modelBaseW, (height - 60) / modelBaseH);
         model.scale.set(fit);
         model.position.set(width / 2, height / 2);
         app.stage.addChild(model);
@@ -995,6 +1132,19 @@ const App = () => {
         const b = model.getBounds();
         setHitRect({ left: b.minX, top: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY });
         hitAlphaRef.current = null;
+
+        // 滚轮缩放：模型等比重排（Cubism 内部矩阵随 scale/position 自适应），不重新 from()
+        applyViewportRef.current = (w, h) => {
+          if (!app) return;
+          width = w;
+          height = h;
+          app.renderer.resize(w, h);
+          const fit = Math.min((w - 60) / modelBaseW, (h - 60) / modelBaseH);
+          model.scale.set(fit);
+          model.position.set(w / 2, h / 2);
+          const bb = model.getBounds();
+          setHitRect({ left: bb.minX, top: bb.minY, w: bb.maxX - bb.minX, h: bb.maxY - bb.minY });
+        };
 
         // clip 动作：clipName 为动作组名（可带 "/序号"），FORCE 优先级打断 idle 播放一次，
         // 播完由 Live2D 内部自动回落 idle 组；frames/transform 为 2D 覆盖动画，Live2D 宠物下忽略
@@ -1034,10 +1184,13 @@ const App = () => {
 
     const decayInterval = setInterval(() => {
       const f = featuresRef.current;
-      decay({ feed: f.feedEnabled, play: f.playEnabled, rest: f.restEnabled });
+      // 宠物状态总开关关闭时全部冻结（不衰减、数值锁定默认 80）
+      const on = petSystemRef.current;
+      const gates = { feed: on && f.feedEnabled, play: on && f.playEnabled, rest: on && f.restEnabled };
+      decay(gates);
       // 精力系统关闭：精力锁定默认值 80（低精力不再影响休息动画与漫步校验）
-      if (!f.restEnabled || !f.feedEnabled || !f.playEnabled) {
-        usePetStore.getState().resetVitals({ feed: f.feedEnabled, play: f.playEnabled, rest: f.restEnabled });
+      if (!gates.rest || !gates.feed || !gates.play) {
+        usePetStore.getState().resetVitals(gates);
       }
     }, 5000);
 
@@ -1047,6 +1200,7 @@ const App = () => {
       playActionRef.current = null;
       stopActionRef.current = null;
       selfieExportRef.current = null;
+      applyViewportRef.current = null;
       if (app) app.destroy(true);
       cleanupThree?.();
     };
@@ -1058,6 +1212,8 @@ const App = () => {
         width: '100%',
         height: '100%',
         display: 'flex',
+        // 固定窗 650x690：面板态内容 450 高贴窗底（顶部透明），宠物态舞台亦贴窗底
+        alignItems: 'flex-end',
         background: 'transparent',
         overflow: 'hidden',
         userSelect: 'none',
@@ -1065,14 +1221,14 @@ const App = () => {
     >
       {/* Chat Panel (left side, shown when chat is open) */}
       {chatOpen && (
-        <div data-interactive style={{ display: 'flex', height: '100%' }}>
+        <div data-interactive style={{ display: 'flex', height: CHAT_PANEL_H }}>
           <ChatPanel onClose={() => handleToggleChat(false)} />
         </div>
       )}
 
       {/* Actions Panel（动作管理：与聊天面板互斥、同尺寸机制） */}
       {actionsOpen && (
-        <div data-interactive style={{ display: 'flex', height: '100%' }}>
+        <div data-interactive style={{ display: 'flex', height: CHAT_PANEL_H }}>
           <ActionsPanel
             onClose={() => handleToggleActions(false)}
             onPlay={(id) => playActionRef.current?.(id)}
@@ -1085,13 +1241,17 @@ const App = () => {
         id="pet-stage"
         ref={containerRef}
         style={{
-          width: petSettings.width,
-          height: '100%',
+          // 宠物模式视觉 side（滚轮缩放经 IPC 实时变化）；面板模式固定基础宠物区宽
+          width: chatOpen || actionsOpen ? petSettings.width : stageSize.w,
+          // 宠物模式：视觉 side + 气泡预留带；面板模式：450 高内容贴窗底
+          height: chatOpen || actionsOpen ? CHAT_PANEL_H : stageSize.h + bubbleReserve,
           position: 'relative',
           flexShrink: 0,
           overflow: 'hidden',
-          // 气泡扩展时画布下移量：canvas 顶部 = 窗口底对齐偏移，宠物屏幕位置不变
-          ['--bubble-extra' as string]: `${bubbleExtra}px`,
+          // 宠物模式在固定 650 宽窗内水平居中（底边由父容器 align-items:flex-end 锁定）
+          margin: chatOpen || actionsOpen ? 0 : '0 auto',
+          // 画布顶部下移量：与 stage 顶部预留带等高，canvas 底边即 stage 底边
+          ['--bubble-extra' as string]: `${chatOpen || actionsOpen ? 0 : bubbleReserve}px`,
         } as React.CSSProperties}
       >
         {/* 智能体主动对话气泡（10s 自动消失，可手动关闭）：挂在宠物头顶居中，测量后钳制在窗口边界内 */}
@@ -1122,7 +1282,7 @@ const App = () => {
         )}
 
         {/* Status display（进度条随对应功能开关显隐：喂食→饱食、休息→精力、玩耍→心情） */}
-        {(petFeatures.feedEnabled || petFeatures.playEnabled || petFeatures.restEnabled || petFeatures.affectionEnabled) && (
+        {(petSystemEnabled && (petFeatures.feedEnabled || petFeatures.playEnabled || petFeatures.restEnabled || petFeatures.affectionEnabled)) && (
           <div style={statusStyle}>
             {petFeatures.feedEnabled && <span>饱:{Math.round(hunger)} </span>}
             {petFeatures.playEnabled && <span>心:{Math.round(mood)} </span>}
@@ -1133,8 +1293,8 @@ const App = () => {
 
         {/* 聊天与商店入口已移至右键菜单（pet:context-action） */}
 
-        {/* Action buttons（随互动功能开关显隐） */}
-        {petFeatures.feedEnabled && (
+        {/* Action buttons（随互动功能开关与宠物状态总开关显隐） */}
+        {petSystemEnabled && petFeatures.feedEnabled && (
           <button
             data-interactive
             onClick={(e) => {
@@ -1147,7 +1307,7 @@ const App = () => {
             喂食
           </button>
         )}
-        {petFeatures.restEnabled && (
+        {petSystemEnabled && petFeatures.restEnabled && (
           <button
             data-interactive
             onClick={(e) => {
@@ -1160,7 +1320,7 @@ const App = () => {
             休息
           </button>
         )}
-        {petFeatures.playEnabled && (
+        {petSystemEnabled && petFeatures.playEnabled && (
           <button
             data-interactive
             onClick={(e) => {

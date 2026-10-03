@@ -10,6 +10,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AgentsService } from '../agents/agents.service';
 import { PetsService } from '../pets/pets.service';
+import { VoicesService } from '../voices/voices.service';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -18,6 +19,7 @@ export class AdminController {
   constructor(
     private readonly petsService: PetsService,
     private readonly agentsService: AgentsService,
+    private readonly voicesService: VoicesService,
   ) {}
 
   @Post('approve/:type/:id')
@@ -36,11 +38,12 @@ export class AdminController {
     status: 'approved' | 'rejected',
   ) {
     // 动作随宠物审核，无独立审核入口
-    if (type !== 'pet' && type !== 'agent') {
-      throw new BadRequestException('资源类型必须是 pet 或 agent');
+    if (type !== 'pet' && type !== 'agent' && type !== 'voice') {
+      throw new BadRequestException('资源类型必须是 pet / agent / voice');
     }
 
     if (type === 'pet') return this.petsService.updateStatus(id, status);
+    if (type === 'voice') return this.voicesService.updateStatus(id, status);
     return this.agentsService.updateStatus(id, status);
   }
 }

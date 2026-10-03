@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "id": "sprout-cat",
+  "name": "芽芽猫",
+  "description": "薄荷绿的圆脸小猫，头上顶着一片嫩芽，安静又黏人。",
+  "author": "desktop-pet 项目组（程序化原创绘制）",
+  "license": "CC0-1.0（本项目自产）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "b380d83c79732299a1514a670582ddbc33943852e336a816063bc3d1a1a62ed3"
+  },
+  "actions": [
+    {
+      "id": "eat",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 6,
+      "frames": [
+        {
+          "file": "actions/eat/frame_000.png",
+          "sha256": "4a8fa1dbdaddc02a82a8e6bb7194b2e1107a2aadc1662f42e69c502f73ad34e7"
+        },
+        {
+          "file": "actions/eat/frame_001.png",
+          "sha256": "44da76721706097af5dc5931ad52c0bf84d4c254dadf40995aea626379af9271"
+        },
+        {
+          "file": "actions/eat/frame_002.png",
+          "sha256": "aee84cba8ad11f6d33e90fa276185d5177936cbca2353a75a3525b52db7200a4"
+        },
+        {
+          "file": "actions/eat/frame_003.png",
+          "sha256": "af0b58cc72ae55d50043d145415507a10a6486596e69da90bb092fde0ef60e40"
+        },
+        {
+          "file": "actions/eat/frame_004.png",
+          "sha256": "f1825f20147ecbdf9d56b50e5f61daa39f4501e655b5cb19a80d10919b58f4f1"
+        },
+        {
+          "file": "actions/eat/frame_005.png",
+          "sha256": "ba78378c5a5064561abb30a10cd5fb507a03f1c1ff5cb0f11a030125ce8c1aa0"
+        },
+        {
+          "file": "actions/eat/frame_006.png",
+          "sha256": "106b898c12943d3f0a94744417ecc5874c3a9d8a08034bc9f1417ce05a2f33f0"
+        },
+        {
+          "file": "actions/eat/frame_007.png",
+          "sha256": "4a8fa1dbdaddc02a82a8e6bb7194b2e1107a2aadc1662f42e69c502f73ad34e7"
+        }
+      ]
+    },
+    {
+      "id": "rest",
+      "name": "休息",
+      "interaction": "rest",
+      "frameRate": 4,
+      "frames": [
+        {
+          "file": "actions/rest/frame_000.png",
+          "sha256": "4a8fa1dbdaddc02a82a8e6bb7194b2e1107a2aadc1662f42e69c502f73ad34e7"
+        },
+        {
+          "file": "actions/rest/frame_001.png",
+          "sha256": "022c09717acd5333a0e84f8c7daaed431f89f1a9e95c1523986228cfde97da21"
+        },
+        {
+          "file": "actions/rest/frame_002.png",
+          "sha256": "b4e92cb4fb28e6f2cf311ede2b6f23bcace55a2ef08e58e8dedd1b512843f1bc"
+        },
+        {
+          "file": "actions/rest/frame_003.png",
+          "sha256": "9bd5e2d9c018cc87041449efb8e35f3962f4ab4b5abca0480bc992297d45f6cb"
+        },
+        {
+          "file": "actions/rest/frame_004.png",
+          "sha256": "d53d42deb974f652fd3c0e2181161e3dd932d89a81d4a2fedfda0176bbf4fb91"
+        },
+        {
+          "file": "actions/rest/frame_005.png",
+          "sha256": "eda2e6b37d5736c0a666f1755472a325eaf0861a84346ef1949204af46160dfe"
+        },
+        {
+          "file": "actions/rest/frame_006.png",
+          "sha256": "9061b5884b8e1cd4303569cd7f2a079e012f62020d7e981d301b07cec02eb317"
+        },
+        {
+          "file": "actions/rest/frame_007.png",
+          "sha256": "4a8fa1dbdaddc02a82a8e6bb7194b2e1107a2aadc1662f42e69c502f73ad34e7"
+        }
+      ]
+    },
+    {
+      "id": "play",
+      "name": "玩耍",
+      "interaction": "play",
+      "frameRate": 6,
+      "frames": [
+        {
+          "file": "actions/play/frame_000.png",
+          "sha256": "4a8fa1dbdaddc02a82a8e6bb7194b2e1107a2aadc1662f42e69c502f73ad34e7"
+        },
+        {
+          "file": "actions/play/frame_001.png",
+          "sha256": "98267a3a0de38d327e9ba1317eec4e02c921186d98f50af25ee1513ecaf4e1d2"
+        },
+        {
+          "file": "actions/play/frame_002.png",
+          "sha256": "ca65987ac1e7c3a12ffb4fa75f83811945150b8fbe0982ed8be99458d1471f1b"
+        },
+        {
+          "file": "actions/play/frame_003.png",
+          "sha256": "6f2b113bfa8f86dacb587c74b944de9e52368b8260f07356b0fc3b571ee81c23"
+        },
+        {
+          "file": "actions/play/frame_004.png",
+          "sha256": "5231357aecfe486f913a175a0164e9e3a8b6e1041d14b532637f2546e7dabf55"
+        },
+        {
+          "file": "actions/play/frame_005.png",
+          "sha256": "9904b07fee2ff0f5e667b7f26e82b57f52ba9d58607790f99dd63335a0c90744"
+        },
+        {
+          "file": "actions/play/frame_006.png",
+          "sha256": "0510a9ec040cae10f2eb2d83ea046ba404313dc0830af5b56bcb99f58f06635a"
+        },
+        {
+          "file": "actions/play/frame_007.png",
+          "sha256": "4a8fa1dbdaddc02a82a8e6bb7194b2e1107a2aadc1662f42e69c502f73ad34e7"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "procedural",
+    "generator": "scripts/build-builtin-pets.mjs",
+    "version": "1.0.0",
+    "seed": 20261002,
+    "generatedAt": "2026-10-02"
+  }
+}

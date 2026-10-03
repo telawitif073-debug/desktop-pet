@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "id": "cloud-rabbit",
+  "name": "云朵兔",
+  "description": "奶白微蓝的长耳兔，尾巴是一团蓬松的云，最擅长打盹。",
+  "author": "desktop-pet 项目组（程序化原创绘制）",
+  "license": "CC0-1.0（本项目自产）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "95312a4366ffd6f5e25e9b44d0d406587b6b97af7ddc46ac5aacbd2b36ecebfb"
+  },
+  "actions": [
+    {
+      "id": "eat",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 6,
+      "frames": [
+        {
+          "file": "actions/eat/frame_000.png",
+          "sha256": "53b1161da9067f44ce4cd2f8772ec260473393c2d155348fd9400ee76a897662"
+        },
+        {
+          "file": "actions/eat/frame_001.png",
+          "sha256": "251959a7946fdace249f6c3d2995b3d35c0b7d52c163cd92c41e8ce29c24da13"
+        },
+        {
+          "file": "actions/eat/frame_002.png",
+          "sha256": "4677be6705b8595223cf885b2ff6b79085639768f3bf8254695d1e685b91a7a1"
+        },
+        {
+          "file": "actions/eat/frame_003.png",
+          "sha256": "4913b36990a21cc27ea0b147cdee42f8467655c600fbdeae391d2394017c2fbb"
+        },
+        {
+          "file": "actions/eat/frame_004.png",
+          "sha256": "915edf5882f269f0581a219a22f2f77a1ab8ace9f430335583f036a7387852ed"
+        },
+        {
+          "file": "actions/eat/frame_005.png",
+          "sha256": "14743b99930fe79607ee3e86599d196b30528313a5bb6c1d7237d0b8ce8c9b11"
+        },
+        {
+          "file": "actions/eat/frame_006.png",
+          "sha256": "fe6952d6d28a000d8d340f8abf68c030c241b0f6d0e57919464c1d520c30b75f"
+        },
+        {
+          "file": "actions/eat/frame_007.png",
+          "sha256": "53b1161da9067f44ce4cd2f8772ec260473393c2d155348fd9400ee76a897662"
+        }
+      ]
+    },
+    {
+      "id": "rest",
+      "name": "休息",
+      "interaction": "rest",
+      "frameRate": 4,
+      "frames": [
+        {
+          "file": "actions/rest/frame_000.png",
+          "sha256": "53b1161da9067f44ce4cd2f8772ec260473393c2d155348fd9400ee76a897662"
+        },
+        {
+          "file": "actions/rest/frame_001.png",
+          "sha256": "452c1440846c435cde8957ac445f85869c2c24ece481f373c12e261d0ca8e596"
+        },
+        {
+          "file": "actions/rest/frame_002.png",
+          "sha256": "9d629a094f9d3c867e7865f0300a91b0700e3cdd4abcf85d65e926c956c1638c"
+        },
+        {
+          "file": "actions/rest/frame_003.png",
+          "sha256": "737e5ba82f5e8c6dcc0dc5d568e2e624a01dc20b805cd5d537bfacae0f887540"
+        },
+        {
+          "file": "actions/rest/frame_004.png",
+          "sha256": "c57fbf9f7e22a77941c266aa081bf545d1d630f4f7a755e7a80284491ab02ee4"
+        },
+        {
+          "file": "actions/rest/frame_005.png",
+          "sha256": "1ba16eeffef174eee88cf01a882e2a43d1b184b28b64f15e02c97717db698de0"
+        },
+        {
+          "file": "actions/rest/frame_006.png",
+          "sha256": "2252c27aed5f65a7e8a7f17db58001d22655236926aeedc68a0e1701396d7810"
+        },
+        {
+          "file": "actions/rest/frame_007.png",
+          "sha256": "53b1161da9067f44ce4cd2f8772ec260473393c2d155348fd9400ee76a897662"
+        }
+      ]
+    },
+    {
+      "id": "play",
+      "name": "玩耍",
+      "interaction": "play",
+      "frameRate": 6,
+      "frames": [
+        {
+          "file": "actions/play/frame_000.png",
+          "sha256": "53b1161da9067f44ce4cd2f8772ec260473393c2d155348fd9400ee76a897662"
+        },
+        {
+          "file": "actions/play/frame_001.png",
+          "sha256": "e4fc478efddf5db3474094e1070dc2e0e171a0a54d4c45f947b29ac8a275891d"
+        },
+        {
+          "file": "actions/play/frame_002.png",
+          "sha256": "c4d1ab857038bd7a1d6b2d2cf7de8833ecdec090fd07c1f769b23398f47d0472"
+        },
+        {
+          "file": "actions/play/frame_003.png",
+          "sha256": "5413d208eff7930d3feb1d46b674f1cc9c75b72c11a4ebb27c3cf643cb4db902"
+        },
+        {
+          "file": "actions/play/frame_004.png",
+          "sha256": "8217c5f3365eedd72e3900e28771129a92637dcbf839ebdbd7ad195cf1f5a63c"
+        },
+        {
+          "file": "actions/play/frame_005.png",
+          "sha256": "e234113e95ee31f0d702611d9693609b774f7c06483abf4a5da79185187a3a27"
+        },
+        {
+          "file": "actions/play/frame_006.png",
+          "sha256": "cb4947ddee224c0b28040e0d7603f8d2d5b39d2a5cf725177ca700b267bd39b1"
+        },
+        {
+          "file": "actions/play/frame_007.png",
+          "sha256": "53b1161da9067f44ce4cd2f8772ec260473393c2d155348fd9400ee76a897662"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "procedural",
+    "generator": "scripts/build-builtin-pets.mjs",
+    "version": "1.0.0",
+    "seed": 20261003,
+    "generatedAt": "2026-10-02"
+  }
+}

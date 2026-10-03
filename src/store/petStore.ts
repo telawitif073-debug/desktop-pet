@@ -20,6 +20,10 @@ interface PetState {
   resetVitals: (gates: { feed: boolean; play: boolean; rest: boolean }) => void;
   load: (state: Partial<PetState>) => void; // 加载持久化数据
   setMoving: (v: boolean) => void; // 漫步状态回报（pet:wander-state）
+  /** 聊天联动：按情绪词调整心情（±8），随 localStorage 持久化 */
+  adjustMood: (delta: number) => void;
+  /** 聊天联动：有效回复好感 +1（与喂食/玩耍同口径的固定增长） */
+  addAffection: (amount: number) => void;
 }
 
 // 从 localStorage 读取初始状态
@@ -33,6 +37,18 @@ const loadPersistedState = (): Partial<PetState> => {
 };
 
 const initialPersisted = loadPersistedState();
+
+/** 四维数值落盘（聊天联动等增量调整复用；写入失败忽略，不影响内存状态） */
+const persistVitals = (s: Pick<PetState, 'hunger' | 'mood' | 'energy' | 'affection'>): void => {
+  try {
+    localStorage.setItem(
+      'pet-state',
+      JSON.stringify({ hunger: s.hunger, mood: s.mood, energy: s.energy, affection: s.affection })
+    );
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+};
 
 export const usePetStore = create<PetState>((set) => ({
   hunger: initialPersisted.hunger ?? 80,
@@ -123,4 +139,16 @@ export const usePetStore = create<PetState>((set) => ({
   load: (state) => set((s) => ({ ...s, ...state })),
 
   setMoving: (v) => set((s) => (s.moving === v ? s : { ...s, moving: v })),
+
+  adjustMood: (delta) => set((s) => {
+    const next = { ...s, mood: Math.min(100, Math.max(0, s.mood + delta)) };
+    persistVitals(next);
+    return next;
+  }),
+
+  addAffection: (amount) => set((s) => {
+    const next = { ...s, affection: Math.min(100, Math.max(0, s.affection + amount)) };
+    persistVitals(next);
+    return next;
+  }),
 }));

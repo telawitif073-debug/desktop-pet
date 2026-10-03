@@ -7,7 +7,7 @@ import { UserSyncData, SyncKind } from './user-sync-data.entity';
 import { DownloadRecord } from '../reviews/download-record.entity';
 
 interface LibraryItem {
-  assetType: 'pet' | 'agent';
+  assetType: 'pet' | 'agent' | 'voice';
   assetId: string;
   downloadedAt: Date;
 }
@@ -133,10 +133,18 @@ export class SyncService {
         return next;
       });
     }
+    // 云 TTS 凭证（音色合成用，与 LLM apiKey 同级敏感）
+    const tts = clone.ttsCloudConfig;
+    if (tts && typeof tts === 'object') {
+      const t = tts as Record<string, unknown>;
+      if (typeof t.apiKey === 'string' && t.apiKey && !this.isCiphertext(t.apiKey)) {
+        clone.ttsCloudConfig = { ...t, apiKey: this.encryptString(t.apiKey) };
+      }
+    }
     return clone;
   }
 
-  /** 响应前：解密 config 中的敏感字段（apiKey 与 multiConfig.credentials 的密文还原为明文） */
+  /** 响应前：解密 config 中的敏感字段（apiKey / 云 TTS Key / multiConfig.credentials） */
   private unprotectConfig(data: unknown): unknown {
     if (!data || typeof data !== 'object') return data;
     const clone = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
@@ -157,6 +165,13 @@ export class SyncService {
         }
         return next;
       });
+    }
+    const tts = clone.ttsCloudConfig;
+    if (tts && typeof tts === 'object') {
+      const t = tts as Record<string, unknown>;
+      if (typeof t.apiKey === 'string' && this.isCiphertext(t.apiKey)) {
+        clone.ttsCloudConfig = { ...t, apiKey: this.decryptString(t.apiKey) };
+      }
     }
     return clone;
   }

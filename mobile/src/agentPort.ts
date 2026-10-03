@@ -2,7 +2,14 @@
  *  导出剥离凭证（apiKey/本地 id/绑定形象/凭证值）；导入按名称合并；
  *  多智能体：解析 YAML/JSON → 识别编排结构 → 提取外部依赖（${VAR}/{{VAR}}/env:/secret:）→ 占位符替换为内部引用 cred://dep_N。
  */
-import type { LlmProfile, AgentMultiConfig, MultiAgentDependency } from './types';
+import type {
+  LlmProfile,
+  AgentCapabilityKind,
+  AgentCapabilitySpec,
+  AgentMultiConfig,
+  MultiAgentDependency,
+} from './types';
+import { detectCapabilities, type CapabilityDetection } from './petCapabilities';
 
 /** 导出文件结构：type 标识 + profiles（无密钥） */
 export interface AgentExportFile {
@@ -26,6 +33,8 @@ export interface NormalizedAgent {
   greeting: string;
   exampleQuestions: string[];
   apiKey: string;
+  /** 从该条 JSON 检测到的自带能力（导入时询问用户是否添加，见 petCapabilities.ts） */
+  detection?: CapabilityDetection;
   enabled: boolean;
 }
 
@@ -34,6 +43,21 @@ export interface ImportOutcome {
   added: number;
   updated: number;
   missingKeys: number;
+  /** 检测到自带能力、等待用户确认是否添加的智能体（导入后弹「为这个智能体添加能力」，见 ChatScreen） */
+  capabilityOffers?: CapabilityOffer[];
+}
+
+/** 待确认的能力添加项：某智能体检测到的能力清单 + 规格（含尚未启用的种类） */
+export interface CapabilityOffer {
+  profileId: string;
+  name: string;
+  /** 可添加的能力种类 */
+  kinds: AgentCapabilityKind[];
+  /** 其中已经启用的（用户之前选过，默认勾选且可取消） */
+  enabled: AgentCapabilityKind[];
+  spec: AgentCapabilitySpec;
+  /** 检测依据（展示用） */
+  reasons: string[];
 }
 
 /** 导出：剥离 apiKey / id / petAssetId / 凭证值，保留可移植的文本与展示字段 */
@@ -91,25 +115,89 @@ function str(v: unknown, fallback = ''): string {
   return v == null ? fallback : String(v).trim();
 }
 
-/** 解析并校验导入文本：兼容数组 / {profiles} / {llmProfiles} 三种形状 */
+// ────────────────────────────────────────────────────────────────────────
+// 人设卡（角色卡）识别：{agent_name, persona:{species/age/tone/catchphrases},
+// active_execution, example_tasks} 这类 AI 生成的「角色人设」JSON 没有 name/
+// baseUrl/model 等 API 字段，导入时把它们映射成标准智能体条目：
+// agent_name → name，persona → systemPrompt/role/style/greeting，
+// example_tasks[].user_input → exampleQuestions；显式字段（name/systemPrompt/
+// baseUrl/model/…）优先级更高，人设对象仅在缺失时兜底生成。
+// ────────────────────────────────────────────────────────────────────────
+
+/** 是否人设卡形状：带 agent_name，或带 persona 对象 */
+export function isPersonaCard(o: Record<string, unknown>): boolean {
+  return typeof o.agent_name === 'string' || (!!o.persona && typeof o.persona === 'object');
+}
+
+/** 从 persona 对象拼出人设系统提示词（species 身份 + age + tone 性格 + catchphrases 口头禅） */
+export function personaToPrompt(raw: Record<string, unknown>): string {
+  const p = (raw.persona && typeof raw.persona === 'object' ? raw.persona : {}) as Record<string, unknown>;
+  const parts: string[] = [];
+  const species = str(p.species);
+  if (species) parts.push(`你是${species}。`);
+  if (str(p.age)) parts.push(`年龄：${str(p.age)}。`);
+  const tone = toStrArr(p.tone);
+  if (tone.length) parts.push(`性格特征：${tone.join('、')}。`);
+  const cps = toStrArr(p.catchphrases);
+  if (cps.length) parts.push(`常说的口头禅：「${cps.join('」「')}」。`);
+  return parts.join('\n');
+}
+
+/** 人设卡 → 标准智能体条目；缺名字（name/agent_name 均无）返回 null */
+export function personaCardToAgent(o: Record<string, unknown>): NormalizedAgent | null {
+  const name = str(o.name) || str(o.agent_name);
+  if (!name) return null;
+  const p = (o.persona && typeof o.persona === 'object' ? o.persona : {}) as Record<string, unknown>;
+  const prompt = str(o.systemPrompt) || personaToPrompt(o);
+  const cps = toStrArr(p.catchphrases);
+  const tasks = Array.isArray(o.example_tasks) ? o.example_tasks : [];
+  const explicitQs = toStrArr(o.exampleQuestions ?? o.questions);
+  return {
+    name,
+    baseUrl: str(o.baseUrl),
+    model: str(o.model),
+    systemPrompt: prompt,
+    avatar: str(o.avatar),
+    intro: str(o.intro),
+    domainTags: toStrArr(o.domainTags ?? o.tags),
+    role: str(o.role) || str(p.species),
+    style: str(o.style) || toStrArr(p.tone).join('、'),
+    greeting: str(o.greeting) || (cps[0] ?? ''),
+    exampleQuestions: explicitQs.length
+      ? explicitQs
+      : tasks
+          .map((t) => (t && typeof t === 'object' ? str((t as Record<string, unknown>).user_input) : ''))
+          .filter((x) => x.length > 0),
+    apiKey: str(o.apiKey),
+    enabled: o.enabled !== false,
+  };
+}
+
+/** 解析并校验导入文本：兼容数组 / {profiles} / {llmProfiles} 三种形状，以及人设卡（agent_name/persona） */
 export function normalizeAgentText(
   text: string,
 ): { ok: true; items: NormalizedAgent[]; skipped: number } | { ok: false; error: string } {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    // 先自动截取可用配置：兼容代码块围栏包裹与前后夹带说明文字
+    raw = JSON.parse(extractConfigText(text));
   } catch {
     return { ok: false, error: '不是合法的 JSON 文本，请检查内容' };
   }
   let arr: unknown[];
   if (Array.isArray(raw)) {
     arr = raw;
-  } else if (raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).profiles)) {
-    arr = (raw as { profiles: unknown[] }).profiles;
-  } else if (raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).llmProfiles)) {
-    arr = (raw as { llmProfiles: unknown[] }).llmProfiles;
+  } else if (raw && typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    if (Array.isArray(o.profiles)) arr = o.profiles;
+    else if (Array.isArray(o.llmProfiles)) arr = o.llmProfiles;
+    // 单条人设卡（agent_name / persona）：作为一条智能体导入
+    else if (isPersonaCard(o)) arr = [raw];
+    else {
+      return { ok: false, error: '格式无法识别：应为智能体数组，或含 profiles / llmProfiles 字段的对象，或人设卡（agent_name / persona）' };
+    }
   } else {
-    return { ok: false, error: '格式无法识别：应为智能体数组，或含 profiles / llmProfiles 字段的对象' };
+    return { ok: false, error: '格式无法识别：应为智能体数组，或含 profiles / llmProfiles 字段的对象，或人设卡（agent_name / persona）' };
   }
   const items: NormalizedAgent[] = [];
   let skipped = 0;
@@ -119,12 +207,18 @@ export function normalizeAgentText(
       continue;
     }
     const o = it as Record<string, unknown>;
-    const name = str(o.name);
+    const isCard = isPersonaCard(o);
+    const agent = isCard ? personaCardToAgent(o) : null;
+    const name = agent?.name ?? str(o.name);
     const baseUrl = str(o.baseUrl);
     const model = str(o.model);
-    // 缺必要字段的条目跳过（不阻塞整批导入）
-    if (!name || !baseUrl || !model) {
+    // 标准条目要求 name/baseUrl/model；人设卡只要求名字（对话 API 可在编辑中补全，与无 Key 导入同流程）
+    if (!name || (!isCard && (!baseUrl || !model))) {
       skipped += 1;
+      continue;
+    }
+    if (agent) {
+      items.push({ ...agent, detection: detectCapabilities(o) });
       continue;
     }
     items.push({
@@ -134,29 +228,36 @@ export function normalizeAgentText(
       systemPrompt: str(o.systemPrompt),
       avatar: str(o.avatar),
       intro: str(o.intro),
-      domainTags: toStrArr(o.domainTags),
+      domainTags: toStrArr(o.domainTags ?? o.tags),
       role: str(o.role),
       style: str(o.style),
       greeting: str(o.greeting),
       exampleQuestions: toStrArr(o.exampleQuestions),
       apiKey: str(o.apiKey),
+      detection: detectCapabilities(o),
       enabled: o.enabled !== false,
     });
   }
   return { ok: true, items, skipped };
 }
 
-/** 合并：同名视为更新（保留本地 id/apiKey/绑定形象/启停与对话），新名称追加为新智能体（不切换激活） */
+/** 合并：同名视为更新（保留本地 id/apiKey/绑定形象/启停与对话），新名称追加为新智能体（不切换激活）
+ *  自带能力：检测结果写入档案的 capabilities.spec（enabled 留空，由导入弹窗询问用户后启用）；
+ *  同名更新时保留用户此前已启用的能力选择，仅刷新规格。 */
 export function mergeImportedProfiles(current: LlmProfile[], items: NormalizedAgent[]): ImportOutcome {
   const list = [...current];
+  const offers: CapabilityOffer[] = [];
   let added = 0;
   let updated = 0;
   let missingKeys = 0;
   for (const inc of items) {
     if (!inc.apiKey) missingKeys += 1;
+    const detected = inc.detection;
     const idx = list.findIndex((p) => p.name === inc.name);
     if (idx >= 0) {
       const cur = list[idx];
+      const curEnabled = cur.capabilities?.enabled ?? [];
+      const nextSpec = detected?.spec ?? cur.capabilities?.spec;
       list[idx] = {
         ...cur,
         name: inc.name,
@@ -170,7 +271,20 @@ export function mergeImportedProfiles(current: LlmProfile[], items: NormalizedAg
         style: inc.style || cur.style,
         greeting: inc.greeting || cur.greeting,
         exampleQuestions: inc.exampleQuestions.length ? inc.exampleQuestions : cur.exampleQuestions,
+        ...(nextSpec || curEnabled.length
+          ? { capabilities: { enabled: curEnabled, spec: nextSpec ?? { source: 'manual' as const } } }
+          : {}),
       };
+      if (detected?.kinds.length) {
+        offers.push({
+          profileId: cur.id,
+          name: inc.name,
+          kinds: detected.kinds,
+          enabled: curEnabled,
+          spec: nextSpec ?? detected.spec,
+          reasons: detected.reasons,
+        });
+      }
       updated += 1;
     } else {
       const id = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -189,11 +303,22 @@ export function mergeImportedProfiles(current: LlmProfile[], items: NormalizedAg
         greeting: inc.greeting,
         exampleQuestions: inc.exampleQuestions,
         enabled: inc.enabled,
+        ...(detected?.kinds.length ? { capabilities: { enabled: [], spec: detected.spec } } : {}),
       });
+      if (detected?.kinds.length) {
+        offers.push({
+          profileId: id,
+          name: inc.name,
+          kinds: detected.kinds,
+          enabled: [],
+          spec: detected.spec,
+          reasons: detected.reasons,
+        });
+      }
       added += 1;
     }
   }
-  return { list, added, updated, missingKeys };
+  return { list, added, updated, missingKeys, ...(offers.length ? { capabilityOffers: offers } : {}) };
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -230,9 +355,34 @@ export function yamlParseLite(text: string): ConfigParseOutcome {
   }
 }
 
-/** 解析入口：先试 JSON，再试 YAML 子集 */
+/** 从粘贴文本中自动截取「可用配置」：
+ *  1) 去掉 Markdown 代码块围栏（```json … ``` / ~~~ … ~~~），正文中夹带的代码块也提取其内容；
+ *  2) 去掉配置前后的说明文字——从第一个 { 或 [ 截到最后一个 } 或 ]。
+ *  这样用户直接整段粘贴（含围栏、含说明）也能解析，不必手工裁剪。
+ */
+export function extractConfigText(text: string): string {
+  let s = (text ?? '').replace(/\r\n?/g, '\n').trim();
+  if (!s) return '';
+  // 整段就是一个代码块：取块内内容
+  const whole = s.match(/^(?:```|~~~)[^\n]*\n([\s\S]*?)\n?(?:```|~~~)\s*$/);
+  if (whole) s = whole[1].trim();
+  else {
+    // 正文中夹带代码块：取第一个代码块的内容
+    const inner = s.match(/(?:```|~~~)[^\n]*\n([\s\S]*?)\n?(?:```|~~~)/);
+    if (inner) s = inner[1].trim();
+  }
+  // 截取最外层 JSON 对象 / 数组（去掉前后说明文字）
+  const objStart = s.indexOf('{');
+  const arrStart = s.indexOf('[');
+  const start = objStart < 0 ? arrStart : arrStart < 0 ? objStart : Math.min(objStart, arrStart);
+  if (start < 0) return s;
+  const end = s.lastIndexOf(s[start] === '{' ? '}' : ']');
+  return end > start ? s.slice(start, end + 1).trim() : s.slice(start).trim();
+}
+
+/** 解析入口：先自动截取可用配置，再试 JSON，最后试 YAML 子集 */
 export function parseConfigText(text: string): ConfigParseOutcome {
-  const trimmed = (text ?? '').trim();
+  const trimmed = extractConfigText(text);
   if (!trimmed) return { ok: false, error: '配置为空' };
   const json = tryParseJson(trimmed);
   if (json.ok) return json;

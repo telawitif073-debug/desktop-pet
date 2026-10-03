@@ -5,7 +5,7 @@
  */
 import { isConfigured, streamChat } from './llm';
 import { scheduleUpload } from '../api/sync';
-import { speak } from '../native/Voice';
+import { speakReply } from '../voiceEngine';
 import { useAppStore } from '../store/appStore';
 import type { ChatMsg } from '../types';
 
@@ -55,7 +55,7 @@ export function petInteract(action: PetAction): void {
       cur.patchMessage(id, patch);
       const st = useAppStore.getState();
       if (st.ttsEnabled) {
-        void speak(content, { rate: st.speechRate, pitch: st.speechPitch, voice: st.speechVoice || undefined });
+        void speakReply(content);
       }
     })
     .catch(() => {

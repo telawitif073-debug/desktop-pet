@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "rainnoon-oc-claw-website-pets-2",
+  "name": "oc-claw · website/pets",
+  "description": "来自 GitHub 开源项目 rainnoon/oc-claw 的美术资源（website/pets），经并集包围盒归一化后导入；原素材 2 段动画、8 帧。",
+  "author": "rainnoon/oc-claw 上游作者（GitHub）",
+  "license": "NOASSERTION — 上游 rainnoon/oc-claw（仓库级未声明，但根目录许可文件为宽松许可：MIT）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "081e36891f980dd9077a1f0232cc913c0360695f46be08d937a4b15ab8ed4ed9"
+  },
+  "actions": [
+    {
+      "id": "rest-qiqi-sleeping",
+      "name": "休息",
+      "interaction": "rest",
+      "frameRate": 2.0,
+      "frames": [
+        {
+          "file": "actions/rest-qiqi-sleeping/frame_000.png",
+          "sha256": "3be1ab238ef499ee2cbf502f16575b9d5bf165bfb21e11eb3fe46c4051951f21"
+        },
+        {
+          "file": "actions/rest-qiqi-sleeping/frame_001.png",
+          "sha256": "1d346b00059c46d972088a00ea7e92154eb1f5689504dd461d6117355262c884"
+        },
+        {
+          "file": "actions/rest-qiqi-sleeping/frame_002.png",
+          "sha256": "bf8c9406b05e77e8d7dcb3f524b22d9bd3a7e84954822b2866142ef1b9ce9f81"
+        },
+        {
+          "file": "actions/rest-qiqi-sleeping/frame_003.png",
+          "sha256": "657a15c5754f3b770a7e28b6da9796704acb397571be6e910dc65110430646c4"
+        }
+      ]
+    },
+    {
+      "id": "feed-qiqi-working",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 2.0,
+      "frames": [
+        {
+          "file": "actions/feed-qiqi-working/frame_000.png",
+          "sha256": "59713099c572b00fd79895a5689560fbb90a5a26eb5e5aad1d305eadb220c385"
+        },
+        {
+          "file": "actions/feed-qiqi-working/frame_001.png",
+          "sha256": "1aa33c24c293f5186cd4d1476fd8eb7e43d1fa1ba524f0f5f82cb3bc4ecd3f8d"
+        },
+        {
+          "file": "actions/feed-qiqi-working/frame_002.png",
+          "sha256": "b70432ca1938427e26cf0996c8aba86b9334e84e477b4c6ff02c5525bb41f203"
+        },
+        {
+          "file": "actions/feed-qiqi-working/frame_003.png",
+          "sha256": "c3d06580ba0ff0d0daa63771978a2b2eff9983ccfbb93c7d36a6689cd25b4503"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "rainnoon/oc-claw",
+    "url": "https://github.com/rainnoon/oc-claw",
+    "stars": 351,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.290988,
+    "rank": 101,
+    "license": "NOASSERTION",
+    "licenseTier": "A",
+    "licenseReason": "仓库级未声明，但根目录许可文件为宽松许可：MIT",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "website/public/images/pets/qiqi_sleeping.gif#frame0",
+    "actionSources": [
+      {
+        "action": "rest-qiqi-sleeping",
+        "interaction": "rest",
+        "sourcePath": "website/public/images/pets/qiqi_sleeping.gif",
+        "sourceFiles": [
+          "website/public/images/pets/qiqi_sleeping.gif"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 2.0,
+        "normalizeMode": "alpha",
+        "scale": 2.539326,
+        "sampled": false
+      },
+      {
+        "action": "feed-qiqi-working",
+        "interaction": "feed",
+        "sourcePath": "website/public/images/pets/qiqi_working.gif",
+        "sourceFiles": [
+          "website/public/images/pets/qiqi_working.gif"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 2.0,
+        "normalizeMode": "alpha",
+        "scale": 2.164103,
+        "sampled": false
+      }
+    ]
+  }
+}

@@ -10,6 +10,10 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    // 内置演示宠物资源：随包分发到 process.resourcesPath/builtin-pets（asar 之外，
+    // 主进程需直接读字节：拷帧图进 userData/pet-actions 并回传形象 dataUrl）
+    // 上游美术资源库同理：静态素材在主进程读字节回传 dataUrl，需在 asar 之外
+    extraResource: ['./resources/builtin-pets', './resources/pet-asset-library'],
   },
   rebuildConfig: {},
   makers: [

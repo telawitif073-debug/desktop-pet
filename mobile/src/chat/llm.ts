@@ -4,7 +4,20 @@
  */
 import { useAppStore } from '../store/appStore';
 import type { ChatMsg, LlmProfile, PetState } from '../types';
-import { ensureMultiSession, multiChatSend } from '../api/platform';
+import { ensureMultiSession, multiChatSend, toolFootball, toolStock, toolWeather } from '../api/platform';
+import { buildTaskProtocolPrompt } from '../petCapabilities';
+import { buildSearchResultPrompt, buildWebPrompt, extractSearchQuery, runWebSearch } from '../webSearch';
+import {
+  buildSkillsPrompt,
+  extractSkillCall,
+  normalizeFootballDate,
+  parseWeatherArg,
+  SKILL_KINDS,
+  stripSkillDirectives,
+  stripUnclosedToolTail,
+  type SkillCall,
+  type SkillKind,
+} from '../skills';
 
 const DEFAULT_SYSTEM = '你是一只可爱的桌面宠物，说话简短活泼、口语化，单次回复尽量不超过 80 字。';
 
@@ -20,6 +33,13 @@ function describePetState(state: PetState): string {
   if (state.affection > 80) parts.push('和主人很亲近');
   else if (state.affection < 20) parts.push('还不太熟悉主人');
   return parts.join('，');
+}
+
+/** 仅好感度 → 自然语言描述（状态功能关闭时使用，空串表示关系平淡） */
+function describeAffection(state: PetState): string {
+  if (state.affection > 80) return '和主人很亲近';
+  if (state.affection < 20) return '还不太熟悉主人';
+  return '';
 }
 
 export function activeProfile(): LlmProfile | null {
@@ -53,11 +73,31 @@ function buildSystemPrompt(): string {
   if (petName && petName !== '小宠') parts.push(`你的名字叫「${petName}」，用户会用这个名字称呼你。`);
   if (userNickname.trim()) parts.push(`请用「${userNickname.trim()}」来称呼用户。`);
   if (petSelfDescription) parts.push(`你的形象：${petSelfDescription}`);
-  // 宠物状态实装：状态注入提示词，智能体语气随状态变化（开关关闭时三项固定 80，好感度始终真实）
+  // 宠物状态实装：状态注入提示词，智能体语气随状态变化。
+  // 状态功能关闭时不再注入任何饥饿/心情/精力信息（智能体不知道饿不饿，自然不会喊饿）；
+  // 好感度不受状态开关影响（始终真实累积），单独注入。
   const { petState, petStateEnabled } = useAppStore.getState();
-  const effectiveState = petStateEnabled ? petState : { ...petState, hunger: 80, mood: 80, energy: 80 };
-  const stateDesc = describePetState(effectiveState);
-  parts.push(`你当前的状态：${stateDesc || '平静正常'}（饱足/心情/精力/好感会影响你的语气，可自然融入回复，不要生硬罗列数值）`);
+  if (petStateEnabled) {
+    const stateDesc = describePetState(petState);
+    parts.push(`你当前的状态：${stateDesc || '平静正常'}（饱足/心情/精力/好感会影响你的语气，可自然融入回复，不要生硬罗列数值）`);
+  } else {
+    const affectionDesc = describeAffection(petState);
+    if (affectionDesc) parts.push(`你与主人的关系：${affectionDesc}。`);
+  }
+  // 智能体自带能力（来自它自己的 JSON + 用户导入时的选择）：只有启用「定时任务」的智能体才注入
+  // 建任务协议，且用该智能体自己的示例任务/频率约束合成（见 petCapabilities.ts）
+  if (profile?.capabilities?.enabled?.includes('tasks')) {
+    parts.push(buildTaskProtocolPrompt(profile.capabilities.spec));
+  }
+  // 联网能力（用户自配搜索服务）：只有启用后才下发「需要实时信息就先查」的协议
+  if (profile?.capabilities?.enabled?.includes('web')) {
+    parts.push(buildWebPrompt());
+  }
+  // 平台免费技能（天气/股票/足彩，无需用户配 Key，服务端代理）
+  const enabledSkills = (profile?.capabilities?.enabled ?? []).filter((k): k is SkillKind =>
+    (SKILL_KINDS as string[]).includes(k),
+  );
+  if (enabledSkills.length) parts.push(buildSkillsPrompt(enabledSkills));
   // 思考过程语言（DeepSeek 风格设置）：跟随回复=不干预；指定语言时强约束内部推理书写语言，
   // 措辞上明确「人设与要求仍优先约束正文」，避免与用户设置的系统提示词冲突
   if (showThinking && thinkingLang === 'zh') {
@@ -144,6 +184,14 @@ export class StreamInterruptError extends Error {
   }
 }
 
+/** 用户主动停止生成：区别于网络错误，不重试、不标错，保留已生成内容 */
+export class AbortedError extends Error {
+  constructor(message = '已停止生成') {
+    super(message);
+    this.name = 'AbortedError';
+  }
+}
+
 /** 组装请求体（模型思考参数按供应商分流，未知参数会导致部分接口 400） */
 function buildRequestBody(profile: LlmProfile, messages: unknown[], stream: boolean): Record<string, unknown> {
   const body: Record<string, unknown> = {
@@ -171,21 +219,18 @@ function buildRequestBody(profile: LlmProfile, messages: unknown[], stream: bool
   return body;
 }
 
-export async function requestChat(history: ChatMsg[]): Promise<ChatResult> {
-  const profile = activeProfile();
-  if (!profile) {
-    throw new Error('尚未配置聊天 API：点聊天页顶部「未配置聊天 API」打开档案管理，在手机上直接创建（或桌面端创建后登录同一账号自动同步）');
-  }
-  // 多智能体协同：走后端编排接口（子智能体由服务端按配置调用，档案 Key 可缺省）
-  if (isMultiAgentMode(profile)) {
-    return orchestrateViaPlatform(history, {});
-  }
-  if (!profile.apiKey || !profile.baseUrl) {
-    throw new Error(`API 档案「${profile.name}」缺少 Key 或接口地址，请在桌面端补全后重新同步`);
-  }
-  const url = `${profile.baseUrl.replace(/\/$/, '')}/chat/completions`;
-  const messages = [{ role: 'system', content: buildSystemPrompt() }, ...history.slice(-20)];
+type WireMsg = { role: string; content: string };
+
+/** 组装请求消息：人设系统提示词 + 最近 20 条历史 + 思考语言约束 */
+function buildMessages(history: ChatMsg[]): WireMsg[] {
+  const messages: WireMsg[] = [{ role: 'system', content: buildSystemPrompt() }, ...history.slice(-20)];
   applyThinkingLang(messages);
+  return messages;
+}
+
+/** 单轮非流式请求 */
+async function requestOnce(profile: LlmProfile, messages: WireMsg[]): Promise<ChatResult> {
+  const url = `${profile.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const body = buildRequestBody(profile, messages, false);
   const res = await fetch(url, {
     method: 'POST',
@@ -206,6 +251,111 @@ export async function requestChat(history: ChatMsg[]): Promise<ChatResult> {
   return { content, reasoning };
 }
 
+/** 最多工具轮次（联网搜索 + 技能合计；避免模型反复调用） */
+const MAX_TOOL_ROUNDS = 3;
+
+/** 剥离一轮回复中的全部工具指令（SEARCH/WEATHER/STOCK/FOOTBALL，含流式未闭合尾巴） */
+function cleanToolText(text: string): string {
+  const noSearch = extractSearchQuery(text).clean;
+  return stripUnclosedToolTail(stripSkillDirectives(noSearch))
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** 执行一条平台技能，把 JSON 资料包成回注文本；失败/未登录也返回字符串，不中断对话 */
+async function runSkillTool(call: SkillCall): Promise<string> {
+  try {
+    if (call.kind === 'weather') {
+      const { city, day } = parseWeatherArg(call.arg);
+      if (!city) return '【天气查询】没有解析出城市名，请向用户确认要查哪个城市后重试。';
+      const data = await toolWeather(city, day);
+      return `【天气资料·${city}】\n${JSON.stringify(data)}`;
+    }
+    if (call.kind === 'stock') {
+      const kw = call.arg.trim();
+      if (!kw) return '【股票行情】没有解析出股票名称或代码，请向用户确认。';
+      const data = await toolStock(kw);
+      return `【股票行情资料】\n${JSON.stringify(data)}`;
+    }
+    const date = normalizeFootballDate(call.arg);
+    const data = await toolFootball(date);
+    return `【竞彩足球资料·${date}】\n${JSON.stringify(data)}`;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/登录/.test(msg)) {
+      return '【技能不可用】使用天气/股票/足彩技能需要先登录平台账号（聊天页右上角登录）。请提示用户登录后再试，不要编造数据。';
+    }
+    return `【技能执行失败】${call.kind} 查询出错：${msg}。请如实告诉用户这次没查到，不要编造数据。`;
+  }
+}
+
+/**
+ * 工具回路：模型在正文里输出隐藏指令表示「需要外部数据」，App 执行后把资料回注，
+ * 再让它用人设回答。支持：
+ * - [[SEARCH|查询词]] 联网搜索（用户自配搜索服务，最多占用同一轮次预算）
+ * - [[WEATHER|城市 明天]] / [[STOCK|名称]] / [[FOOTBALL|日期]] 平台免费技能
+ * 合计最多 MAX_TOOL_ROUNDS 轮；未启用任何能力时完全不介入（单轮直连）。
+ */
+async function runWithWeb(
+  profile: LlmProfile,
+  history: ChatMsg[],
+  round: (messages: WireMsg[]) => Promise<ChatResult>,
+  signal?: AbortSignal,
+): Promise<ChatResult> {
+  const spec = profile.capabilities?.spec?.web;
+  const webEnabled = !!profile.capabilities?.enabled?.includes('web') && !!spec?.apiKey?.trim();
+  const skillEnabled = new Set(
+    (profile.capabilities?.enabled ?? []).filter((k): k is SkillKind => (SKILL_KINDS as string[]).includes(k)),
+  );
+  let messages = buildMessages(history);
+  let visible = '';
+  let reasoning = '';
+  let toolRounds = 0;
+  for (;;) {
+    if (signal?.aborted) throw new AbortedError();
+    const res = await round(messages);
+    if (res.reasoning) reasoning = reasoning ? `${reasoning}\n${res.reasoning}` : res.reasoning;
+    const { query } = extractSearchQuery(res.content);
+    const skillHit = extractSkillCall(res.content);
+    const skill = skillHit && skillEnabled.has(skillHit.kind) ? skillHit : null;
+    visible += cleanToolText(res.content);
+    if (toolRounds >= MAX_TOOL_ROUNDS || (!skill && !(webEnabled && query))) {
+      return { content: visible, reasoning: reasoning || undefined };
+    }
+    toolRounds++;
+    let extra = '';
+    if (skill) {
+      // 专用技能优先于通用联网搜索（结构化数据更准）
+      extra = await runSkillTool(skill);
+    } else {
+      try {
+        const list = await runWebSearch(spec, query ?? '');
+        extra = buildSearchResultPrompt(query ?? '', list);
+      } catch (e) {
+        // 搜索失败不打断对话：如实告诉模型没查到，让它用已有知识回答
+        extra = `【联网查询失败】查询词：「${query}」，原因：${e instanceof Error ? e.message : String(e)}。请如实告诉用户这次没查到（不要编造实时数据），或直接用你已有的知识回答。`;
+      }
+    }
+    messages = [...messages, { role: 'assistant', content: res.content }, { role: 'user', content: extra }];
+  }
+}
+
+export async function requestChat(history: ChatMsg[]): Promise<ChatResult> {
+  const profile = activeProfile();
+  if (!profile) {
+    throw new Error('尚未配置聊天 API：点聊天页顶部「未配置聊天 API」打开档案管理，在手机上直接创建（或桌面端创建后登录同一账号自动同步）');
+  }
+  // 多智能体协同：走后端编排接口（子智能体由服务端按配置调用，档案 Key 可缺省）
+  if (isMultiAgentMode(profile)) {
+    return orchestrateViaPlatform(history, {});
+  }
+  if (!profile.apiKey || !profile.baseUrl) {
+    throw new Error(`API 档案「${profile.name}」缺少 Key 或接口地址，请在桌面端补全后重新同步`);
+  }
+  return runWithWeb(profile, history, (messages) => requestOnce(profile, messages));
+}
+
 export interface StreamCallbacks {
   onReasoning?: (delta: string) => void;
   onContent?: (delta: string) => void;
@@ -215,23 +365,10 @@ export interface StreamCallbacks {
  * 流式聊天（OpenAI 兼容 SSE）。RN 的 fetch 不支持 response.body 流，
  * 这里用 XMLHttpRequest onprogress 增量读取 responseText 并解析 SSE：
  * 思考（reasoning_content）与正文（content）逐字回调，慢模型也有实时反馈。
- * 若接口拒绝流式（非 200）或在收到任何数据前出错，自动降级为非流式 requestChat。
+ * 若接口拒绝流式（非 200）或在收到任何数据前出错，自动降级为非流式 requestOnce。
  */
-export async function streamChat(history: ChatMsg[], cb: StreamCallbacks): Promise<ChatResult> {
-  const profile = activeProfile();
-  if (!profile) {
-    throw new Error('尚未配置聊天 API：点聊天页顶部「未配置聊天 API」打开档案管理，在手机上直接创建（或桌面端创建后登录同一账号自动同步）');
-  }
-  // 多智能体协同：走后端编排接口（非流式，一次返回最终答复）
-  if (isMultiAgentMode(profile)) {
-    return orchestrateViaPlatform(history, cb);
-  }
-  if (!profile.apiKey || !profile.baseUrl) {
-    throw new Error(`API 档案「${profile.name}」缺少 Key 或接口地址，请在桌面端补全后重新同步`);
-  }
+async function streamOnce(profile: LlmProfile, messages: WireMsg[], cb: StreamCallbacks, signal?: AbortSignal): Promise<ChatResult> {
   const url = `${profile.baseUrl.replace(/\/$/, '')}/chat/completions`;
-  const messages = [{ role: 'system', content: buildSystemPrompt() }, ...history.slice(-20)];
-  applyThinkingLang(messages);
   const body = buildRequestBody(profile, messages, true);
 
   return new Promise<ChatResult>((resolve, reject) => {
@@ -247,6 +384,18 @@ export async function streamChat(history: ChatMsg[], cb: StreamCallbacks): Promi
     let reasoning = '';
     let receivedAny = false;
     let settled = false;
+
+    // 用户主动停止：中止底层请求，以 AbortedError 收口（调用方保留已生成内容，不标错）
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      try { xhr.abort(); } catch { /* 已结束 */ }
+      reject(new AbortedError());
+    };
+    if (signal) {
+      if (signal.aborted) { onAbort(); return; }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     const handleChunk = (chunk: string): void => {
       buffer += chunk;
@@ -318,9 +467,9 @@ export async function streamChat(history: ChatMsg[], cb: StreamCallbacks): Promi
         return;
       }
       if (!receivedAny) {
-        // 其他 4xx（如接口不支持流式/参数被拒）：降级非流式，由 requestChat 透传真实错误
+        // 其他 4xx（如接口不支持流式/参数被拒）：降级非流式，由 requestOnce 透传真实错误
         settled = true;
-        requestChat(history).then(resolve, reject);
+        requestOnce(profile, messages).then(resolve, reject);
       } else {
         // 收到数据后被网关打断（502/503 等）：可重试
         reject(new StreamInterruptError(`流式请求中断（HTTP ${xhr.status}${respText ? `：${respText}` : ''}）`));
@@ -345,4 +494,20 @@ export async function streamChat(history: ChatMsg[], cb: StreamCallbacks): Promi
     };
     xhr.send(JSON.stringify(body));
   });
+}
+
+/** 流式聊天入口（含联网查询回路：模型请求联网时先搜索再回答） */
+export async function streamChat(history: ChatMsg[], cb: StreamCallbacks, signal?: AbortSignal): Promise<ChatResult> {
+  const profile = activeProfile();
+  if (!profile) {
+    throw new Error('尚未配置聊天 API：点聊天页顶部「未配置聊天 API」打开档案管理，在手机上直接创建（或桌面端创建后登录同一账号自动同步）');
+  }
+  // 多智能体协同：走后端编排接口（非流式，一次返回最终答复）
+  if (isMultiAgentMode(profile)) {
+    return orchestrateViaPlatform(history, cb);
+  }
+  if (!profile.apiKey || !profile.baseUrl) {
+    throw new Error(`API 档案「${profile.name}」缺少 Key 或接口地址，请在桌面端补全后重新同步`);
+  }
+  return runWithWeb(profile, history, (messages) => streamOnce(profile, messages, cb, signal), signal);
 }

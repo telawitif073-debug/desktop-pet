@@ -1,0 +1,444 @@
+{
+  "schemaVersion": 1,
+  "id": "rainnoon-oc-claw-website-pets",
+  "name": "oc-claw · website/pets",
+  "description": "来自 GitHub 开源项目 rainnoon/oc-claw 的美术资源（website/pets），经并集包围盒归一化后导入；原素材 8 段动画、56 帧。",
+  "author": "rainnoon/oc-claw 上游作者（GitHub）",
+  "license": "NOASSERTION — 上游 rainnoon/oc-claw（仓库级未声明，但根目录许可文件为宽松许可：MIT）",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchor": "center"
+  },
+  "cover": {
+    "file": "cover.png",
+    "sha256": "0480ddd2a58ffabd260709529e7ea590544de2c4bc519556022843a5df4463b9"
+  },
+  "actions": [
+    {
+      "id": "rest-furina-sleeping",
+      "name": "休息",
+      "interaction": "rest",
+      "frameRate": 2.0,
+      "frames": [
+        {
+          "file": "actions/rest-furina-sleeping/frame_000.png",
+          "sha256": "4a8278704e97f6501ac0c954ff4f6249899c15a02cf0c66aa5da57ab98ea8ae4"
+        },
+        {
+          "file": "actions/rest-furina-sleeping/frame_001.png",
+          "sha256": "e271c823d0786041dd946341ff1d68ab05a069e5bf047f6555f45bd90b1e6f0d"
+        },
+        {
+          "file": "actions/rest-furina-sleeping/frame_002.png",
+          "sha256": "91f57310c71bb2f990235f953b3b87d335cba4859677ac4c882e1ea22b2f6b62"
+        },
+        {
+          "file": "actions/rest-furina-sleeping/frame_003.png",
+          "sha256": "10726fed76f92ef9563900e77ab9d525fa0f7e686d25920756e6f843746d252b"
+        }
+      ]
+    },
+    {
+      "id": "feed-furina-working",
+      "name": "吃饭",
+      "interaction": "feed",
+      "frameRate": 2.0,
+      "frames": [
+        {
+          "file": "actions/feed-furina-working/frame_000.png",
+          "sha256": "a4dfabce012926b64f41bed75b73c0ba92bab1e332f32896b72adf9cf3f55d8c"
+        },
+        {
+          "file": "actions/feed-furina-working/frame_001.png",
+          "sha256": "67500529e188fed75a1c83ae2e852401c0744310c5abceefa59aaff2e1f03009"
+        },
+        {
+          "file": "actions/feed-furina-working/frame_002.png",
+          "sha256": "6b514ea22fe2331acb611c886a0400be974164ffe7256db96bf3730bbb2420db"
+        },
+        {
+          "file": "actions/feed-furina-working/frame_003.png",
+          "sha256": "5f957e6671aee8e72f3f820ccd52058442a507bd2a90c0f2baaa058cbe98916c"
+        }
+      ]
+    },
+    {
+      "id": "play-hutao-sleeping",
+      "name": "玩耍",
+      "interaction": "play",
+      "frameRate": 2.0,
+      "frames": [
+        {
+          "file": "actions/play-hutao-sleeping/frame_000.png",
+          "sha256": "1257ae8401f911bfd330289f47dc45182734ca7cb8093ac42214dce471957a28"
+        },
+        {
+          "file": "actions/play-hutao-sleeping/frame_001.png",
+          "sha256": "da5cd12671a450392d737c1f35efacd45c6533b721af499efdaf4975ce13d21f"
+        },
+        {
+          "file": "actions/play-hutao-sleeping/frame_002.png",
+          "sha256": "b45e0eeb4a45e31d9add6befbac7230f7234f0e4003e22452ae6ccb6ce6986aa"
+        },
+        {
+          "file": "actions/play-hutao-sleeping/frame_003.png",
+          "sha256": "1f41850e123d538de74a5deae3cffdb7e8f0517c53ef0a69bf0fc58b512d6c06"
+        }
+      ]
+    },
+    {
+      "id": "hutao-working",
+      "name": "hutao working",
+      "interaction": "none",
+      "frameRate": 2.0,
+      "frames": [
+        {
+          "file": "actions/hutao-working/frame_000.png",
+          "sha256": "e8137a9da33f6753e9485387ade6f4df72ed9639fc70c8c89f6b42358c9a69b9"
+        },
+        {
+          "file": "actions/hutao-working/frame_001.png",
+          "sha256": "441ae8906dc56178a19c5d4f18afcc0ddbf306cb87f39444bac6f5eb5dc0c5c5"
+        },
+        {
+          "file": "actions/hutao-working/frame_002.png",
+          "sha256": "2eb9e440434f8c49f675c20a5158ea1a0fd02eb9d36219442335ae3902f13c44"
+        },
+        {
+          "file": "actions/hutao-working/frame_003.png",
+          "sha256": "3883a0e66e7160f4a1de4816f3783aa6c536dba8deec6acb357c549a2e8e2f99"
+        }
+      ]
+    },
+    {
+      "id": "paimon-sleeping",
+      "name": "paimon sleeping",
+      "interaction": "none",
+      "frameRate": 2.0,
+      "frames": [
+        {
+          "file": "actions/paimon-sleeping/frame_000.png",
+          "sha256": "0ae2474603ae73928c0b43386216d2a8a19675d5bb18371ce103fc301acd5803"
+        },
+        {
+          "file": "actions/paimon-sleeping/frame_001.png",
+          "sha256": "3eb33e2cfafb1579693c018a8ff66219905d1de2e41b76ef5dc407cfdc97981d"
+        },
+        {
+          "file": "actions/paimon-sleeping/frame_002.png",
+          "sha256": "ad2e445da64e2bc21c23123998a8d1e1bdce343787dfd2a61a16ff074da73b0f"
+        },
+        {
+          "file": "actions/paimon-sleeping/frame_003.png",
+          "sha256": "7cca8ae6f9613a4ae2f8cbad35e0a5f293ecfa4e6db599ac5eb10ba32f713dda"
+        }
+      ]
+    },
+    {
+      "id": "paimon-working",
+      "name": "paimon working",
+      "interaction": "none",
+      "frameRate": 2.0,
+      "frames": [
+        {
+          "file": "actions/paimon-working/frame_000.png",
+          "sha256": "ed0c4c10237f74913dc3f2261056ea9c4ee85163db52e29c56707e063ee1f6fd"
+        },
+        {
+          "file": "actions/paimon-working/frame_001.png",
+          "sha256": "68ad36464e391c5da3483596846498d01ad3dff7b868da2a8658f2cf3f269069"
+        },
+        {
+          "file": "actions/paimon-working/frame_002.png",
+          "sha256": "74accf1160045c49ac024a8d86bdac756ee3b87b8d9d81bdfb6564ad544a7838"
+        },
+        {
+          "file": "actions/paimon-working/frame_003.png",
+          "sha256": "b767999654ea7740c4f08f1ecd49fd24a61422663df7aacf8a1dcda3760a2126"
+        }
+      ]
+    },
+    {
+      "id": "penguin-angry",
+      "name": "penguin angry",
+      "interaction": "none",
+      "frameRate": 12.5,
+      "frames": [
+        {
+          "file": "actions/penguin-angry/frame_000.png",
+          "sha256": "58bb828a8687f24026681a892c705ef3c7db4e8c71451d30d72f07b3882adc5c"
+        },
+        {
+          "file": "actions/penguin-angry/frame_001.png",
+          "sha256": "00936d9ac992fa2e4156d89b9a24ce95943110264e2ec7af1e80ed9f33c78c8a"
+        },
+        {
+          "file": "actions/penguin-angry/frame_002.png",
+          "sha256": "62931660dc16e9f453041c80c2b58ac0f520cb0c5d8ae04463e21a21664358f0"
+        },
+        {
+          "file": "actions/penguin-angry/frame_003.png",
+          "sha256": "00339b4c93d1c01bdb697c187a4d6fdf6d4b09a7d7a1709fd1f6495f1bc9f531"
+        },
+        {
+          "file": "actions/penguin-angry/frame_004.png",
+          "sha256": "a8e19cf3dbd5638e31484bc55bd5786488c854bdb7244b4f58654a18d7fc21d5"
+        },
+        {
+          "file": "actions/penguin-angry/frame_005.png",
+          "sha256": "aabf6e8220613c591719a4ff1f90afd6dc1081630014ca1d4675d8cac52b39ad"
+        },
+        {
+          "file": "actions/penguin-angry/frame_006.png",
+          "sha256": "17f25270a010d480116d1b45fd73e92823d52399301cd87e903f5bb5fef0c5e3"
+        },
+        {
+          "file": "actions/penguin-angry/frame_007.png",
+          "sha256": "46d13b437013baab7fc1b714d25b8e66311db5db0a6fe72d64ed4bbfef09006b"
+        },
+        {
+          "file": "actions/penguin-angry/frame_008.png",
+          "sha256": "43f3b45fe7f406717f273cb15aedb353305f9d900e837975235192aa53d6da0c"
+        },
+        {
+          "file": "actions/penguin-angry/frame_009.png",
+          "sha256": "af3b8a9dbbd32ee87097e9e6565fdd9af6bc0abe621a8e59b06b238ebf4e8272"
+        },
+        {
+          "file": "actions/penguin-angry/frame_010.png",
+          "sha256": "2b06e425d702dadff53efa1a9383a17b6856432c91d1207466a7cdee1385a121"
+        },
+        {
+          "file": "actions/penguin-angry/frame_011.png",
+          "sha256": "b6caec4e5d15943bacf06d479ae0ed52d53bf9ef9d1687ac5d6f0ed3e5217723"
+        },
+        {
+          "file": "actions/penguin-angry/frame_012.png",
+          "sha256": "34363533bfdf646196729584a00df59d2858ac6e66d12573ed8cb06398ac0173"
+        },
+        {
+          "file": "actions/penguin-angry/frame_013.png",
+          "sha256": "07449428ec981aa9aa21ff67fb8f420830160690892e0240563e3be2a0be4d3a"
+        },
+        {
+          "file": "actions/penguin-angry/frame_014.png",
+          "sha256": "6f6f6d9d7f4f80d64186e587b8b58cf4e2e9454a52af27521d0057e589bc94d5"
+        },
+        {
+          "file": "actions/penguin-angry/frame_015.png",
+          "sha256": "0423e30f75d21ce83b9860ecae61ce4565933b8e1bf66c8b6a143aeac886b6f4"
+        }
+      ]
+    },
+    {
+      "id": "penguin-rest",
+      "name": "penguin rest",
+      "interaction": "none",
+      "frameRate": 12.5,
+      "frames": [
+        {
+          "file": "actions/penguin-rest/frame_000.png",
+          "sha256": "9034386ed335ee64dd783c14c5da02145754b00ccec65b748c790acbe55ee4f9"
+        },
+        {
+          "file": "actions/penguin-rest/frame_001.png",
+          "sha256": "1836669b8b1555730ec94914194c56bea481214524bf0826685a16c1ef82b60e"
+        },
+        {
+          "file": "actions/penguin-rest/frame_002.png",
+          "sha256": "b44eaeb549fe1342baf2a83d2165768768f684fbfe76c93fa80fd3be1772b297"
+        },
+        {
+          "file": "actions/penguin-rest/frame_003.png",
+          "sha256": "7e2c1b61cd160ba62b7894e034388dba6d1e78fd99ba151f01a6396a32b2de87"
+        },
+        {
+          "file": "actions/penguin-rest/frame_004.png",
+          "sha256": "22e57e8af7bce1d8753bef3389afee2b97192c72e7edab4da7887c8ee77b3687"
+        },
+        {
+          "file": "actions/penguin-rest/frame_005.png",
+          "sha256": "adbd48b7ec1c5e12b84e2fd2c0c6f9147bf93e445401efe3f4d3524d595b16b9"
+        },
+        {
+          "file": "actions/penguin-rest/frame_006.png",
+          "sha256": "d785dc56bc6029c7272bf6c6dda9c0c157b00d6e4b2e2ffb67c330b51553af04"
+        },
+        {
+          "file": "actions/penguin-rest/frame_007.png",
+          "sha256": "b9f4f31a0ba34d78128f4505f17c775b4999808c08bce551412219a8443a3f3f"
+        },
+        {
+          "file": "actions/penguin-rest/frame_008.png",
+          "sha256": "125c282f97dabda46b002711b248e0386cc8bbf6cc10a2dc41f03b4493234586"
+        },
+        {
+          "file": "actions/penguin-rest/frame_009.png",
+          "sha256": "204a2fc4b47a59cacec22e8bcf31e741c55c7ddbedc04b7b281ef3a230dda758"
+        },
+        {
+          "file": "actions/penguin-rest/frame_010.png",
+          "sha256": "74d7230c54a5cb39ec910ca249fb957bc5990ecaa8edf4c36a333469e5fa82e2"
+        },
+        {
+          "file": "actions/penguin-rest/frame_011.png",
+          "sha256": "b717ae660115eefb7e7ef75339e54dfedb26a44274efbf2f6abf3a570c1f439d"
+        },
+        {
+          "file": "actions/penguin-rest/frame_012.png",
+          "sha256": "82bce5ab3d93ca4e4d6735d6af1b04e8ced815139d2c3270473c2497bb84a7c8"
+        },
+        {
+          "file": "actions/penguin-rest/frame_013.png",
+          "sha256": "fe1051411f9e91653f4ad64ca1cc3f3cc89bd251ddb1a931366379758b440af7"
+        },
+        {
+          "file": "actions/penguin-rest/frame_014.png",
+          "sha256": "278371361f846845c1a48244ebe01c4e412aadafa59962933932705625d6dc29"
+        },
+        {
+          "file": "actions/penguin-rest/frame_015.png",
+          "sha256": "c467515700234c70c789af0fb2f84d3fbe7f63429274c3b48aa2c8a4a0431abc"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "kind": "imported",
+    "generator": "scripts/pets/import_pet_assets.py",
+    "version": "1.0.0",
+    "generatedAt": "2026-10-03"
+  },
+  "origin": {
+    "provider": "github",
+    "repo": "rainnoon/oc-claw",
+    "url": "https://github.com/rainnoon/oc-claw",
+    "stars": 351,
+    "releaseDownloads": null,
+    "npmMonthly": null,
+    "pypiMonthly": null,
+    "downloads": 0,
+    "combinedScore": 0.290988,
+    "rank": 101,
+    "license": "NOASSERTION",
+    "licenseTier": "A",
+    "licenseReason": "仓库级未声明，但根目录许可文件为宽松许可：MIT",
+    "modifications": "仅做等比缩放/补透明画布/并集包围盒对齐与统一锚点；未改绘制内容；PNG 内写入 tEXt 溯源信息",
+    "coverSource": "website/public/images/pets/furina_sleeping.gif#frame0",
+    "actionSources": [
+      {
+        "action": "rest-furina-sleeping",
+        "interaction": "rest",
+        "sourcePath": "website/public/images/pets/furina_sleeping.gif",
+        "sourceFiles": [
+          "website/public/images/pets/furina_sleeping.gif"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 2.0,
+        "normalizeMode": "alpha",
+        "scale": 2.542169,
+        "sampled": false
+      },
+      {
+        "action": "feed-furina-working",
+        "interaction": "feed",
+        "sourcePath": "website/public/images/pets/furina_working.gif",
+        "sourceFiles": [
+          "website/public/images/pets/furina_working.gif"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 2.0,
+        "normalizeMode": "alpha",
+        "scale": 2.142132,
+        "sampled": false
+      },
+      {
+        "action": "play-hutao-sleeping",
+        "interaction": "play",
+        "sourcePath": "website/public/images/pets/hutao_sleeping.gif",
+        "sourceFiles": [
+          "website/public/images/pets/hutao_sleeping.gif"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 2.0,
+        "normalizeMode": "alpha",
+        "scale": 2.244681,
+        "sampled": false
+      },
+      {
+        "action": "hutao-working",
+        "interaction": "none",
+        "sourcePath": "website/public/images/pets/hutao_working.gif",
+        "sourceFiles": [
+          "website/public/images/pets/hutao_working.gif"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 2.0,
+        "normalizeMode": "alpha",
+        "scale": 2.164103,
+        "sampled": false
+      },
+      {
+        "action": "paimon-sleeping",
+        "interaction": "none",
+        "sourcePath": "website/public/images/pets/paimon_sleeping.gif",
+        "sourceFiles": [
+          "website/public/images/pets/paimon_sleeping.gif"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 2.0,
+        "normalizeMode": "alpha",
+        "scale": 2.131313,
+        "sampled": false
+      },
+      {
+        "action": "paimon-working",
+        "interaction": "none",
+        "sourcePath": "website/public/images/pets/paimon_working.gif",
+        "sourceFiles": [
+          "website/public/images/pets/paimon_working.gif"
+        ],
+        "sourceFrames": 4,
+        "importedFrames": 4,
+        "frameRate": 2.0,
+        "normalizeMode": "alpha",
+        "scale": 2.153061,
+        "sampled": false
+      },
+      {
+        "action": "penguin-angry",
+        "interaction": "none",
+        "sourcePath": "website/public/images/pets/penguin_angry.gif",
+        "sourceFiles": [
+          "website/public/images/pets/penguin_angry.gif"
+        ],
+        "sourceFrames": 23,
+        "importedFrames": 16,
+        "frameRate": 12.5,
+        "normalizeMode": "alpha",
+        "scale": 2.268817,
+        "sampled": true
+      },
+      {
+        "action": "penguin-rest",
+        "interaction": "none",
+        "sourcePath": "website/public/images/pets/penguin_rest.gif",
+        "sourceFiles": [
+          "website/public/images/pets/penguin_rest.gif"
+        ],
+        "sourceFrames": 23,
+        "importedFrames": 16,
+        "frameRate": 12.5,
+        "normalizeMode": "alpha",
+        "scale": 2.557576,
+        "sampled": true
+      }
+    ]
+  }
+}

@@ -77,16 +77,52 @@ export function assetUrl(url?: string | null): string | undefined {
   return `${apiBase.replace(/\/api\/?$/, '')}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
+// 桌面客户端桥接（浏览器环境下不存在）：登录态与主进程互通，
+// 桌面端下载/安装/上传与本站共用同一份令牌（避免一处登录、另一处显示未登录）
+const bridge = () => window.electronAPI?.platform;
+
 export function saveAuth(auth: AuthResponse) {
   localStorage.setItem(TOKEN_KEY, auth.accessToken);
   localStorage.setItem(REFRESH_TOKEN_KEY, auth.refreshToken);
   localStorage.setItem('platform_user', JSON.stringify(auth.user));
+  // 登录与无感续期都会走这里：把（可能已轮换的）令牌同步给桌面主进程
+  void bridge()?.syncAuth?.({ accessToken: auth.accessToken, refreshToken: auth.refreshToken, user: auth.user });
 }
 
 export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem('platform_user');
+  void bridge()?.clearAuth?.();
+}
+
+/** 把本窗口当前令牌同步给桌面主进程（须在校验通过后调用，避免推送失效令牌） */
+export function syncAuthToDesktop(user?: User | null): void {
+  const accessToken = localStorage.getItem(TOKEN_KEY);
+  if (!accessToken) return;
+  void bridge()?.syncAuth?.({
+    accessToken,
+    refreshToken: localStorage.getItem(REFRESH_TOKEN_KEY) || '',
+    user: user ?? getStoredUser(),
+  });
+}
+
+/**
+ * 桌面端已登录而本窗口没有令牌时沿用桌面端登录态（启动时调用一次）。
+ * 反向（本窗口有令牌）交给调用方先 getMe 校验，通过后再 syncAuthToDesktop。
+ */
+export async function adoptDesktopAuth(): Promise<void> {
+  const desktop = bridge();
+  if (!desktop?.authTokens || localStorage.getItem(TOKEN_KEY)) return;
+  try {
+    const tokens = await desktop.authTokens();
+    if (tokens?.accessToken) {
+      localStorage.setItem(TOKEN_KEY, tokens.accessToken);
+      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken || '');
+    }
+  } catch {
+    /* 桥异常按未登录处理 */
+  }
 }
 
 export function getStoredUser(): User | null {

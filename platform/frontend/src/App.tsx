@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Layout, Menu, Avatar, Button, ConfigProvider, Segmented, Typography } from 'antd';
-import { HeartOutlined, LogoutOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, HeartOutlined, LogoutOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, UserOutlined } from '@ant-design/icons';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { clearAuth, getMe, getStoredUser } from './api';
+import { adoptDesktopAuth, clearAuth, getMe, getStoredUser, syncAuthToDesktop } from './api';
 import type { User } from './types';
 import AuthPage from './pages/AuthPage';
 import ResourceListPage from './pages/ResourceListPage';
 import ResourceDetailPage from './pages/ResourceDetailPage';
-import UploadPage from './pages/UploadPage';
 import ProfilePage from './pages/ProfilePage';
+import WorkshopPage from './pages/WorkshopPage';
 import AdminPage from './pages/AdminPage';
 import SettingsPage from './pages/SettingsPage';
 import AgentsPage from './pages/AgentsPage';
@@ -26,7 +26,7 @@ const DEVELOPER_ACCOUNTS = ['developer'];
 function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, onLogout }: { user: User | null; viewMode: 'user' | 'admin'; adminView: boolean; isDeveloper: boolean; onViewModeChange: (mode: 'user' | 'admin') => void; onLogout: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const selected = location.pathname.startsWith('/profile') ? 'profile' : location.pathname.startsWith('/agents') ? 'agents' : location.pathname.startsWith('/upload') ? 'upload' : location.pathname.startsWith('/admin') ? 'admin' : location.pathname.startsWith('/settings') ? 'settings' : 'browse';
+  const selected = location.pathname.startsWith('/profile') ? 'profile' : location.pathname.startsWith('/agents') ? 'agents' : location.pathname.startsWith('/workshop') ? 'workshop' : location.pathname.startsWith('/admin') ? 'admin' : location.pathname.startsWith('/settings') ? 'settings' : 'browse';
   const viewSwitch = <Segmented size="small" value={viewMode} onChange={(value) => onViewModeChange(value as 'user' | 'admin')} options={[{ label: '用户视图', value: 'user' }, { label: '管理员视图', value: 'admin' }]} />;
 
   if (adminView) {
@@ -46,7 +46,8 @@ function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, o
         selectedKeys={[selected]}
         items={[
           { key: 'browse', label: <Link to="/">探索资源</Link>, icon: <ShopOutlined /> },
-          { key: 'upload', label: <Link to="/upload">上传资源</Link>, icon: <UploadOutlined /> },
+          // 原「上传资源」页已删除：上传/发布收口到宠工坊，内容直接嵌在本窗口内容区
+          { key: 'workshop', label: <Link to="/workshop">宠工坊</Link>, icon: <AppstoreOutlined /> },
           ...(user ? [{ key: 'profile', label: <Link to="/profile">个人中心</Link>, icon: <UserOutlined /> }, { key: 'agents', label: <Link to="/agents">智能体</Link>, icon: <RobotOutlined /> }] : []),
           { key: 'settings', label: <Link to="/settings">设置</Link>, icon: <SettingOutlined /> },
         ]}
@@ -70,8 +71,19 @@ export default function App() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!user || !localStorage.getItem('platform_access_token')) return;
-    getMe().then(setUser).catch(() => setUser(null));
+    void (async () => {
+      // 桌面客户端可能已经登录（宠工坊上传/下载共用同一账号）：先沿用桌面端令牌
+      await adoptDesktopAuth();
+      if (!localStorage.getItem('platform_access_token')) return;
+      try {
+        const me = await getMe();
+        setUser(me);
+        // 校验通过后再回推给桌面端，避免把已失效的令牌同步过去
+        syncAuthToDesktop(me);
+      } catch {
+        setUser(null);
+      }
+    })();
   }, []);
 
   // api 拦截器 token 续期失败时派发 platform:logout：同步登录态并回到登录页
@@ -108,7 +120,8 @@ export default function App() {
             <Route path="/login" element={<AuthPage onAuthenticated={setUser} />} />
             <Route path="/" element={adminView ? <Navigate to="/admin" replace /> : <ResourceListPage />} />
             <Route path="/asset/:type/:id" element={<ResourceDetailPage user={user} />} />
-            <Route path="/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
+            {/* 宠工坊：内容区由主进程嵌入桌面端宠工坊视图（不新开窗口） */}
+            <Route path="/workshop" element={<WorkshopPage />} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<SettingsPage />} />

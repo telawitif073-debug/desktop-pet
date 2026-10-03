@@ -3,7 +3,7 @@
  * 所有方法从 useAppStore 读取 token 与 baseUrl，401 时清登录态。
  */
 import { useAppStore } from '../store/appStore';
-import type { AssetItem } from '../types';
+import type { AssetItem, VoiceConfig } from '../types';
 
 function buildUrl(path: string): string {
   const base = useAppStore.getState().baseUrl.replace(/\/$/, '');
@@ -24,9 +24,58 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(buildUrl(path), { ...init, headers: { ...authHeaders(), ...(init?.headers || {}) } });
+/**
+ * 用 refreshToken 静默换新双令牌。并发 401 共享同一个刷新 Promise（单飞）：
+ * 后端每次刷新都轮换 refreshToken，并发各刷各的会互相踩踏导致误登出。
+ */
+let refreshing: Promise<string> | null = null;
+
+function refreshAccessToken(): Promise<string> {
+  if (!refreshing) {
+    refreshing = (async (): Promise<string> => {
+      const rt = useAppStore.getState().refreshToken;
+      if (!rt) throw new ApiError(401, '缺少 refreshToken');
+      // 直接走原生 fetch，不能经过 request()，否则 401 会递归
+      const res = await fetch(buildUrl('/auth/refresh'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: rt }),
+      });
+      if (!res.ok) throw new ApiError(res.status, 'refresh failed');
+      const data = (await res.json()) as LoginResult;
+      useAppStore.getState().setAuth(data.user, data.accessToken, data.refreshToken);
+      return data.accessToken;
+    })().finally(() => {
+      refreshing = null;
+    });
+  }
+  return refreshing;
+}
+
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
+  const headers: Record<string, string> = { ...authHeaders() };
+  const extra = init?.headers as Record<string, string> | undefined;
+  if (extra) Object.assign(headers, extra);
+  // FormData（音色发布）：必须删掉 JSON 头，让 fetch 自动生成 multipart boundary
+  if (typeof FormData !== 'undefined' && init?.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
+  const res = await fetch(buildUrl(path), { ...init, headers });
   if (res.status === 401) {
+    // access token 过期：有 refresh token 且不是 auth 接口本身、且本轮尚未刷新过时，
+    // 静默换新并重放原请求一次；刷新失败（refresh 也过期/无效）或重放仍 401 才登出
+    const canRefresh =
+      !retried &&
+      !path.startsWith('/auth/') &&
+      !!useAppStore.getState().refreshToken;
+    if (canRefresh) {
+      try {
+        await refreshAccessToken();
+        return request<T>(path, init, true);
+      } catch {
+        // 落到下面的登出分支
+      }
+    }
     useAppStore.getState().logout();
     throw new ApiError(401, '登录已过期，请重新登录');
   }
@@ -58,11 +107,51 @@ export async function login(identifier: string, password: string): Promise<Login
   });
 }
 
-export async function register(email: string, username: string, password: string): Promise<LoginResult> {
+export interface SendCodeResult {
+  sent: boolean;
+  /** 仅开发环境（服务端未配邮件服务且开启回显）返回，便于联调注册 */
+  devCode?: string;
+  devMode?: boolean;
+}
+
+/** 发送邮箱验证码（purpose=register 注册 / login 验证码登录） */
+export async function sendCode(email: string, purpose: 'register' | 'login'): Promise<SendCodeResult> {
+  return request<SendCodeResult>('/auth/send-code', {
+    method: 'POST',
+    body: JSON.stringify({ email, purpose }),
+  });
+}
+
+/** 验证码注册（DeepSeek 式）：验证码 + 密码（≥8 位），用户名缺省由服务端取邮箱前缀 */
+export async function register(email: string, code: string, password: string, username?: string): Promise<LoginResult> {
   return request<LoginResult>('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, username, password }),
+    body: JSON.stringify({ email, code, password, ...(username ? { username } : {}) }),
   });
+}
+
+/** 邮箱验证码登录（免密码） */
+export async function loginByEmailCode(email: string, code: string): Promise<LoginResult> {
+  return request<LoginResult>('/auth/login-code', {
+    method: 'POST',
+    body: JSON.stringify({ email, code }),
+  });
+}
+
+// --- 智能体技能（平台代理，登录可用；数据已归一化为中文 JSON） ---
+export async function toolWeather(city: string, day = 0): Promise<Record<string, unknown>> {
+  const usp = new URLSearchParams({ city });
+  if (day) usp.set('day', String(day));
+  return request<Record<string, unknown>>(`/tools/weather?${usp.toString()}`);
+}
+
+export async function toolStock(q: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/tools/stock?q=${encodeURIComponent(q)}`);
+}
+
+export async function toolFootball(date?: string): Promise<Record<string, unknown>> {
+  const q = date ? `?date=${encodeURIComponent(date)}` : '';
+  return request<Record<string, unknown>>(`/tools/football${q}`);
 }
 
 // --- 资源列表 ---
@@ -111,6 +200,95 @@ export async function downloadAsset(type: 'pet' | 'agent', id: string): Promise<
   const { baseUrl } = useAppStore.getState();
   const root = baseUrl.replace(/\/api\/?$/, '');
   return { url: new URL(res.url, `${root}/`).toString() };
+}
+
+// --- 音色资产（商店「音色」板块；返回结构与 pets/agents 不同，独立一套） ---
+export interface VoiceAssetItem {
+  id: string;
+  name: string;
+  description: string | null;
+  configSchema: VoiceConfig;
+  fileUrl: string | null;
+  version: string;
+  downloads: number;
+  rating?: string | number | null;
+  status?: 'pending' | 'approved' | 'rejected';
+  author?: { id: string; username?: string };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DownloadVoiceResult {
+  config: VoiceConfig;
+  sampleUrl: string | null;
+  name: string;
+  version: string;
+  downloads: number;
+}
+
+export async function listVoices(params?: ListAssetParams): Promise<{ items: VoiceAssetItem[]; total: number }> {
+  let query = '';
+  if (params) {
+    const usp = new URLSearchParams();
+    if (params.search) usp.set('search', params.search);
+    if (params.page) usp.set('page', String(params.page));
+    if (params.limit) usp.set('limit', String(params.limit));
+    if (params.sort) usp.set('sort', params.sort);
+    query = usp.toString() ? `?${usp.toString()}` : '';
+  }
+  return request<{ items: VoiceAssetItem[]; total: number }>(`/voices${query}`);
+}
+
+export async function getVoiceDetail(id: string): Promise<VoiceAssetItem> {
+  return request<VoiceAssetItem>(`/voices/${id}`);
+}
+
+/** 我发布的音色（含待审核/驳回，登录态） */
+export async function myVoices(): Promise<VoiceAssetItem[]> {
+  const res = await request<VoiceAssetItem[] | { items: VoiceAssetItem[] }>('/voices/mine');
+  return Array.isArray(res) ? res : res.items;
+}
+
+/** 安装音色：计数 + 返回配置（不含 Key）；sampleUrl 转绝对直链 */
+export async function downloadVoice(id: string): Promise<DownloadVoiceResult> {
+  const res = await request<DownloadVoiceResult>(`/voices/${id}/download`, { method: 'POST' });
+  const root = useAppStore.getState().baseUrl.replace(/\/api\/?$/, '');
+  return {
+    ...res,
+    sampleUrl: res.sampleUrl ? new URL(res.sampleUrl, `${root}/`).toString() : null,
+  };
+}
+
+export interface PublishVoiceInput {
+  name: string;
+  description?: string;
+  version?: string;
+  /** 音色配置 JSON（engine/voiceId/...，严禁携带任何 Key） */
+  config: VoiceConfig;
+  /** 可选试听样本直链（http(s) 的 mp3/m4a/aac/wav，≤5MB，由后端代拉校验入库） */
+  sampleUrl?: string;
+}
+
+/** 发布音色（multipart/form-data；config 以 JSON 字符串随表单提交） */
+export async function publishVoice(input: PublishVoiceInput): Promise<VoiceAssetItem> {
+  const form = new FormData();
+  form.append('name', input.name);
+  if (input.description) form.append('description', input.description);
+  form.append('version', input.version || '1.0.0');
+  form.append('configSchema', JSON.stringify(input.config));
+  if (input.sampleUrl) form.append('sampleUrl', input.sampleUrl);
+  return request<VoiceAssetItem>('/voices', { method: 'POST', body: form });
+}
+
+export async function deleteVoice(id: string): Promise<void> {
+  await request(`/voices/${id}`, { method: 'DELETE' });
+}
+
+export async function reviewVoice(id: string, rating: number, comment?: string): Promise<unknown> {
+  return request(`/voices/${id}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ rating, comment }),
+  });
 }
 
 export interface DepVerifyResult {
