@@ -42,6 +42,11 @@ typings/
 # TypeScript cache
 *.tsbuildinfo
 
+# Python 字节码缓存（构建产物，不入库；此前 scripts/pets/__pycache__ 下有 5 个 .pyc 被误跟踪）
+__pycache__/
+*.pyc
+*.pyo
+
 # Optional npm cache directory
 .npm
 
