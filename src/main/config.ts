@@ -275,17 +275,20 @@ export interface PetFeaturesConfig {
 export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
 
 /** 宠物动作：kind=frames 为帧序列（手动上传/宠物资源包附带），
- * kind=clip 为 Live2D/3D 模型内置动画 clip（仅模型宠物可用）。
+ * kind=clip 为 Live2D/3D 模型内置动画 clip（仅模型宠物可用），
+ * kind=video 为视频动作（透明 webm，由渲染端直接播放，不转帧序列）。
  * petAssetId 标记动作属于哪个宠物资源（动作随宠物，不可跨宠物使用） */
 export interface PetAction {
   id: string;
   name: string;
-  kind: 'frames' | 'clip';
+  kind: 'frames' | 'clip' | 'video';
   source: 'ai' | 'manual' | 'platform';
   frameFiles?: string[];
   frameRate?: number;
   /** kind=clip 时的模型内置动画名称 */
   clipName?: string;
+  /** kind=video 时的视频文件绝对路径（webm） */
+  videoFile?: string;
   /** 所属宠物资源 id（platform 来源动作） */
   petAssetId?: string;
   /** 所属内置演示宠物 id（source=manual 但由内置演示宠物安装产生，用于精确识别/清理） */

@@ -340,12 +340,15 @@ export interface ChatMessage {
 export interface PetAction {
   id: string;
   name: string;
-  kind: 'frames' | 'clip';
+  /** frames=帧序列 / clip=模型内置动画 / video=视频文件（透明 webm） */
+  kind: 'frames' | 'clip' | 'video';
   source: 'ai' | 'manual' | 'platform';
   frameFiles?: string[];
   frameRate?: number;
   /** kind=clip 时的模型内置动画名称 */
   clipName?: string;
+  /** kind=video 时的视频文件绝对路径（webm） */
+  videoFile?: string;
   /** 所属宠物资源 id（platform 来源动作，随宠物安装/清除） */
   petAssetId?: string;
   /** 所属内置演示宠物 id（内置演示宠物安装产生的动作，用于精确识别/清理） */

@@ -3,10 +3,12 @@ import {
   ACTION_MODEL_SCHEMA_VERSION,
   DEFAULT_WEIGHTS,
   collectReferences,
+  migrateActionModel,
   modelFromActions,
   validatePetActionModel,
   type PetActionLike,
   type PetActionModel,
+  type PetActionSpec,
 } from './actionModel';
 
 const action = (partial: Partial<PetActionLike> & { name: string }): PetActionLike => ({
@@ -189,5 +191,52 @@ describe('旧配置迁移（PetAction[] → schemaVersion 2）', () => {
     expect(model.idle).toEqual([]);
     expect(validatePetActionModel(model).ok).toBe(true);
     expect(notes.join(' ')).toContain('没有任何互动动作');
+  });
+});
+
+describe('视频动作与 v2 → v3 迁移（schemaVersion 3）', () => {
+  it('video 动作经 modelFromActions 记 kind=video 并带 videoFile，且模型合法', () => {
+    const { model, notes } = modelFromActions([
+      action({ name: '打招呼', kind: 'video', videoFile: 'clip.webm', frameFiles: undefined }),
+    ]);
+    const spec = model.actions['打招呼'];
+    expect(spec.kind).toBe('video');
+    expect(spec.videoFile).toBe('clip.webm');
+    expect(validatePetActionModel(model).ok).toBe(true);
+    expect(notes.join(' ')).toContain('kind=video');
+  });
+
+  it('video 动作缺 videoFile → 报错；帧率缺失本身不算错（视频自带帧率）', () => {
+    const model = validModel();
+    const spec: PetActionSpec = { ...model.actions['待机'], ref: '打招呼', kind: 'video' };
+    delete spec.frameRate;
+    model.actions['打招呼'] = spec;
+
+    const r = validatePetActionModel(model);
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toContain('videoFile 是 video 动作的必填项');
+    expect(r.errors.join(' ')).not.toContain('frameRate');
+  });
+
+  it('v2 模型仍被接受；migrateActionModel 补默认 kind（modelClips→clip、其余→frames）且幂等', () => {
+    const v2 = { ...validModel(), schemaVersion: 2, modelClips: ['待机'] } as unknown as PetActionModel;
+    for (const one of Object.values(v2.actions)) delete (one as { kind?: string }).kind;
+    expect(validatePetActionModel(v2).ok).toBe(true);
+
+    const migrated = migrateActionModel(v2) as PetActionModel;
+    expect(migrated.schemaVersion).toBe(ACTION_MODEL_SCHEMA_VERSION);
+    expect(migrated.actions['待机'].kind).toBe('clip');
+    expect(migrated.actions['吃饭'].kind).toBe('frames');
+    expect(validatePetActionModel(migrated).ok).toBe(true);
+    // 纯函数：不改入参
+    expect((v2.actions['待机'] as { kind?: string }).kind).toBeUndefined();
+    // 幂等：已是当前版本直接原样返回
+    expect(migrateActionModel(migrated)).toBe(migrated);
+  });
+
+  it('未知 schemaVersion 不被臆造迁移（交校验器拒绝）', () => {
+    const weird = { ...validModel(), schemaVersion: 99 } as unknown as PetActionModel;
+    expect(migrateActionModel(weird)).toBe(weird);
+    expect(validatePetActionModel(weird).ok).toBe(false);
   });
 });

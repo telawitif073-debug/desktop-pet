@@ -21,11 +21,14 @@
 export interface PetActionLike {
   id: string;
   name: string;
-  kind: 'frames' | 'clip';
+  /** 载体：帧序列 / 模型内置动画 clip / 视频文件（透明 webm 等） */
+  kind: 'frames' | 'clip' | 'video';
   interaction?: 'none' | 'feed' | 'rest' | 'play';
   frameRate?: number;
   frameFiles?: string[];
   clipName?: string;
+  /** kind='video' 时的视频文件（透明 VP9 webm；由渲染端直接播放，不转帧序列） */
+  videoFile?: string;
   petAssetId?: string;
   builtinPetId?: string;
 }
@@ -59,7 +62,17 @@ export type EventSlot = string | string[];
 export interface PetActionSpec {
   /** 动作名（= 池内引用键；必须唯一） */
   ref: string;
-  frameRate: number;
+  /**
+   * 载体种类（v3 起显式声明，缺省视为帧序列）：
+   *  - `frames` 帧序列（frame_000.png…，由 frameRate 驱动）
+   *  - `clip`   模型内置动画（Live2D/3D，按名字驱动）
+   *  - `video`  视频文件（透明 webm；自带帧率，**不需要 frameRate**）
+   */
+  kind?: 'frames' | 'clip' | 'video';
+  /** kind='video' 时的视频文件相对路径（必需项，见 validatePetActionModel） */
+  videoFile?: string;
+  /** 帧序列播放帧率；视频动作不需要（给了就要合法） */
+  frameRate?: number;
   loop: boolean;
   /** 动作首尾原地停顿（秒）：移动/衔接类动作用来对齐位移与动画时长 */
   holdLeadSec: number;
@@ -73,7 +86,7 @@ export interface PetActionSpec {
 }
 
 export interface PetActionModel {
-  schemaVersion: 2;
+  schemaVersion: typeof ACTION_MODEL_SCHEMA_VERSION;
   idle: string[];
   interaction: Record<PetInteraction, string[]>;
   clicks: string[];
@@ -87,7 +100,9 @@ export interface PetActionModel {
   modelClips?: string[];
 }
 
-export const ACTION_MODEL_SCHEMA_VERSION = 2 as const;
+export const ACTION_MODEL_SCHEMA_VERSION = 3 as const;
+/** 仍被接受的旧版本（加载时应先过 {@link migrateActionModel}） */
+export const ACTION_MODEL_SUPPORTED_SCHEMAS: readonly number[] = [2, ACTION_MODEL_SCHEMA_VERSION];
 export const WEIGHT_TOTAL = 100;
 export const FRAME_RATE_RANGE: [number, number] = [1, 24];
 export const DEFAULT_MOVE_PARAMS: MoveParams = { minDist: 60, maxDist: 240, margin: 20, leadSec: 2, tailSec: 2 };
@@ -103,6 +118,30 @@ export interface ValidationResult {
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * 旧模型迁移到当前 schemaVersion（**纯函数，不修改入参**）。
+ * v2 → v3 只有一处变化：动作规格新增 `kind`（载体种类）与 `videoFile`（视频动作的文件）。
+ * 因此迁移只需按既有信息补默认 `kind`：
+ *  - 已登记在 `modelClips` 里的名字 → `'clip'`（模型内置动画）
+ *  - 其余 → `'frames'`（帧序列）
+ * 已带 `kind` 的规格原样保留，故对 v3 数据是幂等的；未知版本不臆造，交给校验器报错。
+ */
+export function migrateActionModel(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const m = raw as Partial<PetActionModel>;
+  if (m.schemaVersion === ACTION_MODEL_SCHEMA_VERSION) return raw;
+  if (m.schemaVersion !== 2) return raw;
+  const clips = new Set(Array.isArray(m.modelClips) ? m.modelClips : []);
+  const actions: Record<string, PetActionSpec> = {};
+  for (const [key, spec] of Object.entries(m.actions ?? {})) {
+    actions[key] =
+      spec && typeof spec === 'object'
+        ? { kind: clips.has(key) ? 'clip' : 'frames', ...spec }
+        : (spec as PetActionSpec);
+  }
+  return { ...m, schemaVersion: ACTION_MODEL_SCHEMA_VERSION, actions };
+}
 
 /** 校验动作名在所有池中的引用是否存在、是否重复（清单↔定义互校）。
  *  对外防御：任何字段结构异常都不能抛错（校验器要先能安全地描述"哪里坏了"）。 */
@@ -136,8 +175,10 @@ export function validatePetActionModel(raw: unknown): ValidationResult {
   if (!raw || typeof raw !== 'object') return { ok: false, errors: ['配置不是对象'] };
   const m = raw as Partial<PetActionModel>;
 
-  if (m.schemaVersion !== ACTION_MODEL_SCHEMA_VERSION) {
-    errors.push(`schemaVersion 必须是 ${ACTION_MODEL_SCHEMA_VERSION}（当前 ${String(m.schemaVersion)}）`);
+  if (typeof m.schemaVersion !== 'number' || !ACTION_MODEL_SUPPORTED_SCHEMAS.includes(m.schemaVersion)) {
+    errors.push(
+      `schemaVersion 必须是 ${ACTION_MODEL_SUPPORTED_SCHEMAS.join(' 或 ')}（当前 ${String(m.schemaVersion)}）`,
+    );
   }
 
   const actions = m.actions;
@@ -155,7 +196,18 @@ export function validatePetActionModel(raw: unknown): ValidationResult {
       }
       const s = spec as Partial<PetActionSpec>;
       if (s.ref !== key) errors.push(`actions["${key}"].ref 必须与键一致（当前 ${String(s.ref)}）`);
-      if (!isFiniteNumber(s.frameRate) || s.frameRate < FRAME_RATE_RANGE[0] || s.frameRate > FRAME_RATE_RANGE[1]) {
+      if (s.kind !== undefined && s.kind !== 'frames' && s.kind !== 'clip' && s.kind !== 'video') {
+        errors.push(`actions["${key}"].kind 非法（${String(s.kind)}，只能是 frames/clip/video）`);
+      }
+      const frameRateBad =
+        !isFiniteNumber(s.frameRate) || s.frameRate < FRAME_RATE_RANGE[0] || s.frameRate > FRAME_RATE_RANGE[1];
+      if (s.kind === 'video') {
+        // 视频动作：必须给出视频文件；帧率由视频自带，可省（给了就要合法）
+        if (!isNonEmptyString(s.videoFile)) errors.push(`actions["${key}"].videoFile 是 video 动作的必填项`);
+        if (s.frameRate !== undefined && frameRateBad) {
+          errors.push(`actions["${key}"].frameRate 必须在 ${FRAME_RATE_RANGE[0]}~${FRAME_RATE_RANGE[1]} 之间`);
+        }
+      } else if (frameRateBad) {
         errors.push(`actions["${key}"].frameRate 必须在 ${FRAME_RATE_RANGE[0]}~${FRAME_RATE_RANGE[1]} 之间`);
       }
       if (typeof s.loop !== 'boolean') errors.push(`actions["${key}"].loop 必须是布尔`);
@@ -344,9 +396,16 @@ export function modelFromActions(
     if (byName) {
       notes.push(`动作「${action.name}」未标互动，按历史同名约定归入 ${byName} 池`);
     }
+    const isVideo = action.kind === 'video';
+    if (isVideo) {
+      notes.push(`视频动作「${action.name}」记为 kind=video（直接播视频，无帧序列）`);
+    }
     actionsMap[action.name] = {
       ref: action.name,
+      // 视频动作自带帧率，此值不参与播放；给个合规默认即可（仍受 FRAME_RATE_RANGE 校验）
       frameRate: clampFrameRate(action.frameRate),
+      kind: isVideo ? 'video' : 'frames',
+      ...(isVideo && isNonEmptyString(action.videoFile) ? { videoFile: action.videoFile } : {}),
       loop: false,
       holdLeadSec: 0.35,
       holdTailSec: 0.35,
