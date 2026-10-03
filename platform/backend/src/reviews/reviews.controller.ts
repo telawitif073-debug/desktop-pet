@@ -73,8 +73,8 @@ export class ReviewsController {
     @Param('assetType') assetType: AssetType,
     @Param('assetId') assetId: string,
   ) {
-    if (assetType !== 'agent' && assetType !== 'voice') {
-      throw new BadRequestException('资源类型必须是 agent 或 voice');
+    if (assetType !== 'agent' && assetType !== 'voice' && assetType !== 'pet') {
+      throw new BadRequestException('资源类型必须是 agent / voice / pet');
     }
     return this.reviewsService.deleteDownload(assetType, assetId, user.id);
   }

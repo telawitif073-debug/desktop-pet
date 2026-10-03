@@ -14,6 +14,7 @@ import { MultiChatModule } from './multi-chat/multi-chat.module';
 import { CrashReportModule } from './crash/crash-report.module';
 import { ToolsModule } from './tools/tools.module';
 import { VoicesModule } from './voices/voices.module';
+import { PetPacksModule } from './pet-packs/pet-packs.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { VoicesModule } from './voices/voices.module';
     CrashReportModule,
     ToolsModule,
     VoicesModule,
+    PetPacksModule,
   ],
 })
 export class AppModule {}

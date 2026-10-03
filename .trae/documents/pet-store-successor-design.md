@@ -140,6 +140,21 @@ POST /pet-packs (multipart: pack.zip, 可选 preview.png, + 文本字段)
    等于白做一遍；直接 b 的同步复制已在后端 `tsc`/`jest`/`nest build`/3199 冷启动上验证通过。
 2. **后端**：`pet_packs` 实体 + module/service/controller + DTO；`admin` 支持 `pet_pack` 审核；
    `reviews` / `download_records` 枚举回补 `'pet'`；配套 migration（建表 + 枚举回补 + 索引）。
+   **【已完成】**：migration `1791041000000-AddPetPacks`（建表 + 可逆的双枚举重建）；
+   新增 `src/pet-packs/**`（entity/dto/service/controller/module）；
+   `admin` 审核类型增加 `pet_pack`；`reviews` 侧接入 PetPack 仓库（存在性校验 / 评分回写 / 已下载列表）。
+   两点实施取舍：
+   - **刻意不开放 `POST /pet-packs`（发布）**：发布必须「上传即解包跑 `evaluatePetPack`」并拒绝不合格包（D3），
+     该能力属第 3 步。在服务端校验落地前留一个「什么文件都能当宠物发布」的入口，
+     等于把 §1.1 的旧缺陷重新引进来——因此宁可在第 2 步先不上发布路由。
+   - `admin` 的 `type=pet_pack`（载体名）与 `asset_type='pet'`（评价域资源类型）**刻意不同名**，
+     后者沿用旧值以保持跨端与历史数据口径；已在两处代码注释中标注。
+   验证：`tsc` 0 错；`jest` 2 套件 / 5 用例全绿；`nest build` 后产物布局不变；
+   真库执行 migration 后 `migration:generate` 报告「No changes in database schema were found」（实体↔库零漂移）；
+   3199 冷启动后**接口级 20 项断言全过**（待审包对公众不可见 / 管理员可见并能审核 /
+   `bodyKind` 与关键词筛选 / 下载返回 `sha256` 且写 `download_records(asset_type='pet')` /
+   评价写 `reviews(asset_type='pet')` 并回写 `rating` / 已下载列表带回宠物包实体 / 删除与 404 边界），
+   验证数据已清理、行数与验证前一致。
 3. **服务端包校验**：新增 `pack-inspection.ts`（解包 + 肩部探测 + 调 `evaluatePetPack`），
    与 `uploads/upload-validation.ts`（字节级安全校验）叠加使用。
 4. **桌面端**：`platformClient` 的 pet 分支改为 pack 流程（上传/下载/安装/校验），
