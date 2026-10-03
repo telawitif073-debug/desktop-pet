@@ -221,6 +221,14 @@ src/pet/
 即：**现状会让这些入口拿到 404**。要么继续按 Plan 完成调用方清理，要么先明确「新的宠物商店」由谁承接
 （这是设计决策，不应默默留 404）。
 
+→ 承接方案已单独设计：[`pet-store-successor-design.md`](./pet-store-successor-design.md)
+（推荐「包即资源」：分发单位从单文件改为经 `evaluatePetPack` 校验的宠物包；
+含备选方案 C「不做平台分发」与 4 个待决策点）。
+
+> **执行顺序教训**：Phase 4.1 是在"替换方案尚未设计"时就执行的，导致刚把 `'pet'`
+> 从 `asset_type` 枚举剔除，承接方案又要求加回来。破坏性删除应排在替代设计定稿之后——
+> 这条应作为 Phase 5/6 的前置检查项。
+
 ### Phase 5 — 资源与移动产物清理
 1. 删除 `resources/builtin-pets`、`resources/pet-asset-library` 与 `forge.config.ts` 的 `extraResource` 项
    （仅在「新模块不再需要随包资产」这一前提下；若新模块仍需要，改为新目录并在 Phase 1 设计里定名）。
