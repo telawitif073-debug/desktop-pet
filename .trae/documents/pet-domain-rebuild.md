@@ -54,21 +54,28 @@
 
 单一入口，对外只暴露一条 import 路径：`import { feed, evaluatePetPack, resolvePlayback } from '../pet'`。
 
+**最终结构（Phase 3 完成后，即当前仓库实况）**：
+
 ```
 src/pet/
-├─ index.ts                    统一出口（facade）
-├─ vitals.ts                   四维：规则/钳制/默认/序列化/归一化（唯一事实来源）  ← Phase 1 已交付
-├─ appearance.ts               （= shared/petResource 的再导出 + 后续迁入）      ← 计划
-├─ actions.ts                  （= shared/petActionModel + petPlayback 的再导出） ← 计划
-├─ ports.ts                    依赖倒置接口：存储/平台/时钟/随机源（便于测试与双跑）← 计划
-└─ migration/                  迁移期临时件（Phase 3 删除）
-   ├─ vitalsLegacy.ts          旧实现冻结副本（禁止修改）                        ← Phase 1 已交付
-   └─ dualRunVitals.ts         双跑比对器（新≡旧 断言 + 分歧打点）               ← Phase 1 已交付
+├─ index.ts          统一出口（facade）：只做再导出，不含逻辑
+├─ vitals.ts         四维：规则/钳制/默认/序列化/归一化（唯一事实来源，桌面与移动共用）
+├─ resource.ts       宠物本体资源识别与包级判定（原 src/shared/petResource.ts）
+├─ actionModel.ts    动作配置模型（原 src/shared/petActionModel.ts）
+├─ playback.ts       动作播放决策（原 src/shared/petPlayback.ts）
+└─ *.spec.ts         对应单测（随实现一起搬迁）
 ```
 
+两点与初版设计的出入（记录取舍）：
+1. 计划里的 `appearance.ts` / `actions.ts` 改名未做——`resource.ts` / `actionModel.ts` / `playback.ts`
+   与内部概念一一对应、语义更准，改名只增加 diff 不增价值；门面已提供统一入口，命名不是关键。
+2. 计划里的 `ports.ts`（依赖倒置接口）**没有建**——实施下来 IO 天然留在适配层
+   （`petPack`/`petActions`/`petStore`/移动端 store），模块内本就无 IO，再抽一层端口属过度设计。
+
 **边界原则**
-- 模块内**只放纯逻辑**（无 fs / 无 IPC / 无 React / 无 localStorage）；IO 通过 `ports.ts` 注入。
-- 桌面主进程、渲染端、移动端**共用同一份纯逻辑**（移动端通过 tsconfig path 或构建期拷贝引用，Phase 4 处理）。
+- 模块内**只放纯逻辑**（无 fs / 无 IPC / 无 React / 无 localStorage）；IO 全部留在适配层。
+- 桌面主进程、渲染端、移动端**共用同一份纯逻辑**：移动端经 `mobile/metro.config.js` 的
+  `watchFolders: ['../src']` 直接引用（已验证进包，见 Phase 2）。
 - 渲染、IPC、存储属于「适配层」，不进入本模块。
 
 ---
@@ -125,13 +132,27 @@ src/pet/
 扩展名/MIME/魔数**文件安全校验**，与「宠物本体分类」是两个不同关注点；
 `pets/actions` 也不做本体判定。故 Phase 2 在后端无改动，后端的表结构/配置面已由 Phase 4.0 覆盖。
 
-### Phase 3 — 删除旧实现（首个破坏性阶段，需先打 tag + 备份）
-按序删除并逐步验证（顺序 = 依赖倒序）：
-1. `src/pet/migration/**`（双跑与旧副本）与所有 `vitalsDualRun` 引用。
-2. `src/shared/pet{Resource,ActionModel,Playback}.ts` 迁入 `src/pet/` 后，删除旧路径与其历史 import。
-3. `src/store/petStore.ts` 旧公式残留；`src/main/config.ts` 的 `foodSystemEnabled` 等无引用字段。
-4. 删除/迁移对应单测（`src/shared/pet*.spec.ts` → `src/pet/*.spec.ts`）。
-- 退出条件：全仓 `grep -rn "vitalsLegacy\|dualRunVitals"` 为空；tsc + 305 测试全绿；冒烟通过。
+### Phase 3 — 删除旧实现【已完成 2026-10-03】
+回滚点：tag `pet-domain-phase2-done`。按依赖倒序执行：
+
+| # | 动作 | 结果 |
+|---|---|---|
+| 1 | 删除 `src/pet/migration/**`（`vitalsLegacy.ts` 旧实现冻结副本 + `dualRunVitals.ts` 双跑比对器），并从门面移除 `vitalsDualRun` 导出 | 已删 |
+| 2 | `src/store/petStore.ts` 由双跑包装改直连 `src/pet/vitals` 的新实现（行为不变，去掉了比对开销） | 已改 |
+| 3 | 用 `git mv` 把三个实现连同单测迁入模块（保留 git 历史）：`shared/petResource.ts→pet/resource.ts`、`shared/petActionModel.ts→pet/actionModel.ts`、`shared/petPlayback.ts→pet/playback.ts`（+ 对应 `.spec.ts`） | 已迁 |
+| 4 | 修正模块内相对 import（`playback.ts`→`./actionModel`；三个 spec 的导入；`playback.spec.ts:200` 的内联 `import('./petActionModel')` 类型） | 已改 |
+| 5 | 删除无引用配置字段 `foodSystemEnabled`（`config.ts` 接口 + 默认值、`global.d.ts` 镜像、`conversationManager.spec.ts` fixture）；真正的开关是 `petFeatures.feedEnabled` | 已删 |
+| 6 | `vitals.spec.ts`：等价性用例随旧实现退场，改为**不变量断言**（全边界矩阵下四维必须落在 [0,100]、好感不衰减、`resetVitals` 幂等），并保留迁移期发现的「损坏数据消毒」加固用例 | 已改 |
+| 7 | 同步文档里的旧路径引用（`Environment/README.md`、`docs/upstream-pet-assets.md`；历史设计文档加「路径迁移提示」而非改写留痕） | 已改 |
+
+验证（实跑）：
+- `npx tsc --noEmit`：0 错（tsc 期间抓出 `playback.spec.ts` 的一处内联 `import('./petActionModel')` 类型残留——vitest 因 esbuild 剥离类型而没报，说明**类型检查不能只靠测试**）。
+- `npm test`：**303 项全绿**（305 → 303：移除双跑/等价性用例 2 项净减；`vitals.spec` 由 20 → 18）。
+- 移动端 `npx tsc --noEmit -p tsconfig.json`：0 错；`react-native bundle` 打包成功（跨项目共享未受影响）。
+- 全仓复核：`vitalsLegacy` / `dualRunVitals` / `vitalsDualRun` / `foodSystemEnabled` / 旧 `shared/pet*` 导入 **全部 0 命中**。
+
+**仍未做（属 Phase 5/6）**：`mobile/metro.config.js` 之外的构建配置同步、`src/assets/pet.png` 等旧演示资源、
+`resources/` 随包资源、`scripts/pets/*` 资源流水线、以及历史设计文档的整体归档。
 
 ### Phase 4 — 平台与数据库（不可逆，需独立审批 + 备份）
 

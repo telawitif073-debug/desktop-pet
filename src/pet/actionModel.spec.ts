@@ -7,7 +7,7 @@ import {
   validatePetActionModel,
   type PetActionLike,
   type PetActionModel,
-} from './petActionModel';
+} from './actionModel';
 
 const action = (partial: Partial<PetActionLike> & { name: string }): PetActionLike => ({
   id: partial.id ?? `a_${partial.name}`,

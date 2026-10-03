@@ -8,8 +8,8 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // 宠物主体功能模块（与桌面端共用同一份纯逻辑；mobile/metro.config.js 已把它加入 watchFolders）。
-// 这里只引 `pet/vitals` 而不引模块门面：门面会连带导出迁移期的双跑比对代码，
-// 没必要打进 RN 包体（Phase 3 删除双跑后可直接改为从门面导入）。
+// 这里只引 `pet/vitals` 而不是模块门面 `pet`：门面还导出 resource/actionModel/playback，
+// 移动端目前用不到，引门面会把它们一并打进 RN 包体（无谓体积）。何时需要那些能力再从门面引。
 import {
   feed as petFeed,
   play as petPlay,

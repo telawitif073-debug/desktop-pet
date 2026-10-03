@@ -9,7 +9,7 @@ import {
   MIN_BODY_STILL_EDGE,
   type ResourceEntry,
   type ResourceProbe,
-} from './petResource';
+} from './resource';
 
 /** 静帧探测：默认带 alpha（抠像立绘） */
 const still = (width: number, height: number, hasAlpha = true): ResourceProbe => ({ width, height, hasAlpha, frames: 1 });

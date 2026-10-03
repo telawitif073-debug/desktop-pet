@@ -137,7 +137,8 @@ Pillow 不能栅格化 SVG（旧版会把这类文件记成「解码失败」而
 
 > **分类标准已升级（重要）**：本文第 4/6 节描述的是「按路径策略筛选角色美术」的早期口径。
 > 现在导入侧统一采用《宠物本体资源分类标准》（12 个角色 + 6 层判定顺序 + 两种证据策略）：
-> `src/shared/petResource.ts`（运行期，宽松策略）⇄ `scripts/pets/pet_roles.py`（抓取侧，严格策略），
+> `src/pet/resource.ts`（运行期，宽松策略；原 `src/shared/petResource.ts`，Phase 3 已迁入宠物主体功能模块）⇄
+> `scripts/pets/pet_roles.py`（抓取侧，严格策略），
 > 设计动机、反例证据与落地范围见 [`.trae/documents/pet-resource-system-refactor.md`](../.trae/documents/pet-resource-system-refactor.md)。
 > 严格策略下：只有**结构性证据**（清单声明 / 本体目录 / 模型扩展名 / 弱状态目录 + 透明通道）才算宠物本体；
 > 界面件、表情包、道具、贴图、品牌、文档图、无法判定者一律不入包（fail-closed）。

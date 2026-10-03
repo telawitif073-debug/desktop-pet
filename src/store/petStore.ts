@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import {
-  vitalsDualRun,
+  feed as vitalsFeed,
+  play as vitalsPlay,
+  rest as vitalsRest,
+  decay as vitalsDecay,
+  resetVitals as vitalsReset,
+  adjustMood as vitalsAdjustMood,
+  addAffection as vitalsAddAffection,
   normalizeVitals,
   serializeVitals,
   vitalsEqual,
@@ -75,26 +81,26 @@ export const usePetStore = create<PetState>((set) => ({
 
   feed: () => set((s) => {
     // 好感度增长与功能开关无关（开关只控制显隐）：喂食固定 +2
-    const next = vitalsDualRun.feed(vitalsOf(s));
+    const next = vitalsFeed(vitalsOf(s));
     persistVitals(next);
     return { ...s, ...next, lastFeedAt: Date.now() };
   }),
 
   play: () => set((s) => {
     // 好感度增长与功能开关无关（开关只控制显隐）：玩耍固定 +5
-    const next = vitalsDualRun.play(vitalsOf(s));
+    const next = vitalsPlay(vitalsOf(s));
     persistVitals(next);
     return { ...s, ...next, lastPlayAt: Date.now() };
   }),
 
   rest: () => set((s) => {
-    const next = vitalsDualRun.rest(vitalsOf(s));
+    const next = vitalsRest(vitalsOf(s));
     persistVitals(next);
     return { ...s, ...next, lastRestAt: Date.now() };
   }),
 
   decay: (gates) => set((s) => {
-    const next = vitalsDualRun.decay(vitalsOf(s), gates);
+    const next = vitalsDecay(vitalsOf(s), gates);
     // 每10次decay才保存一次，避免频繁写localStorage
     if (Math.random() < 0.1) persistVitals(next);
     return { ...s, ...next };
@@ -102,7 +108,7 @@ export const usePetStore = create<PetState>((set) => ({
 
   resetVitals: (gates) => set((s) => {
     const current = vitalsOf(s);
-    const next = vitalsDualRun.resetVitals(current, gates);
+    const next = vitalsReset(current, gates);
     // 全部已归位：返回原 state，避免每 5s 触发订阅更新
     if (vitalsEqual(current, next)) return s;
     persistVitals(next);
@@ -114,13 +120,13 @@ export const usePetStore = create<PetState>((set) => ({
   setMoving: (v) => set((s) => (s.moving === v ? s : { ...s, moving: v })),
 
   adjustMood: (delta) => set((s) => {
-    const next = vitalsDualRun.adjustMood(vitalsOf(s), delta);
+    const next = vitalsAdjustMood(vitalsOf(s), delta);
     persistVitals(next);
     return { ...s, ...next };
   }),
 
   addAffection: (amount) => set((s) => {
-    const next = vitalsDualRun.addAffection(vitalsOf(s), amount);
+    const next = vitalsAddAffection(vitalsOf(s), amount);
     persistVitals(next);
     return { ...s, ...next };
   }),

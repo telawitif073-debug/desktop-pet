@@ -15,8 +15,8 @@
  * 说明：显式点播（右键菜单「播放」按钮）由调用方直接播 id，不经本模块；
  * 本模块处理的是「按语义触发」的路径。
  */
-import type { ActionCategory, EventSlot, PetActionModel, PetInteraction } from './petActionModel';
-import { modelFromActions, type PetActionLike } from './petActionModel';
+import type { ActionCategory, EventSlot, PetActionModel, PetInteraction } from './actionModel';
+import { modelFromActions, type PetActionLike } from './actionModel';
 
 /** 可注入随机源（[0,1)）；默认 Math.random，测试注入固定序列 */
 export type Rng = () => number;

@@ -1,5 +1,10 @@
 # 宠物本体资源系统：参考项目分析与重构方案
 
+> **路径迁移提示（2026-10-03）**：本文是当时的**设计记录**，其中 `src/shared/petResource.ts` /
+> `petActionModel.ts` / `petPlayback.ts` 三个文件已随宠物功能域重建迁入 `src/pet/`，
+> 现名分别为 `resource.ts` / `actionModel.ts` / `playback.ts`（统一入口 `src/pet/index.ts`）。
+> 本文其余内容按原样保留，作为决策留痕。
+>
 > 输入：① 任务要求（修正「非宠物本体资源被加进宠物资源包」的缺陷；以
 > `https://github.com/PC2005-cloud/dsh-pet/tree/main/dsh-pet` 为参考重构宠物本体资源系统）；
 > ② 参考项目源码（已取到 `Environment/downloads/github/dsh-pet/`，MIT，commit 见 `.fetch.json`）；

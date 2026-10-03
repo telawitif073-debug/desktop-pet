@@ -178,7 +178,6 @@ export interface VoiceAsrApiConfig {
 
 export interface AppConfig {
   petSystemEnabled: boolean;
-  foodSystemEnabled: boolean;
   randomMoveEnabled: boolean;
   agentType: string;
   userProfile: UserProfile;

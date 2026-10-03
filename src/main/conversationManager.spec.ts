@@ -33,7 +33,6 @@ const petState: PetStateSnapshot = { hunger: 80, mood: 80, energy: 80, affection
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
     petSystemEnabled: true,
-    foodSystemEnabled: true,
     randomMoveEnabled: true,
     agentType: 'default',
     userProfile: { name: '测试用户', preferences: {} },

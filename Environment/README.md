@@ -111,5 +111,5 @@ Environment\toolchains\pyenv\Scripts\python.exe -m pip install --index-url https
 ```
 
 抓取产物一律留在本目录内、**不进入 `resources/`**：只有通过 `scripts/pets/import_pet_assets.py`
-按《宠物本体资源分类标准》（`src/shared/petResource.ts` ⇄ `scripts/pets/pet_roles.py`）判定为
+按《宠物本体资源分类标准》（`src/pet/resource.ts` ⇄ `scripts/pets/pet_roles.py`）判定为
 **宠物本体**且许可为 A 层的素材，才会被归一化后写入 `resources/`。

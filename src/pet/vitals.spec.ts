@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_VITALS,
   LOCKED_VALUE,
   DECAY_PER_TICK,
   HUNGER_ALERT_THRESHOLD,
+  VITAL_MAX,
+  VITAL_MIN,
   clampVital,
   normalizeVitals,
   serializeVitals,
@@ -20,22 +22,6 @@ import {
   type PetVitals,
   type VitalGates,
 } from './vitals';
-import * as legacy from './migration/vitalsLegacy';
-import {
-  setVitalsDivergenceReporter,
-  getVitalsDivergences,
-  getVitalsDivergenceCount,
-  resetVitalsDivergences,
-  feed as feedDual,
-  play as playDual,
-  rest as restDual,
-  decay as decayDual,
-  resetVitals as resetVitalsDual,
-  adjustMood as adjustMoodDual,
-  addAffection as addAffectionDual,
-  normalizeVitals as normalizeVitalsDual,
-  type VitalsDivergence,
-} from './migration/dualRunVitals';
 
 const V = (hunger: number, mood: number, energy: number, affection: number): PetVitals => ({ hunger, mood, energy, affection });
 
@@ -51,10 +37,9 @@ const GATES: VitalGates[] = [
 const VALUES = [0, 1, 5, 29.5, 30, 79.5, 80, 99.9, 100];
 
 describe('宠物主体模块 · 生命体征规则', () => {
-  it('默认值与旧实现一致（80/80/80/50），锁定值为 80', () => {
+  it('默认值为 80/80/80/50，锁定值为 80', () => {
     expect(DEFAULT_VITALS).toEqual({ hunger: 80, mood: 80, energy: 80, affection: 50 });
     expect(LOCKED_VALUE).toBe(80);
-    expect(parseFloat('0')).toBe(0);
   });
 
   it('喂食：饱腹 +15、好感 +2，且全部钳制在 100', () => {
@@ -88,13 +73,11 @@ describe('宠物主体模块 · 生命体征规则', () => {
   });
 
   it('衰减不会跌破 0', () => {
-    const next = decay(V(0, 0, 0, 0), { feed: true, play: true, rest: true });
-    expect(next).toEqual(V(0, 0, 0, 0));
+    expect(decay(V(0, 0, 0, 0), { feed: true, play: true, rest: true })).toEqual(V(0, 0, 0, 0));
   });
 
   it('resetVitals：关闭的维度锁定回 80，开启的维度保持原值', () => {
-    const next = resetVitals(V(12, 34, 56, 78), { feed: false, play: true, rest: false });
-    expect(next).toEqual(V(80, 34, 80, 78));
+    expect(resetVitals(V(12, 34, 56, 78), { feed: false, play: true, rest: false })).toEqual(V(80, 34, 80, 78));
   });
 
   it('resetVitals：无需归位时返回入参引用（保留 zustand 免渲染优化）', () => {
@@ -132,109 +115,80 @@ describe('宠物主体模块 · 生命体征规则', () => {
   });
 });
 
-describe('宠物主体模块 · 新旧实现等价性（双跑基准）', () => {
-  beforeEach(() => {
-    resetVitalsDivergences();
-    setVitalsDivergenceReporter(undefined as unknown as (d: VitalsDivergence) => void);
-  });
+/**
+ * 迁移期（Phase 1）曾用「新实现 ⇄ 旧实现冻结副本」的全边界矩阵比对来证明等价；
+ * Phase 3 已删除 `migration/`（旧实现与双跑比对器），那批「新旧逐值相等」的用例随之退场
+ * （结论见 `.trae/documents/pet-domain-rebuild.md`）。
+ *
+ * 但边界矩阵本身的价值不能丢——这里把「与旧实现比对」换成「不变量断言」：
+ * 不依赖任何对照实现，直接钉住四维在任何输入组合下都必须守住的约束。
+ */
+describe('宠物主体模块 · 全边界不变量（原双跑矩阵的等价替代）', () => {
+  const inRange = (v: PetVitals): boolean =>
+    [v.hunger, v.mood, v.energy, v.affection].every((n) => Number.isFinite(n) && n >= VITAL_MIN && n <= VITAL_MAX);
 
-  it('feed / play / rest 在全边界矩阵上逐值等价', () => {
+  it('feed/play/rest：任何边界输入下四维都落在 [0,100] 且不为 NaN', () => {
     for (const h of VALUES) {
       for (const m of VALUES) {
         const v = V(h, m, m, h);
-        expect(feed(v)).toEqual(legacy.feedLegacy(v));
-        expect(play(v)).toEqual(legacy.playLegacy(v));
-        expect(rest(v)).toEqual(legacy.restLegacy(v));
+        expect(inRange(feed(v))).toBe(true);
+        expect(inRange(play(v))).toBe(true);
+        expect(inRange(rest(v))).toBe(true);
       }
     }
   });
 
-  it('decay 在全边界矩阵 × 全门闸组合上逐值等价', () => {
+  it('decay：任何边界输入 × 任何门闸组合下都不会越界，且好感度恒定不变', () => {
     for (const g of GATES) {
       for (const h of VALUES) {
         for (const m of VALUES) {
           const v = V(h, m, m, h);
-          expect(decay(v, g)).toEqual(legacy.decayLegacy(v, g));
+          const next = decay(v, g);
+          expect(inRange(next)).toBe(true);
+          expect(next.affection).toBe(v.affection);
         }
       }
     }
   });
 
-  it('resetVitals 在全边界矩阵 × 全门闸组合上逐值等价（含引用恒等的场景）', () => {
+  it('resetVitals：幂等（连做两次结果一致）且只在维度关闭时改动', () => {
     for (const g of GATES) {
       for (const h of VALUES) {
         const v = V(h, 44, h, 50);
-        expect(resetVitals(v, g)).toEqual(legacy.resetVitalsLegacy(v, g));
-        // 引用恒等也一致：无需归位时两边都返回入参
-        expect(resetVitals(v, g) === v).toBe(legacy.resetVitalsLegacy(v, g) === v);
+        const once = resetVitals(v, g);
+        expect(resetVitals(once, g)).toEqual(once); // 幂等
+        if (g.feed) expect(once.hunger).toBe(v.hunger);
+        else expect(once.hunger).toBe(LOCKED_VALUE);
+        if (g.rest) expect(once.energy).toBe(v.energy);
+        else expect(once.energy).toBe(LOCKED_VALUE);
+        expect(once.affection).toBe(v.affection); // 好感度不受开关影响
       }
     }
   });
 
-  it('adjustMood / addAffection / normalizeVitals 等价', () => {
+  it('adjustMood / addAffection：任何增量下都钳制在 [0,100]', () => {
     for (const m of VALUES) {
       for (const d of [-100, -8, -0.5, 0, 0.5, 8, 100]) {
-        expect(adjustMood(V(0, m, 0, 0), d)).toEqual(legacy.adjustMoodLegacy(V(0, m, 0, 0), d));
+        expect(inRange(adjustMood(V(0, m, 0, 0), d))).toBe(true);
       }
     }
     for (const a of VALUES) {
       for (const amt of [-50, -1, 0, 1, 5, 200]) {
-        expect(addAffection(V(0, 0, 0, a), amt)).toEqual(legacy.addAffectionLegacy(V(0, 0, 0, a), amt));
+        expect(inRange(addAffection(V(0, 0, 0, a), amt))).toBe(true);
       }
-    }
-    for (const raw of [undefined, {}, { hunger: 10 }, { hunger: 55, mood: 44, energy: 33, affection: 22 }]) {
-      expect(normalizeVitals(raw)).toEqual(legacy.loadVitalsLegacy(raw));
     }
   });
 
   /**
-   * 有意差异（由双跑比对器真实抓出来的，不是遗漏）：旧 `load` 只判断 `typeof === 'number'`，
-   * 于是损坏的 localStorage（`NaN` / 越界值）会被原样带进内存——`NaN` 一旦进入状态，
-   * 后续所有 Math.min/max 都是 NaN，状态条永久变成 "NaN" 且衰减再也回不来。
-   * 新模块 `normalizeVitals` 统一消毒（非有限数回落默认、越界钳制），这是**刻意的加固**，
-   * 因此它不纳入「必须等价」的比对集合，而是用本用例显式钉住。
+   * 迁移期由双跑比对器真实抓出、并**刻意保留**的加固行为：
+   * 旧实现在读取持久化状态时只判断 `typeof === 'number'`，于是损坏的 localStorage
+   * （`NaN` / 越界值）会被原样带进内存——`NaN` 一旦进入状态，后续所有 Math.min/max 都是 NaN，
+   * 状态条永久显示 "NaN" 且衰减再也回不来。新实现统一消毒，此处显式钉住。
    */
-  it('有意差异：normalizeVitals 对损坏数据消毒（旧实现会带进 NaN / 越界值）', () => {
-    const corrupted = { hunger: NaN, mood: 'x', energy: null, affection: 200 };
-    expect(legacy.loadVitalsLegacy(corrupted)).toEqual(V(NaN, 80, 80, 200)); // 旧：原样保留
-    expect(normalizeVitals(corrupted)).toEqual(V(80, 80, 80, 100));          // 新：消毒
-    expect(normalizeVitals({ affection: -5 }).affection).toBe(0);            // 新：负值钳制
-  });
-
-  it('双跑比对器：正确实现下不产生任何分歧记录', () => {
-    const report: VitalsDivergence[] = [];
-    setVitalsDivergenceReporter((d) => report.push(d));
-
-    for (const g of GATES) {
-      for (const h of VALUES) {
-        const v = V(h, 60, h, 40);
-        feedDual(v);
-        playDual(v);
-        restDual(v);
-        decayDual(v, g);
-        resetVitalsDual(v, g);
-        adjustMoodDual(v, 8);
-        addAffectionDual(v, 1);
-      }
-    }
-    normalizeVitalsDual({ hunger: 1 });
-
-    expect(report).toHaveLength(0);
-    expect(getVitalsDivergenceCount()).toBe(0);
-    expect(getVitalsDivergences()).toHaveLength(0);
-  });
-
-  it('双跑比对器确实在工作：喂入损坏数据必须被抓成 1 条分歧', () => {
-    // 反向验证「比对器不是空跑」——否则上面的 0 分歧毫无说服力
-    const report: VitalsDivergence[] = [];
-    setVitalsDivergenceReporter((d) => report.push(d));
-
-    normalizeVitalsDual({ hunger: NaN });
-
-    expect(report).toHaveLength(1);
-    expect(report[0].op).toBe('normalizeVitals');
-    expect(report[0].actual.hunger).toBe(80);   // 新：消毒为默认
-    expect(Number.isNaN(report[0].expected.hunger)).toBe(true); // 旧：原样 NaN
-    expect(getVitalsDivergenceCount()).toBe(1);
+  it('加固：损坏持久化数据必须被消毒（旧实现会带进 NaN / 越界值）', () => {
+    expect(normalizeVitals({ hunger: NaN, mood: 'x', energy: null, affection: 200 })).toEqual(V(80, 80, 80, 100));
+    expect(normalizeVitals({ affection: -5 }).affection).toBe(0);
+    expect(normalizeVitals({ hunger: Infinity }).hunger).toBe(80);
+    expect(normalizeVitals({ energy: 1e9 }).energy).toBe(100);
   });
 });

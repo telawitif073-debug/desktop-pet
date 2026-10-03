@@ -355,7 +355,6 @@ export interface VoiceAsrConfig {
 
 export interface AppConfig {
   petSystemEnabled: boolean;
-  foodSystemEnabled: boolean;
   randomMoveEnabled: boolean;
   agentType: string;
   userProfile: UserProfile;
@@ -433,7 +432,6 @@ export interface AppConfig {
 
 const DEFAULT_CONFIG: AppConfig = {
   petSystemEnabled: true,
-  foodSystemEnabled: true,
   randomMoveEnabled: false,
   agentType: 'default',
   userProfile: {

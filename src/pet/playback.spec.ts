@@ -11,8 +11,8 @@ import {
   resolvePlayback,
   rollKind,
   type Rng,
-} from './petPlayback';
-import { ACTION_MODEL_SCHEMA_VERSION, DEFAULT_WEIGHTS, type PetActionModel } from './petActionModel';
+} from './playback';
+import { ACTION_MODEL_SCHEMA_VERSION, DEFAULT_WEIGHTS, type PetActionModel } from './actionModel';
 
 /** 确定性随机源：按给定序列循环取值，便于断言"抽到了哪一个" */
 const seq = (values: number[]): Rng => {
@@ -197,7 +197,7 @@ describe('触发优先级与显式失败原因', () => {
 });
 
 describe('互动触发整合（绑定优先 → 标准池回退）', () => {
-  const act = (id: string, name: string, extra: Partial<import('./petActionModel').PetActionLike> = {}) => ({
+  const act = (id: string, name: string, extra: Partial<import('./actionModel').PetActionLike> = {}) => ({
     id,
     name,
     kind: 'frames' as const,
