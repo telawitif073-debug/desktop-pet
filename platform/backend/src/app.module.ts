@@ -4,12 +4,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { dataSourceOptions } from './data-source';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
-import { PetsModule } from './pets/pets.module';
 import { AgentsModule } from './agents/agents.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AdminModule } from './admin/admin.module';
-import { ActionsModule } from './actions/actions.module';
 import { SyncModule } from './sync/sync.module';
 import { AppUpdateModule } from './app-update/app-update.module';
 import { MultiChatModule } from './multi-chat/multi-chat.module';
@@ -30,12 +28,10 @@ import { VoicesModule } from './voices/voices.module';
     TypeOrmModule.forRoot({ ...dataSourceOptions }),
     UsersModule,
     AuthModule,
-    PetsModule,
     AgentsModule,
     UploadsModule,
     ReviewsModule,
     AdminModule,
-    ActionsModule,
     SyncModule,
     AppUpdateModule,
     MultiChatModule,

@@ -5,9 +5,11 @@ import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
 import { UserSyncData, SyncKind } from './user-sync-data.entity';
 import { DownloadRecord } from '../reviews/download-record.entity';
+// 资源类型以 reviews 的 AssetType 为唯一来源（避免这里再抄一份字面量联合，随枚举变更漂移）
+import type { AssetType } from '../reviews/review.entity';
 
 interface LibraryItem {
-  assetType: 'pet' | 'agent' | 'voice';
+  assetType: AssetType;
   assetId: string;
   downloadedAt: Date;
 }

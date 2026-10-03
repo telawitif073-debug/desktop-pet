@@ -23,8 +23,8 @@ export class DownloadRecord {
   @JoinColumn({ name: 'user_id' })
   user: User | null;
 
-  // 'action' 为历史保留值；'voice' 为音色板块下载记录
-  @Column({ name: 'asset_type', type: 'enum', enum: ['pet', 'agent', 'action', 'voice'] })
+  // 'action' 为历史保留值；'pet' 已由 migration 1791036000000 从枚举中剔除
+  @Column({ name: 'asset_type', type: 'enum', enum: ['agent', 'action', 'voice'] })
   assetType: AssetType;
 
   @Column({ name: 'asset_id', type: 'uuid' })

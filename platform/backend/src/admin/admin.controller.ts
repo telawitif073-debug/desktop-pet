@@ -9,7 +9,6 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AgentsService } from '../agents/agents.service';
-import { PetsService } from '../pets/pets.service';
 import { VoicesService } from '../voices/voices.service';
 
 @Controller('admin')
@@ -17,7 +16,6 @@ import { VoicesService } from '../voices/voices.service';
 @Roles('admin')
 export class AdminController {
   constructor(
-    private readonly petsService: PetsService,
     private readonly agentsService: AgentsService,
     private readonly voicesService: VoicesService,
   ) {}
@@ -37,12 +35,11 @@ export class AdminController {
     id: string,
     status: 'approved' | 'rejected',
   ) {
-    // 动作随宠物审核，无独立审核入口
-    if (type !== 'pet' && type !== 'agent' && type !== 'voice') {
-      throw new BadRequestException('资源类型必须是 pet / agent / voice');
+    // 旧宠物资源（pet）已随宠物功能域重建下线，不再是可审核的资源类型
+    if (type !== 'agent' && type !== 'voice') {
+      throw new BadRequestException('资源类型必须是 agent / voice');
     }
 
-    if (type === 'pet') return this.petsService.updateStatus(id, status);
     if (type === 'voice') return this.voicesService.updateStatus(id, status);
     return this.agentsService.updateStatus(id, status);
   }

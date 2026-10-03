@@ -179,14 +179,47 @@ src/pet/
    它们正是 Phase 4 要清的「旧宠物功能遗留组件」，因不在实体集合内，删代码不会自动清理，
    需要一条显式 `DROP TABLE` migration。
 
-#### 4.1 正式删除（待执行）
-1. 生产库同样先执行 4.0 的备份 + 基线（阿里云 ECS）。
-2. `pet_assets` / `action_assets` / `download_records`(asset_type='pet') / `reviews`(asset_type='pet')
-   的数据导出与迁移；`user_sync_data` 中 `pet_state` 的兼容读取。
-3. 删除模型/实体/模块：`platform/backend/src/{pets,actions}`、`app.module.ts` 引用、
-   `scripts/seed.ts` 的示例宠物；前端 `ResourceList/Detail/Profile/Workshop` 的宠物分支。
-4. 新增 migration 显式删表（含 4.0 发现的 2 张孤儿表），**不再依赖 synchronize**。
-5. 退出条件：平台后端启动无孤儿引用；商店不再展示宠物类目；移动端/桌面端无 404 调用。
+#### 4.1 后端实体与孤儿表删除【已完成 2026-10-03（后端部分）】
+回滚点：tag `pet-domain-phase3-done`；执行前另做 `pre-phase41-<ts>.dump` 全量备份。
+
+**关键教训（差点造成静默数据丢失）**：先用 `pg_stat_user_tables.n_live_tup` 判断"库是空的"，
+它给出 0——但那是统计收集器的**估算值**（该库从未 ANALYZE）。改用 `count(*)` 后真相是：
+**23 用户 / 16 只宠物资产 / 9 条评价 / 75 条下载记录**。据此在迁移里内建了「安全闸」：
+确有数据且未设 `ALLOW_PET_DATA_PURGE=1` 时**主动中止**，并把待删行数打印出来。
+第一次执行时该闸确实拦下了 74 行。
+
+执行内容：
+1. **先导出再删**：把将被永久删除的行导出到 `Environment/build/backups/purged-<ts>-*.json`
+   （pet_assets 16 / action_assets 0 / reviews(pet) 9 / download_records(pet) 65），
+   流程与踩坑记录写进同目录 `RESTORE.md`。
+2. **migration `1791036000000-DropLegacyPetTables`**（`down()` 故意抛错 = 不可逆）：
+   删 `action_assets`（FK 先删）→ `pet_assets` → 孤儿表 `ai_image_providers` / `ai_style_presets`
+   → 重建 `reviews` / `download_records` 的 `asset_type` 枚举为 `('agent','action','voice')`
+   （Postgres 不能直接删枚举值，故「建新类型 → 改列 → 删旧类型 → 改名」，名字保持不变）。
+3. **删除后端模块**：`src/pets/**`、`src/actions/**`（9 个文件），并清理全部引用——
+   `app.module.ts`、`admin.controller/module`（去掉 pet 审核分支）、`reviews.service/module`
+   （去掉 petsRepo 与 pet 分支）、`review.entity`/`download-record.entity` 的枚举与 `AssetType`、
+   `sync.service` 里重复抄写的资源类型联合、`scripts/seed.ts` 的示例宠物、
+   `test/pets.service.spec.ts`。
+4. **无关表零损伤**（迁移后逐一核对）：users 23、agent_assets 1、download_records(agent) 10、
+   user_sync_data 13、multi_agent_sessions 2、voice_assets 0。
+
+验证（实跑）：
+- 后端 `tsc --noEmit` 0 错；`jest` 2 套件 / 5 用例全绿。
+- `migration:generate` 输出 **"No changes in database schema were found"** →
+  实体与数据库结构**完全一致，无漂移**（这是本次最有力的自证）。
+- 冷启动 3199 实例：启动成功、`/api/app-update` 200、**`/api/pets` 返回 404**、日志无迁移与报错；
+  用户正在运行的 3001 未受影响。
+
+**仍未做（Phase 4.1 的另一半，需继续）**：跨端调用方仍在调用已删除的宠物接口——
+- 桌面：`src/main/platformClient.ts`（`search/getDetail/download/install` 的 `pet` 分支、
+  `installPetActions`、`publish` 的 pet 载荷、`platform:getInstalledPet`）、
+  `PetResources.tsx` 的商店入口；
+- 移动：`mobile/src/api/platform.ts` 的 `'pet'` 资产类型、`StoreDrawer.tsx` 的宠物 tab；
+- 平台前端：`ResourceListPage` / `ResourceDetailPage` / `ProfilePage` / `WorkshopPage` 的宠物分支。
+
+即：**现状会让这些入口拿到 404**。要么继续按 Plan 完成调用方清理，要么先明确「新的宠物商店」由谁承接
+（这是设计决策，不应默默留 404）。
 
 ### Phase 5 — 资源与移动产物清理
 1. 删除 `resources/builtin-pets`、`resources/pet-asset-library` 与 `forge.config.ts` 的 `extraResource` 项

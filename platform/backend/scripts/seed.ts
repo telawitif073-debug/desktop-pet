@@ -4,7 +4,6 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { DataSource } from 'typeorm';
 import { User } from '../src/users/user.entity';
-import { PetAsset } from '../src/pets/pet-asset.entity';
 import { AgentAsset } from '../src/agents/agent-asset.entity';
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
@@ -17,7 +16,7 @@ async function main() {
     username: process.env.DB_USERNAME || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
     database: process.env.DB_DATABASE || 'desktop_pet_platform',
-    entities: [User, PetAsset, AgentAsset],
+    entities: [User, AgentAsset],
     synchronize: false,
   });
   await dataSource.initialize();
@@ -27,7 +26,6 @@ async function main() {
   await dataSource.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
 
   const usersRepo = dataSource.getRepository(User);
-  const petsRepo = dataSource.getRepository(PetAsset);
   const agentsRepo = dataSource.getRepository(AgentAsset);
 
   // ---- 用户 ----
@@ -54,25 +52,6 @@ async function main() {
       }),
     );
     console.log('seeded demo: demo@platform.local / demo123');
-  }
-
-  // ---- 示例宠物资源 ----
-  // fileUrl 必须指向**可渲染的图片**：早先指向纯文本桩，商店卡片既无预览图、安装后也不可用。
-  // 这里使用随项目自产的原创演示形象（CC0，见 resources/builtin-pets 生成脚本）。
-  if ((await petsRepo.count()) === 0) {
-    await petsRepo.save(
-      petsRepo.create({
-        name: '示例桌宠·芽芽猫',
-        description: '平台自带的示例宠物形象（原创绘制），用于验证商店浏览、下载与安装流程。',
-        authorId: admin.id,
-        category: '桌宠',
-        tags: ['示例', '猫', '原创'],
-        fileUrl: '/uploads/sample-pet-asset.png',
-        version: '1.0.0',
-        status: 'approved',
-      }),
-    );
-    console.log('seeded sample pet asset');
   }
 
   // ---- 示例智能体资源 ----
