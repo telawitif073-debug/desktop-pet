@@ -111,6 +111,39 @@ export const DEFAULT_WEIGHTS = { idle: 10, turn: 5, move: 5 };
 /** 历史约定：右键「喂食/休息/玩耍」在未绑定时回退到同名动作 —— 迁移时按此归池 */
 export const INTERACTION_LABELS: Record<PetInteraction, string> = { feed: '吃饭', rest: '休息', play: '玩耍' };
 
+// ---------------------------------------------------------------------------
+// 包内动作载荷布局（发布端写入 / 安装端读取，必须同口径）
+// ---------------------------------------------------------------------------
+/** 包内动作载荷目录（帧图 / 视频） */
+export const ACTION_PAYLOAD_DIR = 'pet/actions';
+/** 包内动作清单文件（{@link PetActionModel} 的 JSON 快照） */
+export const ACTION_PAYLOAD_MANIFEST = 'pet/actions.json';
+
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+/** FNV-1a 32bit → 8 位十六进制（纯函数，跨端可复现） */
+function shortHash(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * 动作名 → 包内载荷目录名（`pet/actions/<dir>/`，帧图 `frame_000.png…`、视频 `clip.webm`）。
+ * 发布端写入、安装端读取都用它，因此必须**确定性**且**不撞车**：
+ * 名字本身合法时直接用（可读）；需要转义或是 Windows 保留名时追加原名哈希，
+ * 保证「不同动作名 → 不同目录」，安装端才能只凭动作名找回帧图（无需在清单里写路径）。
+ */
+export function actionPayloadDirName(actionName: string): string {
+  const name = String(actionName ?? '').trim();
+  const sanitized = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '').slice(0, 40);
+  const usable = sanitized && !WINDOWS_RESERVED.test(sanitized) ? sanitized : '';
+  return usable === name && usable ? usable : `${usable || 'action'}~${shortHash(name)}`;
+}
+
 export interface ValidationResult {
   ok: boolean;
   errors: string[];

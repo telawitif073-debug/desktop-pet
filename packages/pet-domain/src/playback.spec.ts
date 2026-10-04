@@ -238,6 +238,24 @@ describe('互动触发整合（绑定优先 → 标准池回退）', () => {
     expect(r.evidence.join(' ')).toContain('无可播资源');
   });
 
+  it('视频动作算可播（bonded video：有 videoFile 即直接采用绑定）', () => {
+    const video = act('idv', '打招呼', { kind: 'video', videoFile: '/tmp/clip.webm', frameFiles: undefined });
+    const other = act('id1', '吃饭', { interaction: 'feed' });
+    const r = resolveInteractionTrigger({ kind: 'feed', boundActionId: 'idv', actions: [other, video] });
+    expect(r.ok).toBe(true);
+    expect(r.actionId).toBe('idv');
+    expect(r.pool).toBe('binding');
+  });
+
+  it('video 动作缺 videoFile 仍视为不可播', () => {
+    const broken = act('idv', '坏视频', { kind: 'video', frameFiles: undefined });
+    const ok = act('id1', '吃饭', { interaction: 'feed' });
+    const r = resolveInteractionTrigger({ kind: 'feed', boundActionId: 'idv', actions: [ok, broken] });
+    expect(r.ok).toBe(true);
+    expect(r.actionId).toBe('id1');
+    expect(r.evidence.join(' ')).toContain('无可播资源');
+  });
+
   it('无任何可用动作 → 显式 no-action（不静默什么都不做）', () => {
     const r = resolveInteractionTrigger({ kind: 'play', actions: [] });
     expect(r.ok).toBe(false);

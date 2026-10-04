@@ -179,10 +179,45 @@ POST /pet-packs (multipart: pack.zip, 可选 preview.png, + 文本字段)
    验证数据行数与上传目录已复原。
 4. **桌面端**：`platformClient` 的 pet 分支改为 pack 流程（上传/下载/安装/校验），
    `PetPublishForm` 改成"选择宠物包"（而非选一张主图），`PetResources` 商店入口恢复。
+   **【已完成】**：
+   - **包内动作载荷约定**（新增，见 `packages/pet-domain/src/actionModel.ts`）：
+     `pet/actions.json`（actionModel schemaVersion 3 快照）＋ `pet/actions/<动作名>/frame_*.png`
+     （视频为 `clip.webm`）。目录名由共享纯函数 `actionPayloadDirName()` 派生（确定性、不撞车），
+     因此安装端只凭动作名就能找回帧图，**无需在清单里写路径**。
+   - **动作载荷不参与本体判定**：`resource.ts` 新增 `isActionPayloadPath()`，桌面 `buildPackEntries`
+     与服务端 `inspectPetPack` 同口径跳过该子树——否则「静态本体 + 帧动作」的包会选中一帧动作当形象。
+   - **发布**：新增 `src/main/petPackPublish.ts`（解包 → 本地预校验 → 注入动作 → 重打包，无 electron 依赖、
+     可单测）；`platformClient.publishPetPack` 调它后 `POST /pet-packs`（multipart `pack`/`preview`）。
+     `PetPublishForm` 改为「选一个宠物包 zip + 可选预览 + 附带动作（帧图 zip / webm 视频 / 模型 clip）」。
+   - **浏览/下载/安装/卸载**：API 路径 `pets → pet-packs`（本地安装目录仍叫 `pets`，避免已装宠物断链）；
+     安装前**校验 `pack_sha256`**，安装后**从包内 `pet/actions.json` 装动作**（旧的 `/pets/:id/actions` 已下线）；
+     `addFramesAction` 新增 `skipBodyCheck`（包内声明过的动作载荷不再走「是否宠物本体」启发式）。
+   - **顺手修掉的 P5 遗留缺陷**：`playback.ts` 的 `playable()` 漏了 `kind==='video'`，
+     导致「绑定到视频动作」的互动被判成「无可播资源」而回退——已修并补单测。
+   - 验证：桌面 `tsc` 0 错、`vitest` 23 文件 / 367 用例全绿（新增 `petPackPublish.spec` 12 例）；
+     后端 `tsc` 0 错、`jest` 4 套件 / 36 用例全绿、`nest build` 布局不变。
 5. **平台前端**：`ResourceListPage` / `ResourceDetailPage` / `ProfilePage` / `WorkshopPage`
    的宠物分支改为展示包信息与校验摘要。
-6. **移动端**：`api/platform.ts` 的 `'pet'` 恢复为 pack 语义，`StoreDrawer` 宠物 tab 恢复。
-7. **测试**：服务端用**真实宠物包**做「合格包通过 / 只有图标的包被拒」的接口级用例；
+   **【已完成】**：`api.ts` 新增 `assetPath()`（pet → `pet-packs`）与 `adminCarrierName()`
+   （pet → `pet_pack`，与后端 `admin.controller.ts` 的载体名一致；评价域仍是 `asset_type='pet'`）；
+   `types.ts` 的 `Asset` 补 `packUrl/packSha256/packBytes/bodyKinds/manifest`、`fileUrl` 改可选；
+   列表按 `bodyKinds` 出标签（模型/动画/静图）；详情页展示「本体类型 + 包体积 + 版本 + sha256 前缀」
+   与**服务端自动校验摘要**（本体条目数、被拒资源数与理由）；审核页同样展示 `bodyKinds` 与被拒资源数。
+   前端不再发布资源（`uploadPet/uploadAsset` 已删，发布收口到桌面端宠工坊）。
+   `ProfilePage` 无需改动（`ACTIVE_ID_PATTERN` 仍匹配 `pets|agents`）。
+   验证：前端 `tsc --noEmit` 与 `npm run build`（vite）均通过。
+6. **真机 GUI 冒烟（端到端）**：在真实 Electron + 真库（3199 临时端口，不动 3001）上跑通
+   「发布真实宠物包（含帧动作 + 视频动作）→ 审核 → 桌面端安装（sha256 校验 + 本体判定 + 包内动作落地）
+   → 实际播放」。录制到的**判据**（渲染端原地取证）：
+   `direct={"found":true,"scheme":"petaction","paused":false,"t0":0,"t1":0.685,"readyState":4,"err":null}`、
+   `feed1={"found":true,...,"t1":0.701,...}` —— 即 `<video>` 的 src 是 `petaction://`、未暂停、
+   `currentTime` 在推进、无解码错误；`feed`（互动触发，走 `resolveInteractionTrigger`）也能播，
+   印证了上一条 `playable()` 修复。冒烟用的临时 env 钩子 `PT_P6_PACK` 与测试数据（服务器行、上传文件、
+   本地安装目录/动作目录/配置）**已全部清理并按基线还原**，`grep` 零残留。
+   同时清掉了一处历史遗留：`src/main.ts` 里标注「验收后整块删除」的 `PT_PUB2` 临时钩子（137 行）。
+7. **移动端**：`api/platform.ts` 的 `'pet'` 恢复为 pack 语义，`StoreDrawer` 宠物 tab 恢复。
+   **【本轮未做】**：本轮范围确认为 step 4 + step 5，移动端待后续（当前移动端仍指向已下线的 `/pets`）。
+8. **测试**：服务端用**真实宠物包**做「合格包通过 / 只有图标的包被拒」的接口级用例；
    客户端保留现有 `petResource.spec.ts` 作为同一标准的回归。
 
 ---

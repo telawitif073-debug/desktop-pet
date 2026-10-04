@@ -138,6 +138,22 @@ describe('inspectPetPack · 合格包通过', () => {
     expect(r.manifest.actions).toBeNull();
     expect(r.manifest.warnings.join(' ')).toContain('actions.json');
   });
+
+  it('动作载荷区（pet/actions/**）不参与本体判定：静态本体不会被一帧动作顶替', () => {
+    const model = { schemaVersion: 3, actions: { wave: { ref: 'wave', kind: 'frames', frameRate: 8 } } };
+    const zip = buildZip([
+      { name: 'pet/body.png', data: makePng(512, 512) }, // 静帧本体
+      { name: 'pet/actions/wave/frame_000.png', data: makePng(256, 256) }, // 动作帧（更大面积也不该被选中）
+      { name: 'pet/actions/wave/frame_001.png', data: makePng(256, 256) },
+      { name: 'pet/actions.json', data: Buffer.from(JSON.stringify(model), 'utf8') },
+    ]);
+    const r = inspectPetPack(zip);
+    expect(r.entry?.path).toBe('pet/body.png');
+    expect(r.bodyKinds).toEqual(['body-still']);
+    expect(r.entryCount).toBe(1); // 只统计本体，动作载荷不计入
+    expect(r.manifest.rejected).toEqual([]);
+    expect(r.manifest.actions).toEqual(model);
+  });
 });
 
 describe('inspectPetPack · 不合格包被拒（返回结构化 400）', () => {

@@ -15,6 +15,7 @@ import { BadRequestException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import {
   evaluatePetPack,
+  isActionPayloadPath,
   isIgnoredPackPath,
   isQualifiedBody,
   probeByMeta,
@@ -45,9 +46,6 @@ export const PET_PACK_MAX_UNCOMPRESSED_BYTES = Number(process.env.PET_PACK_MAX_U
 
 /** 包格式版本：将来角色/结构升级时用于判定 `body_kinds` / `manifest` 是否需要重算（§六 风险 5） */
 export const PET_PACK_SCHEMA_VERSION = 1;
-
-/** 包内 `actions.json` 的相对路径（动作是包的一部分，不建独立表，见 D4） */
-const ACTIONS_PATH_RE = /^pet\/actions\.json$/i;
 
 const BODY_KIND_RANK: Record<PetPackBodyKind, number> = {
   'body-model': 0,
@@ -134,13 +132,16 @@ export function inspectPetPack(buf: Buffer): PackInspectionResult {
       throw new BadRequestException(`宠物包解压后过大（> ${fmtBytes(PET_PACK_MAX_UNCOMPRESSED_BYTES)}），疑似 zip 炸弹`);
     }
 
-    if (ACTIONS_PATH_RE.test(path)) {
-      try {
-        actions = JSON.parse(readZipEntry(buf, entry, { maxEntryBytes: PET_PACK_MAX_ENTRY_BYTES }).toString('utf8'));
-      } catch (e) {
-        warnings.push(`包内 ${path} 解析失败：${(e as Error).message}`);
+    if (isActionPayloadPath(path)) {
+      // 动作载荷区不参与本体判定（与客户端同一口径）：这里只给 pet/actions.json 留一份快照
+      if (path.toLowerCase() === 'pet/actions.json') {
+        try {
+          actions = JSON.parse(readZipEntry(buf, entry, { maxEntryBytes: PET_PACK_MAX_ENTRY_BYTES }).toString('utf8'));
+        } catch (e) {
+          warnings.push(`包内 ${path} 解析失败：${(e as Error).message}`);
+        }
       }
-      continue; // 清单文件不是「资源」，不进分类
+      continue;
     }
 
     let probe;

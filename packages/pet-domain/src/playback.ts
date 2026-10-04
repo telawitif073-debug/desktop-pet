@@ -249,7 +249,10 @@ export function resolveInteractionTrigger(args: {
   rng?: Rng;
 }): { ok: boolean; actionId?: string; actionName?: string; pool?: string; reason?: PlaybackFailure; evidence: string[] } {
   const { kind, boundActionId, actions } = args;
-  const playable = (a: PetActionLike): boolean => a.kind === 'clip' ? !!a.clipName : (a.frameFiles?.length ?? 0) > 0;
+  // 可播判定必须涵盖三种载体：clip 看 clipName、video 看 videoFile、frames 看帧文件。
+  // （漏掉 video 会让「绑定到视频动作」的互动判定成「无可播资源」而莫名回退到池子。）
+  const playable = (a: PetActionLike): boolean =>
+    a.kind === 'clip' ? !!a.clipName : a.kind === 'video' ? !!a.videoFile : (a.frameFiles?.length ?? 0) > 0;
 
   if (boundActionId) {
     const bound = actions.find((a) => a.id === boundActionId);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTION_MODEL_SCHEMA_VERSION,
   DEFAULT_WEIGHTS,
+  actionPayloadDirName,
   collectReferences,
   migrateActionModel,
   modelFromActions,
@@ -238,5 +239,26 @@ describe('视频动作与 v2 → v3 迁移（schemaVersion 3）', () => {
     const weird = { ...validModel(), schemaVersion: 99 } as unknown as PetActionModel;
     expect(migrateActionModel(weird)).toBe(weird);
     expect(validatePetActionModel(weird).ok).toBe(false);
+  });
+});
+
+describe('包内动作载荷目录名（发布 / 安装必须同口径）', () => {
+  it('合法名字直接用作目录名（可读、去首尾空格）', () => {
+    expect(actionPayloadDirName('wave')).toBe('wave');
+    expect(actionPayloadDirName('吃饭')).toBe('吃饭');
+    expect(actionPayloadDirName('  idle_01  ')).toBe('idle_01');
+  });
+
+  it('含非法字符 → 转义并追加原名哈希；不同原名不撞车且可复现', () => {
+    const slash = actionPayloadDirName('a/b');
+    expect(slash).not.toBe('a/b');
+    expect(slash).toMatch(/^a_b~/);
+    expect(actionPayloadDirName('a/b')).toBe(slash); // 确定性
+    expect(actionPayloadDirName('a\\b')).not.toBe(slash); // 不同原名 → 不同目录
+  });
+
+  it('Windows 保留名与空名 → 兜底 action~hash（仍可复现）', () => {
+    expect(actionPayloadDirName('CON')).toMatch(/^action~/);
+    expect(actionPayloadDirName('   ')).toMatch(/^action~/);
   });
 });

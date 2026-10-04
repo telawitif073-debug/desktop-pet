@@ -3,6 +3,7 @@ import {
   classifyResource,
   evaluatePetPack,
   groupFrameSequences,
+  isActionPayloadPath,
   isIgnoredPackPath,
   isPetBodyRole,
   isQualifiedBody,
@@ -310,5 +311,21 @@ describe('包内路径忽略口径（桌面遍历与后端解包必须一致）'
     expect(isIgnoredPackPath('Node_Modules/x.png')).toBe(true);
     // 末段是文件名：文件本身叫 dist 不受目录忽略表影响
     expect(isIgnoredPackPath('pet/dist')).toBe(false);
+  });
+});
+
+describe('动作载荷区（不参与本体判定）', () => {
+  it('pet/actions.json 与 pet/actions/** 判为动作载荷', () => {
+    expect(isActionPayloadPath('pet/actions.json')).toBe(true);
+    expect(isActionPayloadPath('Pet/Actions.json')).toBe(true);
+    expect(isActionPayloadPath('pet/actions/wave/frame_000.png')).toBe(true);
+    expect(isActionPayloadPath('pet/actions/wave/clip.webm')).toBe(true);
+  });
+
+  it('其它路径不是动作载荷（含顶层 actions/，那是本体目录）', () => {
+    expect(isActionPayloadPath('pet/body.png')).toBe(false);
+    expect(isActionPayloadPath('pet/actions2/x.png')).toBe(false);
+    expect(isActionPayloadPath('actions/eat/frame_000.png')).toBe(false);
+    expect(isActionPayloadPath('pet/idle/frame_000.png')).toBe(false);
   });
 });

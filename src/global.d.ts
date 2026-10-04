@@ -301,16 +301,28 @@ export interface PublishFilePayload {
   bytes: Uint8Array;
 }
 
-/** 发布载荷（对应平台 POST /pets、POST /agents、POST /voices） */
+/** 随宠物包发布的动作（主进程会注入到包内：帧图/视频写 pet/actions/<动作名>/，元数据汇总为 pet/actions.json） */
+export interface PublishPackAction {
+  name: string;
+  interaction?: 'none' | 'feed' | 'rest' | 'play';
+  /** frames=帧图序列（file 为 zip）；clip=模型内置动画（无文件）；video=透明 webm */
+  kind: 'frames' | 'clip' | 'video';
+  /** kind='clip' 时的模型动画名；缺省取动作名 */
+  clipName?: string;
+  /** kind='frames' 的帧图 zip；kind='video' 的 webm */
+  file?: PublishFilePayload;
+}
+
+/** 发布载荷（宠物 → POST /pet-packs，智能体 → POST /agents，音色 → POST /voices） */
 export interface PublishPayload {
   type: 'pet' | 'agent' | 'voice';
-  /** 纯文本字段（tags/actionsMeta/configSchema/dependencies 等由渲染端序列化） */
+  /** 纯文本字段（tags/configSchema/dependencies 等由渲染端序列化） */
   fields: Record<string, string>;
+  /** 宠物包 zip（宠物必填） */
   file?: PublishFilePayload;
   preview?: PublishFilePayload;
-  /** 帧图 zip（顺序须与 actionsMeta 中需要文件的项一致） */
-  actionFiles?: PublishFilePayload[];
-  actionsMeta?: Array<{ name: string; interaction?: 'none' | 'feed' | 'rest' | 'play'; clipName?: string }>;
+  /** 随宠物包发布的动作（可选） */
+  actions?: PublishPackAction[];
 }
 
 /** 发布成功返回的资源摘要 */

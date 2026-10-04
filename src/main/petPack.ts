@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import {
   evaluatePetPack,
+  isActionPayloadPath,
   isIgnoredPackPath,
   probeByMeta,
   probeImageHead,
@@ -87,13 +88,18 @@ export function probeImageFile(file: string): ResourceProbe | undefined {
   }
 }
 
-/** 把一个目录（资源包解压根）变成分类输入：相对路径 + 内容探测 */
+/**
+ * 把一个目录（资源包解压根）变成分类输入：相对路径 + 内容探测。
+ * `pet/actions.json` 与 `pet/actions/**`（动作载荷）被排除——动作随宠物安装，
+ * 但**不是宠物本体**，混进来会让静态本体被一帧动作顶替（与后端同口径）。
+ */
 export function buildPackEntries(dir: string): ResourceEntry[] {
   return walkPackFiles(dir)
     .map((file) => ({
       path: path.relative(dir, file).split(path.sep).join('/'),
       probe: probeImageFile(file),
     }))
+    .filter((entry) => !isActionPayloadPath(entry.path))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 

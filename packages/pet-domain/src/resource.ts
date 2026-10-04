@@ -22,6 +22,8 @@
  * 只有图标、只有封面、只有文档图、只有过小的静帧 → **invalid** 并给出显式原因。
  */
 
+import { ACTION_PAYLOAD_DIR, ACTION_PAYLOAD_MANIFEST } from './actionModel';
+
 export type PetResourceRole =
   | 'body-animation'
   | 'body-still'
@@ -199,6 +201,19 @@ export function isIgnoredPackPath(relPath: string): boolean {
     // 仅目录段参与 SKIP_DIRS 判定（末段是文件名）
     return i < segs.length - 1 && PACK_SKIP_DIRS.includes(seg.toLowerCase());
   });
+}
+
+/**
+ * 包内「动作载荷」区：`pet/actions.json` 与 `pet/actions/**`。
+ * ---------------------------------------------------------------------------
+ * 动作是宠物包的一部分（见 `actionModel.ts`），但**不是宠物本体**：把帧图目录当成
+ * 本体会让「静态本体 + 帧动作」的包选中一帧动作当形象。因此这棵子树**不参与本体判定**，
+ * 由客户端安装时按约定装配（帧图 = `pet/actions/<动作名>/frame_*.png`）。
+ * 桌面与服务端两侧必须同口径，否则又会出现「服务端说合格、客户端装不上」。
+ */
+export function isActionPayloadPath(relPath: string): boolean {
+  const p = normalize(relPath).toLowerCase();
+  return p === ACTION_PAYLOAD_MANIFEST.toLowerCase() || p.startsWith(`${ACTION_PAYLOAD_DIR.toLowerCase()}/`);
 }
 
 /** Live2D 清单后缀（与 `pet_roles.py` 的 `stem_of` 三条后缀逐字对应） */

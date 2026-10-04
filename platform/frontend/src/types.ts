@@ -27,6 +27,9 @@ export interface User {
   avatarUrl?: string | null;
 }
 
+/** 宠物本体类型（由服务端包校验派生，不是用户填写） */
+export type PetBodyKind = 'body-model' | 'body-animation' | 'body-still';
+
 export interface Asset {
   id: string;
   name: string;
@@ -34,7 +37,7 @@ export interface Asset {
   category?: string | null;
   tags?: string[];
   type?: 'chat' | 'task' | 'mixed';
-  /** 宠物资源形态 */
+  /** 宠物资源形态（旧字段，智能体分支仍在用） */
   format?: PetFormat;
   /** 宠物附带的动作清单（详情接口返回） */
   actions?: PetActionSummary[];
@@ -42,7 +45,20 @@ export interface Asset {
   dependencies?: string[];
   previewUrl?: string | null;
   backgroundUrl?: string | null;
-  fileUrl: string;
+  /** 资源文件地址：宠物包没有该字段（改用 packUrl），故为可选 */
+  fileUrl?: string | null;
+  /** 宠物包 zip 地址（宠物商店的唯一必填载体） */
+  packUrl?: string | null;
+  /** 包体 sha256（十六进制小写），下载/安装两侧比对 */
+  packSha256?: string | null;
+  /** 包体字节数 */
+  packBytes?: number | null;
+  /** 包格式版本 */
+  packSchemaVersion?: number;
+  /** 包内合格本体类型（服务端校验派生） */
+  bodyKinds?: PetBodyKind[];
+  /** 服务端校验清单快照（本体/被拒资源/角色统计等） */
+  manifest?: Record<string, unknown> | null;
   version: string;
   downloads: number;
   rating: number;

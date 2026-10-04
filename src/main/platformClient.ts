@@ -1,13 +1,23 @@
 import axios, { isAxiosError } from 'axios';
 import AdmZip from 'adm-zip';
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { app } from 'electron';
 import { loadConfig, saveConfig, type AppConfig, type PetFormat } from './config';
-import { addFramesAction, addClipAction, clearPlatformActions } from './petActions';
+import { addFramesAction, addClipAction, addVideoAction, clearPlatformActions } from './petActions';
 import { readBuiltinCover } from './builtinPets';
 import { pickPetAppearance } from './petPack';
+import {
+  ACTION_PAYLOAD_DIR,
+  ACTION_PAYLOAD_MANIFEST,
+  actionPayloadDirName,
+  migrateActionModel,
+  validatePetActionModel,
+  type PetActionModel,
+} from '../pet';
+import { buildPetPackForPublish } from './petPackPublish';
 
 export type PlatformAssetType = 'pet' | 'agent' | 'voice';
 
@@ -19,25 +29,32 @@ export interface UploadFilePayload {
   bytes: Uint8Array;
 }
 
-/** 宠物附带动作元数据（与 actionFiles 按下标对齐，见 publish 注释） */
-export interface PublishActionMeta {
+/**
+ * 随宠物包一起发布的动作（发布时由主进程注入到包内：
+ * 帧图/视频写入 `pet/actions/<动作名>/`，元数据汇总成 `pet/actions.json`）。
+ */
+export interface PublishPackAction {
   name: string;
   interaction?: 'none' | 'feed' | 'rest' | 'play';
+  /** frames=帧图序列（file 为 zip）；clip=模型内置动画（无文件）；video=透明 webm */
+  kind: 'frames' | 'clip' | 'video';
+  /** kind='clip' 时的模型动画名；缺省取动作名 */
   clipName?: string;
+  /** kind='frames' 的帧图 zip；kind='video' 的 webm */
+  file?: UploadFilePayload;
 }
 
-/** 宠工坊各页发布的载荷（对应平台 POST /pets、POST /agents、POST /voices） */
+/** 宠工坊各页发布的载荷（宠物 → POST /pet-packs，智能体 → POST /agents，音色 → POST /voices） */
 export interface PublishPayload {
   type: PlatformAssetType;
-  /** 纯文本字段（name/description/category/format/tags(JSON)/configSchema(JSON)/dependencies(JSON) 等） */
+  /** 纯文本字段（name/description/category/tags(JSON)/version/configSchema/dependencies 等） */
   fields: Record<string, string>;
-  /** 主资源文件；智能体结构化配置由渲染端生成 JSON 后放入 */
+  /** 宠物包 zip（宠物必填）；智能体结构化配置由渲染端生成 JSON 后放入 */
   file?: UploadFilePayload;
-  /** 宠物预览图（多图包 / Live2D / 3D 必需） */
+  /** 宠物封面图（可选；不参与本体判定） */
   preview?: UploadFilePayload;
-  /** 附带动作的帧图 zip（顺序须与 actionsMeta 中需要文件的项一致） */
-  actionFiles?: UploadFilePayload[];
-  actionsMeta?: PublishActionMeta[];
+  /** 随宠物包发布的动作（可选） */
+  actions?: PublishPackAction[];
 }
 
 export interface PlatformAuthState {
@@ -85,29 +102,37 @@ export function platformErrorText(error: unknown): string {
 interface AssetResponse {
   id: string;
   name: string;
-  fileUrl: string;
   status: string;
-  /** 宠物资源形态（image/pack/live2d/model3d） */
+  /** 智能体：配置文件地址 */
+  fileUrl?: string;
+  /** 宠物包（POST /pet-packs）：zip 地址 / 完整性 sha256 / 体积 */
+  packUrl?: string;
+  packSha256?: string;
+  packBytes?: number | null;
+  /** 宠物合格本体类型（由服务端校验派生，不是作者填写） */
+  bodyKinds?: string[];
+  /** 兼容旧字段（新契约不再返回） */
   format?: unknown;
   [key: string]: unknown;
-}
-
-/** 宠物附带动作（GET /pets/:id/actions 返回） */
-interface PetActionResponse {
-  id: string;
-  name: string;
-  kind?: string;
-  clipName?: string | null;
-  interaction?: string | null;
 }
 
 interface DownloadResponse {
   url: string;
   downloads: number;
+  /** 宠物包下载附带（安装前做完整性校验） */
+  sha256?: string;
+  bytes?: number | null;
+  version?: string;
 }
 
+/** 本地安装目录名：沿用 `pets`/`agents`，避免已安装宠物的识别与卸载断链 */
 function assetPath(type: PlatformAssetType): string {
   return type === 'pet' ? 'pets' : 'agents';
+}
+
+/** 平台接口资源路径：宠物已由「单文件 /pets」改为「宠物包 /pet-packs」 */
+function apiPath(type: PlatformAssetType): string {
+  return type === 'pet' ? 'pet-packs' : type === 'agent' ? 'agents' : 'voices';
 }
 
 function assertAssetType(type: string): asserts type is PlatformAssetType {
@@ -158,6 +183,20 @@ function isZipFile(filePath: string, contentType?: string): boolean {
 
 const IMAGE_EXTS = /\.(png|jpe?g|gif|webp)$/i;
 
+/** 文件 sha256（十六进制小写），用于宠物包完整性校验 */
+function sha256OfFile(filePath: string): string {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+/** 在 base 目录内安全解析相对路径（拒绝绝对路径与越界 `..`）；非法返回 null */
+function safeResolve(base: string, relative: string): string | null {
+  if (typeof relative !== 'string' || !relative.trim() || path.isAbsolute(relative)) return null;
+  const resolved = path.resolve(base, relative);
+  const inside = path.relative(base, resolved);
+  if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) return null;
+  return resolved;
+}
+
 export class PlatformClient {
   private get config(): AppConfig {
     return loadConfig();
@@ -170,7 +209,7 @@ export class PlatformClient {
 
   async search(type: PlatformAssetType, query: string, page = 1) {
     assertAssetType(type);
-    const response = await axios.get(apiUrl(this.config.platform.baseUrl, `/${assetPath(type)}`), {
+    const response = await axios.get(apiUrl(this.config.platform.baseUrl, `/${apiPath(type)}`), {
       params: { search: query, page, limit: 20 },
       headers: this.headers,
     });
@@ -179,7 +218,7 @@ export class PlatformClient {
 
   async getDetail(type: PlatformAssetType, id: string) {
     assertAssetType(type);
-    const response = await axios.get(apiUrl(this.config.platform.baseUrl, `/${assetPath(type)}/${id}`), {
+    const response = await axios.get(apiUrl(this.config.platform.baseUrl, `/${apiPath(type)}/${id}`), {
       headers: this.headers,
     });
     return response.data as AssetResponse;
@@ -248,26 +287,29 @@ export class PlatformClient {
   }
 
   /**
-   * 提交资源到平台（等待管理员审核）：宠物 / 智能体 / 音色三类共用同一条 multipart 通道。
-   * 注意：后端按下标取 actionFiles（metas[i] ↔ actionFiles[i]），因此附带动作必须在渲染端
-   * 先排「帧图 zip 动作」再排「模型 clip 动作」，否则取到空文件会报「动作缺少 zip」。
+   * 提交资源到平台（等待管理员审核）。
+   * - **宠物**：必须是一个 zip 宠物包（POST /pet-packs）。先本地解包跑 `evaluatePetPack`
+   *   （提前失败，避免白传），再按需把附带动作注入包内
+   *   （帧图/视频 → `pet/actions/<动作名>/`，元数据 → `pet/actions.json`），重新打包上传；
+   * - 智能体 / 音色：沿用单文件 multipart。
    */
   async publish(payload: PublishPayload) {
+    if (payload.type === 'pet') return this.publishPetPack(payload);
+
     const form = new FormData();
     if (payload.file) form.append('file', this.toBlobPart(payload.file), payload.file.name);
     if (payload.preview) form.append('preview', this.toBlobPart(payload.preview), payload.preview.name);
-    for (const actionFile of payload.actionFiles ?? []) {
-      form.append('actionFiles', this.toBlobPart(actionFile), actionFile.name);
-    }
-    if (payload.actionsMeta?.length) form.append('actionsMeta', JSON.stringify(payload.actionsMeta));
     for (const [key, value] of Object.entries(payload.fields)) {
       if (value !== undefined && value !== null && value !== '') form.append(key, value);
     }
-    const resourcePath = payload.type === 'pet' ? '/pets' : payload.type === 'agent' ? '/agents' : '/voices';
+    return this.postForm(payload.type === 'agent' ? '/agents' : '/voices', form);
+  }
+
+  /** multipart 提交（大文件不做本地体积限制，超时给足） */
+  private async postForm(resourcePath: string, form: FormData) {
     try {
       const response = await axios.post(apiUrl(this.config.platform.baseUrl, resourcePath), form, {
         headers: this.headers,
-        // 大文件（上限 50MB）不做本地体积限制，超时给足
         maxBodyLength: Infinity,
         maxContentLength: Infinity,
         timeout: 180_000,
@@ -276,6 +318,25 @@ export class PlatformClient {
     } catch (error) {
       throw new Error(platformErrorText(error));
     }
+  }
+
+  /**
+   * 宠物包发布：本地组装（解包 → 预校验 → 注入动作 → 重打包，见 petPackPublish.ts）后 POST /pet-packs。
+   * 本地预校验失败即抛错，**不发起上传**（避免白传几十 MB）。
+   */
+  private async publishPetPack(payload: PublishPayload) {
+    const packFile = payload.file;
+    if (!packFile) throw new Error('请选择宠物包文件（.zip）');
+    if (!/\.zip$/i.test(packFile.name)) throw new Error('宠物包必须是 .zip 压缩包');
+    const packed = buildPetPackForPublish(Buffer.from(packFile.bytes), payload.actions ?? []);
+
+    const form = new FormData();
+    form.append('pack', new Blob([packed], { type: 'application/zip' }), packFile.name);
+    if (payload.preview) form.append('preview', this.toBlobPart(payload.preview), payload.preview.name);
+    for (const [key, value] of Object.entries(payload.fields)) {
+      if (value !== undefined && value !== null && value !== '') form.append(key, value);
+    }
+    return this.postForm('/pet-packs', form);
   }
 
   // --- 用户数据云同步（/api/sync/*，LLM Key 由服务端 AES 加密落库） ---
@@ -304,7 +365,7 @@ export class PlatformClient {
     assertAssetType(type);
     const detail = await this.getDetail(type, id);
     const download = await axios.post<DownloadResponse>(
-      apiUrl(this.config.platform.baseUrl, `/${assetPath(type)}/${id}/download`),
+      apiUrl(this.config.platform.baseUrl, `/${apiPath(type)}/${id}/download`),
       undefined,
       { headers: this.headers },
     );
@@ -320,67 +381,84 @@ export class PlatformClient {
     return { tempPath, detail, downloads: download.data.downloads };
   }
 
-  /** 安装宠物时同步安装其附带动作：frames 下载 zip 注册帧序列，clip 直接登记模型动画名。
-   * 单个动作失败不阻断安装，但**必须回报失败清单**——过去只 `console.error`，
-   * 一旦动作数超过配额，安装会静默缩水（少装的动作用户完全看不见）。 */
-  private async installPetActions(
+  /**
+   * 从**已解包的宠物包内**安装动作（动作随宠物；旧的 `/pets/:id/actions` 独立接口已下线）：
+   * 读 `pet/actions.json` → 迁移/校验 → 按 kind 落盘注册：
+   *  - frames：`pet/actions/<动作名>/frame_*.png` 拷进 `userData/pet-actions/<id>/`；
+   *  - video ：`pet/actions/<动作名>/clip.webm` 直接注册；
+   *  - clip  ：模型内置动画，按名字登记（无文件）。
+   * 单个动作失败不阻断安装，但**必须回报失败清单**——过去只 console.error，
+   * 动作静默缩水时用户完全看不见。
+   */
+  private installPackActions(
+    installDir: string,
     petId: string,
-  ): Promise<{ installed: number; failures: Array<{ name: string; reason: string }> }> {
-    let actions: PetActionResponse[] = [];
+  ): { installed: number; failures: Array<{ name: string; reason: string }> } {
+    const manifestPath = path.join(installDir, ...ACTION_PAYLOAD_MANIFEST.split('/'));
+    if (!fs.existsSync(manifestPath)) return { installed: 0, failures: [] };
+
+    let model: PetActionModel;
     try {
-      const response = await axios.get(apiUrl(this.config.platform.baseUrl, `/pets/${petId}/actions`), {
-        headers: this.headers,
-      });
-      actions = Array.isArray(response.data) ? (response.data as PetActionResponse[]) : [];
+      const migrated = migrateActionModel(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
+      const check = validatePetActionModel(migrated);
+      if (!check.ok) {
+        return { installed: 0, failures: [{ name: ACTION_PAYLOAD_MANIFEST, reason: `动作清单非法：${check.errors.join('；')}` }] };
+      }
+      model = migrated as PetActionModel;
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
-      console.error(`Failed to fetch pet actions for "${petId}": ${reason}`);
-      return { installed: 0, failures: [{ name: '动作列表', reason: `拉取动作列表失败：${reason}` }] };
+      return { installed: 0, failures: [{ name: ACTION_PAYLOAD_MANIFEST, reason: `解析失败：${reason}` }] };
     }
 
     let installed = 0;
     const failures: Array<{ name: string; reason: string }> = [];
-    for (const action of actions) {
-      const interaction = action.interaction === 'feed' || action.interaction === 'rest' || action.interaction === 'play'
-        ? action.interaction
-        : 'none';
+    const register = (name: string, run: () => void): void => {
       try {
-        if (action.kind === 'clip' && action.clipName) {
-          addClipAction(action.name, action.clipName, { petAssetId: petId, interaction });
-        } else {
-          const download = await axios.post<{ url: string }>(
-            apiUrl(this.config.platform.baseUrl, `/pets/${petId}/actions/${action.id}/download`),
-            undefined,
-            { headers: this.headers },
-          );
-          const fileUrl = new URL(download.data.url, `${this.config.platform.baseUrl}/`).toString();
-          const file = await axios.get<ArrayBuffer>(fileUrl, { responseType: 'arraybuffer', headers: this.headers });
-          const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-pet-action-'));
-          try {
-            const tempPath = path.join(tempDir, `${action.id}.zip`);
-            fs.writeFileSync(tempPath, Buffer.from(file.data));
-            if (!isZipFile(tempPath)) throw new Error('动作包不是有效的 zip');
-            const extractDir = path.join(tempDir, 'extract');
-            new AdmZip(tempPath).extractAllTo(extractDir, true);
-            const frames = listFiles(extractDir)
-              .filter((p) => IMAGE_EXTS.test(p))
-              .sort((a, b) => path.basename(a).localeCompare(path.basename(b), undefined, { numeric: true }));
-            if (!frames.length) throw new Error('动作包中未找到帧图（需要 png/jpg/gif/webp，1~30 张）');
-            addFramesAction(
-              action.name,
-              frames.map((p) => ({ filename: path.basename(p), data: fs.readFileSync(p) })),
-              { petAssetId: petId, interaction },
-            );
-          } finally {
-            fs.rmSync(tempDir, { recursive: true, force: true });
-          }
-        }
+        run();
         installed += 1;
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
-        failures.push({ name: action.name, reason });
-        console.error(`Failed to install pet action "${action.name}": ${reason}`);
+        failures.push({ name, reason });
+        console.error(`Failed to install pack action "${name}": ${reason}`);
       }
+    };
+
+    for (const [ref, spec] of Object.entries(model.actions ?? {})) {
+      const interaction = spec.interaction ?? 'none';
+      if (spec.kind === 'video') {
+        const rel = spec.videoFile;
+        register(ref, () => {
+          if (!rel) throw new Error('video 动作缺少 videoFile');
+          const file = safeResolve(installDir, rel);
+          if (!file || !fs.existsSync(file)) throw new Error(`缺少视频文件：${rel}`);
+          addVideoAction(ref, { filename: path.basename(file), data: fs.readFileSync(file) }, { petAssetId: petId, interaction });
+        });
+      } else if (spec.kind === 'clip') {
+        register(ref, () => addClipAction(ref, ref, { petAssetId: petId, interaction }));
+      } else {
+        register(ref, () => {
+          const dirName = actionPayloadDirName(ref);
+          const dir = path.join(installDir, ACTION_PAYLOAD_DIR, dirName);
+          const frames = fs.existsSync(dir)
+            ? listFiles(dir)
+                .filter((p) => IMAGE_EXTS.test(p))
+                .sort((a, b) => path.basename(a).localeCompare(path.basename(b), undefined, { numeric: true }))
+            : [];
+          if (!frames.length) throw new Error(`缺少帧图目录 ${ACTION_PAYLOAD_DIR}/${dirName}/`);
+          addFramesAction(
+            ref,
+            frames.map((p) => ({ filename: path.basename(p), data: fs.readFileSync(p) })),
+            // 载荷来自已校验的宠物包（该目录刻意不参与本体判定），跳过「是否宠物本体」的启发式
+            { petAssetId: petId, interaction, frameRate: spec.frameRate, skipBodyCheck: true },
+          );
+        });
+      }
+    }
+
+    // 模型内置动画（Live2D/3D）：清单里只留名字，按名字登记
+    for (const clip of model.modelClips ?? []) {
+      if (model.actions && model.actions[clip]) continue;
+      register(clip, () => addClipAction(clip, clip, { petAssetId: petId }));
     }
     return { installed, failures };
   }
@@ -393,6 +471,17 @@ export class PlatformClient {
     fs.rmSync(installDir, { recursive: true, force: true });
     fs.mkdirSync(installDir, { recursive: true });
 
+    // 宠物包：先做完整性校验（不信任传输链路），再解包
+    if (type === 'pet') {
+      const expected = downloaded.detail.packSha256;
+      if (typeof expected === 'string' && expected) {
+        const actual = sha256OfFile(downloaded.tempPath);
+        if (actual.toLowerCase() !== expected.toLowerCase()) {
+          throw new Error('宠物包完整性校验失败（sha256 与服务端不一致），已中止安装');
+        }
+      }
+    }
+
     const contentType = undefined;
     if (isZipFile(downloaded.tempPath, contentType)) {
       new AdmZip(downloaded.tempPath).extractAllTo(installDir, true);
@@ -401,13 +490,14 @@ export class PlatformClient {
     }
 
     if (type === 'pet') {
-      // 动作随宠物：换宠物时清除旧宠物的资源库动作与互动绑定
+      // 动作随宠物：换宠物时先清除旧宠物的资源库动作与互动绑定
       clearPlatformActions();
 
-      // 入口文件：按「宠物本体资源分类标准」（src/shared/petResource）挑本体入口。
+      // 入口文件：按「宠物本体资源分类标准」（src/pet/resource.ts）挑本体入口。
       // 过去是「main.* → 任意图片 → 目录里第一个文件」的 glob 兜底，会把图标/背景/截图/
       // 表情包当成宠物本体装进来；现在若没有「够格的本体」则**显式报错，绝不回落**。
-      const pick = pickPetAppearance(installDir, downloaded.detail.format);
+      // 形态一律本地推断（body_kinds 只用于商店筛选，不作为安装依据）。
+      const pick = pickPetAppearance(installDir);
       if (!pick.ok || !pick.path) {
         const rejected = pick.evaluation.rejected
           .slice(0, 5)
@@ -417,17 +507,16 @@ export class PlatformClient {
           `宠物资源包校验未通过：${pick.errors.join('；')}` + (rejected ? `｜被拒资源：${rejected}` : ''),
         );
       }
-      const format = pick.format;
       const installedPath = pick.path;
 
-      // 随宠物安装附带动作（frames/clip）
-      const { installed: actionsCount, failures: actionsFailed } = await this.installPetActions(id);
+      // 动作来自包内 pet/actions.json（动作随宠物，随安装一次性落地）
+      const { installed: actionsCount, failures: actionsFailed } = this.installPackActions(installDir, id);
 
       saveConfig({
         petAssetPath: installedPath,
         petAssetName: downloaded.detail.name,
         petAssetId: id,
-        petAssetFormat: format,
+        petAssetFormat: pick.format,
         // 平台宠物与内置演示宠物互斥：装平台资源即让出内置形象
         builtinPet: undefined,
       });

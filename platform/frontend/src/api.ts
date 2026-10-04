@@ -70,6 +70,19 @@ api.interceptors.response.use(
   },
 );
 
+/** 资源载体路径：宠物 = 宠物包（/pet-packs），智能体仍为 /agents */
+function assetPath(type: AssetType): string {
+  return type === 'pet' ? 'pet-packs' : 'agents';
+}
+
+/**
+ * admin 审核载体名：与「评价域资源类型」(`pet`/`agent`) **刻意不同名**，
+ * 见后端 `admin.controller.ts` 的 updateStatus —— 宠物载体叫 `pet_pack`，智能体保持 `agent`。
+ */
+function adminCarrierName(type: AssetType): string {
+  return type === 'pet' ? 'pet_pack' : 'agent';
+}
+
 export function assetUrl(url?: string | null): string | undefined {
   if (!url) return undefined;
   if (url.startsWith('http')) return url;
@@ -152,43 +165,44 @@ export async function getMe() {
   return response.data;
 }
 
-export async function listAssets(type: AssetType, params: { search?: string; page?: number; limit?: number; sort?: string; category?: string; status?: string }) {
-  const response = await api.get<PageResponse>(`/${type}s`, { params });
+export async function listAssets(type: AssetType, params: { search?: string; page?: number; limit?: number; sort?: string; category?: string; status?: string; bodyKind?: string }) {
+  const response = await api.get<PageResponse>(`/${assetPath(type)}`, { params });
   return response.data;
 }
 
 export async function approveAsset(type: AssetType, id: string) {
-  const response = await api.post(`/${'admin'}/approve/${type}/${id}`);
+  const response = await api.post(`/admin/approve/${adminCarrierName(type)}/${id}`);
   return response.data;
 }
 
 export async function rejectAsset(type: AssetType, id: string) {
-  const response = await api.post(`/${'admin'}/reject/${type}/${id}`);
+  const response = await api.post(`/admin/reject/${adminCarrierName(type)}/${id}`);
   return response.data;
 }
 
 export async function getAsset(type: AssetType, id: string) {
-  const response = await api.get<Asset>(`/${type}s/${id}`);
+  const response = await api.get<Asset>(`/${assetPath(type)}/${id}`);
   return response.data;
 }
 
 export async function downloadAsset(type: AssetType, id: string) {
-  const response = await api.post<{ url: string; downloads: number }>(`/${type}s/${id}/download`);
+  const response = await api.post<{ url: string; sha256?: string; bytes?: number | null; version?: string; downloads: number }>(`/${assetPath(type)}/${id}/download`);
   return response.data;
 }
 
 export async function listReviews(type: AssetType, id: string) {
+  // 评价域资源类型仍叫 pet/agent（见后端 review.entity.ts 注释），不随载体改名
   const response = await api.get<Review[]>('/reviews', { params: { assetType: type, assetId: id } });
   return response.data;
 }
 
 export async function submitReview(type: AssetType, id: string, rating: number, comment: string) {
-  const response = await api.post<Review>(`/${type}s/${id}/review`, { rating, comment });
+  const response = await api.post<Review>(`/${assetPath(type)}/${id}/review`, { rating, comment });
   return response.data;
 }
 
 export async function listMine(type: AssetType) {
-  const response = await api.get<Asset[]>(`/${type}s/mine`);
+  const response = await api.get<Asset[]>(`/${assetPath(type)}/mine`);
   return response.data;
 }
 
@@ -202,53 +216,16 @@ export async function deleteDownloaded(assetType: AssetType, assetId: string) {
 }
 
 export async function updateAsset(type: AssetType, id: string, values: Record<string, unknown>) {
-  const response = await api.put<Asset>(`/${type}s/${id}`, values);
+  const response = await api.put<Asset>(`/${assetPath(type)}/${id}`, values);
   return response.data;
 }
 
 export async function deleteAsset(type: AssetType, id: string) {
-  await api.delete(`/${type}s/${id}`);
+  await api.delete(`/${assetPath(type)}/${id}`);
 }
 
-export async function uploadAsset(type: AssetType, values: Record<string, unknown>, file: File) {
-  const form = new FormData();
-  form.append('file', file);
-  Object.entries(values).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      form.append(key, Array.isArray(value) || typeof value === 'object' ? JSON.stringify(value) : String(value));
-    }
-  });
-  const response = await api.post<Asset>(`/${type}s`, form);
-  return response.data;
-}
-
-/** 上传宠物（主文件 + 可选预览图 + 附带动作 zip/clip），动作随宠物上传 */
-export interface PetActionUpload {
-  name: string;
-  interaction?: 'none' | 'feed' | 'rest' | 'play';
-  clipName?: string;
-  file?: File;
-}
-
-export async function uploadPet(
-  values: Record<string, unknown>,
-  file: File | null,
-  preview: File | null,
-  actions: PetActionUpload[],
-) {
-  const form = new FormData();
-  if (file) form.append('file', file);
-  if (preview) form.append('preview', preview);
-  actions.forEach((action) => { if (action.file) form.append('actionFiles', action.file); });
-  Object.entries(values).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      form.append(key, Array.isArray(value) || typeof value === 'object' ? JSON.stringify(value) : String(value));
-    }
-  });
-  form.append('actionsMeta', JSON.stringify(actions.map(({ file: _file, ...meta }) => meta)));
-  const response = await api.post<Asset>('/pets', form);
-  return response.data;
-}
+// 前端不再发布资源：宠物发布已收口到桌面端宠工坊（`POST /pet-packs`，multipart 字段 pack），
+// 智能体走 /api/sync/config 云同步。此处原有的 uploadAsset / uploadPet 已下线。
 
 // ── 个人智能体云同步（/api/sync/config，与手机端/桌面端共库） ──
 

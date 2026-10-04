@@ -36,7 +36,17 @@ function assertPetBodyFrames(files: Array<{ filename: string; data: Buffer }>): 
 export function addFramesAction(
   name: string,
   files: Array<{ filename: string; data: Buffer }>,
-  options?: { petAssetId?: string; interaction?: 'none' | 'feed' | 'rest' | 'play'; frameRate?: number },
+  options?: {
+    petAssetId?: string;
+    interaction?: 'none' | 'feed' | 'rest' | 'play';
+    frameRate?: number;
+    /**
+     * 跳过「是否宠物本体」的启发式校验。仅用于**宠物包内已声明的动作载荷**
+     * （`pet/actions/<动作名>/`）——那些帧不是本体，且包本身已通过本体校验；
+     * 手动上传/AI 生成仍必须走校验。
+     */
+    skipBodyCheck?: boolean;
+  },
 ): PetAction {
   const trimmedName = name.trim();
   if (!trimmedName) throw new Error('动作名称不能为空');
@@ -47,7 +57,7 @@ export function addFramesAction(
   // 配额按归属计数：带 petAssetId 的动作只占该宠物的配额，不挤占用户自建动作
   assertActionQuota(config.petActions, { petAssetId: options?.petAssetId });
   // 本体校验：只有「全部帧都被证明为非本体」时才拒绝（详见 assertPetBodyFrames 注释）
-  assertPetBodyFrames(files);
+  if (!options?.skipBodyCheck) assertPetBodyFrames(files);
 
   const id = `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const dir = path.join(getActionsDir(), id);
