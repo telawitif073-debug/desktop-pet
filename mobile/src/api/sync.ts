@@ -11,8 +11,8 @@
  */
 import { getAssetDetail, syncGet, syncPut } from './platform';
 import { useAppStore, sanitizeMessages, type PetAssetRef } from '../store/appStore';
-import { cacheAssetFile } from '../pet/petFiles';
-import { normalizeFormat, type LlmProfile, type PetState } from '../types';
+import { unzipPetPack } from '../pet/petFiles';
+import { petEntryOf, petFormatOfPack, type LlmProfile, type PetState } from '../types';
 
 /** 跨设备共享的当前宠物引用（与桌面端 cloudSync.ts currentPet 同构） */
 interface CurrentPetRef {
@@ -58,14 +58,26 @@ async function restoreBoundPets(): Promise<void> {
     if (!ref) {
       try {
         const detail = await getAssetDetail('pet', id);
-        ref = { id: detail.id, name: detail.name, format: normalizeFormat(detail.format), fileUrl: detail.fileUrl };
+        const entry = petEntryOf(detail);
+        ref = {
+          id: detail.id,
+          name: detail.name,
+          format: petFormatOfPack(detail),
+          packUrl: detail.packUrl ?? '',
+          entryPath: entry?.path,
+        };
       } catch (e) {
         console.log('[sync] 恢复宠物形象失败:', id, e instanceof Error ? e.message : e);
         continue;
       }
     }
-    // 形象文件下载失败不阻断登录（远端地址仍可渲染），之后进商店/编辑时会补上
-    const localPath = await cacheAssetFile(ref.id, ref.fileUrl).catch(() => undefined);
+    // 宠物包解压失败不阻断登录（之后进商店/编辑时会补上）
+    const packUrl = ref.packUrl;
+    const localPath = packUrl
+      ? await unzipPetPack(ref.id, packUrl)
+          .then((dir) => (ref!.entryPath ? `${dir}/${ref!.entryPath}` : undefined))
+          .catch(() => undefined)
+      : undefined;
     const cur = useAppStore.getState();
     cur.patch({
       downloadedPets: known
@@ -190,11 +202,13 @@ export async function pullAfterLogin(): Promise<PullSummary> {
     if (data.currentPet?.id && !store.petAsset) {
       try {
         const detail = await getAssetDetail('pet', data.currentPet.id);
+        const entry = petEntryOf(detail);
         const petAsset: PetAssetRef = {
           id: detail.id,
           name: detail.name,
-          format: normalizeFormat(detail.format),
-          fileUrl: detail.fileUrl,
+          format: petFormatOfPack(detail),
+          packUrl: detail.packUrl ?? '',
+          entryPath: entry?.path,
         };
         const cur = useAppStore.getState();
         cur.patch({

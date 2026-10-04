@@ -240,20 +240,50 @@ export interface PlatformUser {
 /** 宠物资源形态（与桌面端 PetFormat 一致） */
 export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
 
-/** 商店资源条目（pets / agents 列表通用） */
+/** 宠物本体类型（服务端由宠物包校验派生，不是用户填写） */
+export type PetBodyKind = 'body-model' | 'body-animation' | 'body-still';
+
+/** 商店资源条目（pet-packs / agents 列表通用） */
 export interface AssetItem {
   id: string;
   name: string;
-  fileUrl: string;
+  /** 智能体：配置文件地址（宠物包已改用 packUrl） */
+  fileUrl?: string;
+  /** 宠物包 zip 地址（新契约：宠物只以包分发） */
+  packUrl?: string;
+  /** 包体 sha256 / 体积 / 服务端校验快照（含本体入口 manifest.entry） */
+  packSha256?: string;
+  packBytes?: number | null;
+  bodyKinds?: PetBodyKind[];
+  manifest?: { entry?: { path?: string; role?: string } | null; [key: string]: unknown } | null;
   format?: string;
   downloads?: number;
   description?: string | null;
   [key: string]: unknown;
 }
 
-/** 把平台返回的 format 字符串归一化为合法形态，未知值按 image 处理 */
-export function normalizeFormat(value: unknown): PetFormat {
-  return value === 'pack' || value === 'live2d' || value === 'model3d' || value === 'image'
-    ? value
-    : 'image';
+const PET_IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
+
+/** 宠物包内**本体入口**（服务端校验快照 manifest.entry）：相对包根的路径 + 派生角色 */
+export function petEntryOf(item: AssetItem): { path: string; role: string } | null {
+  const entry = item.manifest?.entry;
+  if (!entry || typeof entry.path !== 'string' || !entry.path) return null;
+  return { path: entry.path, role: typeof entry.role === 'string' ? entry.role : '' };
+}
+
+/**
+ * 宠物包 → 移动端渲染形态。新契约里服务端**不再返回 format**，改由包内本体入口推断：
+ *  - Live2D / 3D 模型入口 → 走 WebView overlay；
+ *  - `body-animation` 且入口是栅格图（帧序列的一帧）→ 按帧序列播放（沿用 'pack'）；
+ *  - 其余（含 body-still）→ 单图。
+ * 注：入口是 **webm 视频**（kind=video 的本体）时移动端无法渲染，会落到单图分支并提示加载失败——
+ * 移动端当前不播放透明视频动作，这是刻意的能力边界而不是静默失败。
+ */
+export function petFormatOfPack(item: AssetItem): PetFormat {
+  const entry = petEntryOf(item);
+  const p = entry?.path ?? '';
+  if (/\.(model3|live2d(-lite)?)\.json$/i.test(p)) return 'live2d';
+  if (/\.(glb|gltf|vrm|fbx|obj)$/i.test(p)) return 'model3d';
+  if (entry?.role === 'body-animation' && PET_IMAGE_RE.test(p)) return 'pack';
+  return 'image';
 }

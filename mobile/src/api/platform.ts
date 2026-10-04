@@ -161,6 +161,21 @@ export interface ListAssetParams {
   page?: number;
   limit?: number;
   sort?: string;
+  /** 只看包含指定本体类型的宠物包（body-model / body-animation / body-still） */
+  bodyKind?: string;
+}
+
+/** 资源载体路径：宠物 = 宠物包（/pet-packs），智能体仍为 /agents */
+function assetPath(type: 'pet' | 'agent'): string {
+  return type === 'pet' ? 'pet-packs' : 'agents';
+}
+
+/**
+ * admin 审核载体名：与「评价域资源类型」(`pet`/`agent`) **刻意不同名**——
+ * 见后端 `admin.controller.ts`：宠物载体叫 `pet_pack`，智能体保持 `agent`。
+ */
+function adminCarrierName(type: 'pet' | 'agent'): string {
+  return type === 'pet' ? 'pet_pack' : 'agent';
 }
 
 export async function listAssets(type: 'pet' | 'agent', params?: ListAssetParams | string): Promise<{ items: AssetItem[]; total: number }> {
@@ -174,32 +189,43 @@ export async function listAssets(type: 'pet' | 'agent', params?: ListAssetParams
     if (params.page) usp.set('page', String(params.page));
     if (params.limit) usp.set('limit', String(params.limit));
     if (params.sort) usp.set('sort', params.sort);
+    if (params.bodyKind) usp.set('bodyKind', params.bodyKind);
     query = usp.toString() ? `?${usp.toString()}` : '';
   }
-  const res = await request<{ items: AssetItem[]; total: number }>(`/${type}s${query}`);
+  const res = await request<{ items: AssetItem[]; total: number }>(`/${assetPath(type)}${query}`);
   // 平台返回 items/total，兼容直接返回数组
   return Array.isArray(res) ? { items: res, total: res.length } : res;
 }
 
 // --- 管理员审核（需 admin 角色，后端 RolesGuard 校验） ---
 export async function approveAsset(type: 'pet' | 'agent', id: string): Promise<void> {
-  await request(`/admin/approve/${type}/${id}`, { method: 'POST' });
+  await request(`/admin/approve/${adminCarrierName(type)}/${id}`, { method: 'POST' });
 }
 
 export async function rejectAsset(type: 'pet' | 'agent', id: string): Promise<void> {
-  await request(`/admin/reject/${type}/${id}`, { method: 'POST' });
+  await request(`/admin/reject/${adminCarrierName(type)}/${id}`, { method: 'POST' });
 }
 
 export async function getAssetDetail(type: 'pet' | 'agent', id: string): Promise<AssetItem> {
-  return request<AssetItem>(`/${type}s/${id}`);
+  return request<AssetItem>(`/${assetPath(type)}/${id}`);
 }
 
-/** 下载资源触发后端计数 + 返回可直接使用的文件 URL（拼接平台根域名） */
-export async function downloadAsset(type: 'pet' | 'agent', id: string): Promise<{ url: string }> {
-  const res = await request<{ url: string }>(`/${type}s/${id}/download`, { method: 'POST' });
+/**
+ * 下载资源：触发后端计数并返回可直接使用的文件 URL。
+ * 宠物返回的是**包 zip**（另有 sha256 / 体积 / 版本）；移动端不做 sha256 校验——
+ * RN 无内置摘要原语，为一个校验引入新依赖不划算，服务端校验 + 专用签名 URL 是当前边界。
+ */
+export async function downloadAsset(
+  type: 'pet' | 'agent',
+  id: string,
+): Promise<{ url: string; sha256?: string; bytes?: number | null; version?: string }> {
+  const res = await request<{ url: string; sha256?: string; bytes?: number | null; version?: string }>(
+    `/${assetPath(type)}/${id}/download`,
+    { method: 'POST' },
+  );
   const { baseUrl } = useAppStore.getState();
   const root = baseUrl.replace(/\/api\/?$/, '');
-  return { url: new URL(res.url, `${root}/`).toString() };
+  return { ...res, url: new URL(res.url, `${root}/`).toString() };
 }
 
 // --- 音色资产（商店「音色」板块；返回结构与 pets/agents 不同，独立一套） ---

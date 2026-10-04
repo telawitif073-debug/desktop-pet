@@ -7,8 +7,6 @@
  * 平台根 URL 用于让 overlay.html 内的相对资源 URL 自动补全为完整平台地址。
  */
 import { NativeModules, Platform } from 'react-native';
-import { assetUrl } from '../api/platform';
-import { normalizeFileUrl } from '../pet/petFiles';
 import { useAppStore, type PetAssetRef } from '../store/appStore';
 
 const { OverlayPet } = NativeModules;
@@ -35,9 +33,10 @@ export function requestOverlayPermission(): Promise<boolean> {
 
 /**
  * 构造 overlay.html 的加载 URL（带 query 参数）：
- * - image/gif：直接走 src 资源 URL
- * - pack：传 manifest URL（指向平台打包的帧清单 JSON；当前若平台未提供 manifest 则降级为图片占位）
- * - live2d/model3d：走 model URL（在 WebView 内部加载 CDN 库渲染）
+ * - live2d/model3d：走 `model`（宠物包内已解压的本地模型入口，overlay 用 file:// 读取其相对资源）
+ * - image / pack ：走 `src`（本体入口解压后的本地文件；pack 的入口即帧序列首帧，作为一个静态帧显示）
+ * 本体入口来自服务端校验快照 `manifest.entry.path`（见 PetAssetRef.entryPath），
+ * 因此**不会**再去请求任何「单图/清单」远端接口——那些接口随旧契约一起下线了。
  */
 export function buildOverlayUrl(asset: PetAssetRef | null): string {
   const base = useAppStoreBaseUrlRoot();
@@ -48,18 +47,13 @@ export function buildOverlayUrl(asset: PetAssetRef | null): string {
   }
   qs.set('name', asset.name || '小宠');
   qs.set('format', asset.format);
-  if (asset.format === 'pack') {
-    // 平台尚未提供帧包清单 JSON：降级为图片占位（first-frame-less）
-    // 后续平台补 /pets/:id/manifest 接口后即可直接生效，无需改这里
-    qs.set('manifest', `${base}/api/pets/${asset.id}/manifest`);
-  } else if (asset.format === 'live2d' || asset.format === 'model3d') {
-    qs.set('model', assetUrl(normalizeFileUrl(asset.fileUrl)));
+  if (asset.format === 'live2d' || asset.format === 'model3d') {
+    qs.set('model', asset.localPath ? `file://${asset.localPath}` : '');
   } else if (asset.localPath) {
-    // 本地缓存优先：离线/换服务器都显示（Service 已开启 allowFileAccess）
+    // 已解压：本地文件优先（离线可用、换服务器也不失效；Service 已开启 allowFileAccess）
     qs.set('src', `file://${asset.localPath}`);
-  } else {
-    qs.set('src', assetUrl(normalizeFileUrl(asset.fileUrl)));
   }
+  // 未解压时不给 src/model：overlay 会显示提示，而不是去取一个 zip
   return `file:///android_asset/overlay.html?${qs.toString()}`;
 }
 

@@ -8,8 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as platform from '../api/platform';
 import { scheduleUpload } from '../api/sync';
 import { useAppStore } from '../store/appStore';
-import { cacheAssetFile, normalizeFileUrl } from '../pet/petFiles';
-import { normalizeFormat, type AssetItem, type InstalledVoice } from '../types';
+import { unzipPetPack } from '../pet/petFiles';
+import { petEntryOf, petFormatOfPack, type AssetItem, type InstalledVoice } from '../types';
 import { cloudVoiceReady, previewInstalled, stopAllVoice } from '../voiceEngine';
 import { VOICE_GUIDE } from './voiceGuide';
 import PublishVoiceModal from './PublishVoiceModal';
@@ -30,8 +30,9 @@ interface DetailAsset extends AssetItem {
   author?: { id?: string; username?: string } | null;
 }
 
-function formatLabel(format?: string): string {
-  const f = normalizeFormat(format);
+/** 宠物形态文案：新契约不再返回 format，改由包内本体入口（manifest.entry）派生 */
+function petFormatLabel(item: AssetItem): string {
+  const f = petFormatOfPack(item);
   return f === 'image' ? '静态形象' : f === 'pack' ? '帧动画' : f === 'live2d' ? 'Live2D' : '3D 模型';
 }
 
@@ -219,18 +220,20 @@ export default function StoreDrawer({
     try {
       if (tab === 'pet') {
         const detail = await platform.getAssetDetail('pet', item.id);
+        const packUrl = detail.packUrl ?? '';
+        if (!packUrl) throw new Error('该宠物包缺少 zip 地址，无法安装');
         await platform.downloadAsset('pet', item.id);
-        const format = normalizeFormat(detail.format);
-        const fileUrl = normalizeFileUrl(detail.fileUrl);
+        const format = petFormatOfPack(detail);
+        const entry = petEntryOf(detail);
+        // 解压到本机（离线可用）；解压失败仍入库，渲染时会再补一次、失败才提示
         let localPath: string | undefined;
-        if (format === 'image') {
-          try {
-            localPath = await cacheAssetFile(detail.id, fileUrl);
-          } catch {
-            localPath = undefined;
-          }
+        try {
+          const dir = await unzipPetPack(detail.id, packUrl);
+          localPath = entry?.path ? `${dir}/${entry.path}` : undefined;
+        } catch {
+          localPath = undefined;
         }
-        const ref = { id: detail.id, name: detail.name, format, fileUrl, localPath };
+        const ref = { id: detail.id, name: detail.name, format, packUrl, entryPath: entry?.path, localPath };
         const store = useAppStore.getState();
         const list = store.downloadedPets.filter((p) => p.id !== ref.id);
         // 下载仅入库，不切换当前宠物：宠物跟随当前智能体绑定（严格绑定），可到「智能体管理」中绑定
@@ -240,7 +243,7 @@ export default function StoreDrawer({
       } else {
         const detail = await platform.getAssetDetail('agent', item.id);
         await platform.downloadAsset('agent', item.id);
-        const res = await fetch(platform.assetUrl(detail.fileUrl));
+        const res = await fetch(platform.assetUrl(detail.fileUrl ?? ''));
         const config = (await res.json().catch(() => ({}))) as { name?: string; systemPrompt?: string };
         const agentName = config.name ?? detail.name;
         const agentPrompt = String(config.systemPrompt ?? '').trim();
@@ -405,12 +408,10 @@ export default function StoreDrawer({
   const detailIsCurrent = tab === 'pet' && !!detailItem && currentPetId === detailItem.id;
   // 已下载判断：只要已下载到本机就视为「已安装」，不再显示可安装（当前形象单独标识）
   const detailIsDownloaded = tab === 'pet' && !!detailItem && downloadedPets.some((p) => p.id === detailItem.id);
-  // 详情大图：previewUrl 优先；image 形态宠物的旧数据 previewUrl 为空，降级用 fileUrl（本身就是图片）
+  // 详情大图：宠物只展示卡片预览图（preview_url）——本体在包内，没有可直链的单图
   const detailImgSource = (() => {
     if (!detail || imgError) return null;
-    const url =
-      detail.previewUrl ||
-      (tab === 'pet' && normalizeFormat(detail.format) === 'image' ? detail.fileUrl : null);
+    const url = detail.previewUrl || null;
     return url ? platform.assetUrl(url) : null;
   })();
   // 智能体详情：系统提示词（配置优先，其次实体 configSchema）
@@ -542,7 +543,7 @@ export default function StoreDrawer({
                 )}
                 <View style={styles.detailBadgeRow}>
                   <View style={styles.detailBadge}>
-                    <Text style={styles.detailBadgeText}>{tab === 'pet' ? formatLabel(detail.format) : agentTypeLabel(detail.type)}</Text>
+                    <Text style={styles.detailBadgeText}>{tab === 'pet' ? petFormatLabel(detail) : agentTypeLabel(detail.type)}</Text>
                   </View>
                   {typeof detail.version === 'string' && <Text style={styles.detailVersion}>v{detail.version}</Text>}
                 </View>
@@ -717,7 +718,7 @@ export default function StoreDrawer({
                   const meta =
                     tab === 'agent'
                       ? `智能体${typeof item.downloads === 'number' ? ` · ${item.downloads} 次下载` : ''}`
-                      : `${formatLabel(item.format)}${typeof item.downloads === 'number' ? ` · ${item.downloads} 次下载` : ''}`;
+                      : `${petFormatLabel(item)}${typeof item.downloads === 'number' ? ` · ${item.downloads} 次下载` : ''}`;
                   return (
                     <View style={styles.item}>
                       <Pressable style={{ flex: 1 }} onPress={() => void openDetail(item)}>

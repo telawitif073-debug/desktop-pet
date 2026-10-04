@@ -41,9 +41,11 @@ export interface PetAssetRef {
   id: string;
   name: string;
   format: PetFormat;
-  /** /uploads/... 相对路径（渲染时按当前服务器地址动态拼接，换隧道不失效） */
-  fileUrl: string;
-  /** image/gif 形象的本地缓存文件（离线可用；pack 帧目录按 id 约定无需存） */
+  /** 宠物包 zip 的 /uploads/... 相对路径（新契约：宠物只以包分发；渲染/下载时按当前服务器地址拼） */
+  packUrl: string;
+  /** 包内**本体入口**的相对路径（如 pet/body.png，来自服务端校验快照 manifest.entry） */
+  entryPath?: string;
+  /** 本体入口解压到本机的绝对路径（离线可用；解压目录为 pets/<id>/） */
   localPath?: string;
 }
 

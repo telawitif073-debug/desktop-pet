@@ -216,7 +216,27 @@ POST /pet-packs (multipart: pack.zip, 可选 preview.png, + 文本字段)
    本地安装目录/动作目录/配置）**已全部清理并按基线还原**，`grep` 零残留。
    同时清掉了一处历史遗留：`src/main.ts` 里标注「验收后整块删除」的 `PT_PUB2` 临时钩子（137 行）。
 7. **移动端**：`api/platform.ts` 的 `'pet'` 恢复为 pack 语义，`StoreDrawer` 宠物 tab 恢复。
-   **【本轮未做】**：本轮范围确认为 step 4 + step 5，移动端待后续（当前移动端仍指向已下线的 `/pets`）。
+   **【已完成】**：
+   - `api/platform.ts`：新增 `assetPath()`（pet → `pet-packs`）与 `adminCarrierName()`（pet → `pet_pack`）；
+     `downloadAsset` 返回值补 `sha256/bytes/version`；`listAssets` 支持 `bodyKind` 筛选。
+   - `types.ts`：`AssetItem` 补 `packUrl/packSha256/packBytes/bodyKinds/manifest`、`fileUrl` 改可选；
+     新增 `petEntryOf()` 与 `petFormatOfPack()`——**服务端已不再返回 `format`**，移动端改由包内
+     本体入口（`manifest.entry`）派生渲染形态：模型入口 → live2d/model3d、入口是栅格图且
+     `body-animation` → 帧序列、其余 → 单图。
+   - `PetAssetRef` 的 `fileUrl` 换成 `packUrl` + `entryPath`；`petFiles.ts` 新增 `unzipPetPack()`
+     （下载 zip → 解压到 `pets/<id>/`，重装先清旧目录）与 `listImages()`；删掉只为单图服务的
+     `cacheAssetFile()`（宠物已无「单文件直链」）。
+   - `PetView`：改为「先确保包已解压 → 按本体入口渲染」，去掉了不可再实现的「远端单图回退」；
+     帧序列只播**本体入口所在目录**（不再把包内所有图片混在一起播）。
+   - `StoreDrawer`：安装改为取 `packUrl` 解压入库；形态文案按 `petFormatOfPack()` 出；
+     宠物详情大图只用 `preview_url`（本体在包内，没有可直链的单图）。
+   - `OverlayPet`（悬浮窗）：去掉已下线的 `/api/pets/:id/manifest` 分支，改用解压后的**本地**入口
+     路径（`model` 走模型入口、其余走 `src`）。
+   - 已知边界（刻意不做静默兜底）：移动端不播放透明 webm 视频本体/动作（入口是 webm 时会走单图分支并
+     提示加载失败）；RN 无内置摘要原语，移动端**不校验 `pack_sha256`**（服务端校验仍是门禁，桌面端会校验）。
+   - 验证：移动端 `tsc --noEmit` 通过。**未做真机/模拟器运行验证**（需要 Android 设备）；
+     另注：`mobile` 既有 `npm test`（`__tests__/App.test.tsx`）在本机因
+     `@react-native-async-storage` 的 ESM 未被 jest transform 而失败，属**本次改动之前就存在**的配置问题，未改动。
 8. **测试**：服务端用**真实宠物包**做「合格包通过 / 只有图标的包被拒」的接口级用例；
    客户端保留现有 `petResource.spec.ts` 作为同一标准的回归。
 
