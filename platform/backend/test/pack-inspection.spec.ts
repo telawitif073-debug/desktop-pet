@@ -1,116 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as zlib from 'zlib';
 import {
   PET_PACK_MAX_ENTRIES,
   inspectPetPack,
   validatePetPackFile,
 } from '../src/pet-packs/pack-inspection';
 import { ZipFormatException, readZipDirectory, readZipEntry } from '../src/pet-packs/zip-reader';
-
-// ---------------------------------------------------------------------------
-// 测试用 ZIP 构造器（store / deflate 两种 method；crc32 真实计算，便于将来加校验）
-// ---------------------------------------------------------------------------
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c >>> 0;
-  }
-  return table;
-})();
-const crc32 = (buf: Buffer): number => {
-  let c = 0xffffffff;
-  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-};
-
-interface ZipFileInput { name: string; data: Buffer; method?: 0 | 8; flags?: number }
-interface ZipBuildOptions { zip64EntriesMarker?: boolean }
-
-function buildZip(files: ZipFileInput[], opts: ZipBuildOptions = {}): Buffer {
-  const localParts: Buffer[] = [];
-  const centralParts: Buffer[] = [];
-  let offset = 0;
-
-  for (const f of files) {
-    const method = f.method ?? 8;
-    const raw = f.data;
-    const comp = method === 8 ? zlib.deflateRawSync(raw) : raw;
-    const nameBuf = Buffer.from(f.name, 'utf8');
-    const flags = (f.flags ?? 0) | 0x0800; // 置 UTF-8 名标志
-    const crc = crc32(raw);
-
-    const lfh = Buffer.alloc(30);
-    lfh.writeUInt32LE(0x04034b50, 0);
-    lfh.writeUInt16LE(20, 4);
-    lfh.writeUInt16LE(flags, 6);
-    lfh.writeUInt16LE(method, 8);
-    lfh.writeUInt32LE(crc, 14);
-    lfh.writeUInt32LE(comp.length, 18);
-    lfh.writeUInt32LE(raw.length, 22);
-    lfh.writeUInt16LE(nameBuf.length, 26);
-    lfh.writeUInt16LE(0, 28);
-    localParts.push(lfh, nameBuf, comp);
-
-    const cdfh = Buffer.alloc(46);
-    cdfh.writeUInt32LE(0x02014b50, 0);
-    cdfh.writeUInt16LE(20, 4);
-    cdfh.writeUInt16LE(20, 6);
-    cdfh.writeUInt16LE(flags, 8);
-    cdfh.writeUInt16LE(method, 10);
-    cdfh.writeUInt32LE(crc, 16);
-    cdfh.writeUInt32LE(comp.length, 20);
-    cdfh.writeUInt32LE(raw.length, 24);
-    cdfh.writeUInt16LE(nameBuf.length, 28);
-    cdfh.writeUInt16LE(0, 30);
-    cdfh.writeUInt16LE(0, 32);
-    cdfh.writeUInt16LE(0, 34);
-    cdfh.writeUInt16LE(0, 36);
-    cdfh.writeUInt32LE(0, 38);
-    cdfh.writeUInt32LE(offset, 42);
-    centralParts.push(cdfh, nameBuf);
-
-    offset += 30 + nameBuf.length + comp.length;
-  }
-
-  const cd = Buffer.concat(centralParts);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  const count = opts.zip64EntriesMarker ? 0xffff : files.length;
-  eocd.writeUInt16LE(count, 8);
-  eocd.writeUInt16LE(count, 10);
-  eocd.writeUInt32LE(cd.length, 12);
-  eocd.writeUInt32LE(offset, 16);
-  return Buffer.concat([...localParts, cd, eocd]);
-}
-
-// ---------------------------------------------------------------------------
-// 测试用 PNG（8bit RGBA → hasAlpha）
-// ---------------------------------------------------------------------------
-const chunk = (type: string, data: Buffer): Buffer => {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length, 0);
-  const typeBuf = Buffer.from(type, 'latin1');
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
-  return Buffer.concat([len, typeBuf, data, crc]);
-};
-function makePng(width: number, height: number): Buffer {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 6; // RGBA
-  return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', zlib.deflateSync(Buffer.alloc(32))),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-}
+import { buildZip, makeIconOnlyPackZip, makePng, makeValidPackZip, type ZipFileInput } from './pack-fixtures';
 
 /** 捕获抛出的 HttpException，便于断言结构化响应体 */
 function caught(fn: () => unknown): BadRequestException {
@@ -245,11 +142,7 @@ describe('inspectPetPack · 合格包通过', () => {
 
 describe('inspectPetPack · 不合格包被拒（返回结构化 400）', () => {
   it('只有图标的包 → 400，逐条给出角色与理由', () => {
-    const zip = buildZip([
-      { name: 'ui/cursor-grab.png', data: makePng(64, 64) },
-      { name: 'logo.png', data: makePng(256, 256) },
-    ]);
-    const err = caught(() => inspectPetPack(zip));
+    const err = caught(() => inspectPetPack(makeIconOnlyPackZip()));
     expect(err).toBeInstanceOf(BadRequestException);
     const body = err.getResponse() as { errors: string[]; rejected: Array<{ path: string; role: string; evidence: string[] }> };
     expect(body.errors.length).toBeGreaterThan(0);
@@ -278,7 +171,7 @@ describe('inspectPetPack · 不合格包被拒（返回结构化 400）', () => 
 });
 
 describe('validatePetPackFile · 与 upload-validation 叠加', () => {
-  const zip = buildZip([{ name: 'pet/body.png', data: makePng(512, 512) }]);
+  const zip = makeValidPackZip();
 
   it('合法 .zip 通过两层校验', () => {
     const r = validatePetPackFile({ originalname: 'sprout.zip', mimetype: 'application/zip', buffer: zip });

@@ -43,6 +43,9 @@ export const PET_PACK_MAX_ENTRY_BYTES = Number(process.env.PET_PACK_MAX_ENTRY_BY
 /** 全部条目解压后总量上限（zip 炸弹兜底） */
 export const PET_PACK_MAX_UNCOMPRESSED_BYTES = Number(process.env.PET_PACK_MAX_UNCOMPRESSED_BYTES || 128 * 1024 * 1024);
 
+/** 包格式版本：将来角色/结构升级时用于判定 `body_kinds` / `manifest` 是否需要重算（§六 风险 5） */
+export const PET_PACK_SCHEMA_VERSION = 1;
+
 /** 包内 `actions.json` 的相对路径（动作是包的一部分，不建独立表，见 D4） */
 const ACTIONS_PATH_RE = /^pet\/actions\.json$/i;
 

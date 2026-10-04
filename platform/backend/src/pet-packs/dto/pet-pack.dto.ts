@@ -42,6 +42,29 @@ export class ListPetPacksQueryDto {
 }
 
 /**
+ * 发布宠物包（multipart 文本字段）。
+ * 文件字段是 `pack`（必填，.zip）与 `preview`（可选卡片图）；二进制不由本 DTO 承载。
+ * `packUrl` / `packSha256` / `bodyKinds` / `manifest` 全部由服务端校验派生，不接受客户端填写。
+ */
+export class CreatePetPackDto {
+  @IsString() @MinLength(1) @MaxLength(100)
+  name: string;
+
+  @IsOptional() @IsString()
+  description?: string;
+
+  @IsOptional() @IsString() @MaxLength(50)
+  category?: string;
+
+  /** 标签：JSON 字符串数组（`["a","b"]`）或逗号分隔；multipart 只有字符串 */
+  @IsOptional() @IsString()
+  tags?: string;
+
+  @IsOptional() @IsString() @MaxLength(20)
+  version?: string;
+}
+
+/**
  * 更新宠物包元信息。
  * 注意：`packUrl` / `packSha256` / `bodyKinds` / `manifest` **不在可更新字段内**——
  * 它们由服务端校验派生，只能通过重新发布（传新的包）变更，避免作者自述与包内容不一致。

@@ -168,10 +168,15 @@ POST /pet-packs (multipart: pack.zip, 可选 preview.png, + 文本字段)
      目录遍历与 zip 解包同口径，避免「服务端说合格、客户端装不上」；
    - **包体积上限已定**（§六 风险 3）：包体 32MB、条目 3000、单条解压 32MB、解压总量 128MB，
      均可用 `PET_PACK_MAX_*` 环境变量覆盖。
-   `POST /pet-packs`（发布路由）**仍未开放**：是否随本步一起开放待确认（本步只交付校验能力）。
-   验证：桌面 `tsc` 0 错、`vitest` 22 文件 / 348 用例全绿；后端 `tsc` 0 错、`jest` 3 套件 / 29 用例全绿
-   （含真实内置宠物 `resources/builtin-pets/sprout-cat` 打包后判合格、仅图标包被拒、ZIP store/deflate/空包/
-   截断/加密/ZIP64/路径穿越/超限等边界）；`nest build` 产物布局不变。
+   **发布路由**：`POST /pet-packs` 经确认后**开放为「仅管理员可用」**（`@Roles('admin')`，先行用于内部/测试
+   发布与真实包联调）：multipart `pack`（必填 .zip）＋ `preview`（可选）＋ 文本字段；上传即
+   `validatePetPackFile` 校验，不合格 400（未落盘，无孤儿文件），合格落盘并写 `status=pending`；
+   落盘/写库任一步失败回滚已上传文件。待第 4 步桌面端 pack 流程就绪后再放开给普通用户。
+   验证：桌面 `tsc` 0 错、`vitest` 22 文件 / 348 用例全绿；后端 `tsc` 0 错、`jest` 4 套件 / 35 用例全绿；
+   `nest build` 产物布局不变；**3199 冷启动 + 真库真包端到端**全过（未登录 401 / 普通用户 403 /
+   仅图标包 400 带 `errors`+`rejected` / 真实内置宠物包 201 pending 且派生 `body_kinds`+`manifest`+`preview_url` /
+   pending 对公众不可见而管理员可见 / 审核后公开可见且下载返回一致 `sha256` / 删除后库与上传文件均清理），
+   验证数据行数与上传目录已复原。
 4. **桌面端**：`platformClient` 的 pet 分支改为 pack 流程（上传/下载/安装/校验），
    `PetPublishForm` 改成"选择宠物包"（而非选一张主图），`PetResources` 商店入口恢复。
 5. **平台前端**：`ResourceListPage` / `ResourceDetailPage` / `ProfilePage` / `WorkshopPage`

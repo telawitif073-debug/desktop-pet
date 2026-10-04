@@ -6,16 +6,33 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { PetPack, PetPackStatus } from './pet-pack.entity';
-import { UpdatePetPackDto } from './dto/pet-pack.dto';
+import { CreatePetPackDto, UpdatePetPackDto } from './dto/pet-pack.dto';
 import { ReviewsService } from '../reviews/reviews.service';
 import { StorageService } from '../uploads/storage.service';
+import { PET_PACK_SCHEMA_VERSION, validatePetPackFile } from './pack-inspection';
+
+/** 标签解析：multipart 只有字符串，兼容 JSON 数组与逗号分隔两种写法 */
+function parseTags(raw?: string): string[] {
+  if (!raw) return [];
+  const text = raw.trim();
+  if (text.startsWith('[')) {
+    try {
+      const value = JSON.parse(text);
+      if (Array.isArray(value)) {
+        return value.filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean).slice(0, 20);
+      }
+    } catch {
+      /* 落到逗号分隔 */
+    }
+  }
+  return text.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 20);
+}
 
 /**
- * 宠物包（商店宠物板块）的读取与管理。
+ * 宠物包（商店宠物板块）的读取、发布与管理。
  *
- * ⚠️ 这里**没有 create**：发布必须「上传即解包跑 `evaluatePetPack`」，
- * 不合格直接拒绝（设计文档 D3），而解包/探测能力在实施清单第 3 步（`pack-inspection.ts`）。
- * 在该能力落地前刻意不开放发布入口，避免出现「随便一个文件就能当宠物发布」的旧缺陷。
+ * 发布走 {@link PetPacksService.publish}：**上传即解包跑 `evaluatePetPack`**，
+ * 不合格直接 400（设计文档 D3）。该路由当前**仅管理员可用**（先行用于内部/测试发布与联调）。
  */
 @Injectable()
 export class PetPacksService {
@@ -25,6 +42,50 @@ export class PetPacksService {
     private readonly reviewsService: ReviewsService,
     private readonly storage: StorageService,
   ) {}
+
+  /**
+   * 发布宠物包（管理员先行）。步骤：
+   *  1. 语义校验（{@link validatePetPackFile}：字节级安全校验 + 包内本体判定）；
+   *     不合格抛 400 —— 此时**尚未落盘**，无需清理；
+   *  2. 落盘包体与可选封面，写 `pet_packs`（`status=pending`，`sha256`/`body_kinds`/`manifest` 全部派生）；
+   *  3. 任一步失败回滚已上传文件，避免孤儿文件。
+   */
+  async publish(input: {
+    pack: Express.Multer.File;
+    preview?: Express.Multer.File;
+    dto: CreatePetPackDto;
+    authorId: string;
+  }): Promise<PetPack> {
+    const { pack, preview, dto, authorId } = input;
+    const inspection = validatePetPackFile(pack);
+
+    let packUrl: string | null = null;
+    let previewUrl: string | null = null;
+    try {
+      packUrl = await this.storage.upload(pack);
+      if (preview) previewUrl = await this.storage.upload(preview);
+      const entity = this.packsRepo.create({
+        name: dto.name,
+        description: dto.description ?? null,
+        category: dto.category ?? null,
+        tags: parseTags(dto.tags),
+        authorId,
+        packUrl,
+        packSha256: inspection.sha256,
+        packBytes: inspection.bytes,
+        packSchemaVersion: PET_PACK_SCHEMA_VERSION,
+        manifest: inspection.manifest as unknown as Record<string, unknown>,
+        bodyKinds: inspection.bodyKinds,
+        previewUrl,
+        version: dto.version ?? '1.0.0',
+        status: 'pending',
+      });
+      return await this.packsRepo.save(entity);
+    } catch (error) {
+      await Promise.allSettled([this.storage.remove(packUrl), this.storage.remove(previewUrl)]);
+      throw error;
+    }
+  }
 
   async list(opts: {
     status?: PetPackStatus;

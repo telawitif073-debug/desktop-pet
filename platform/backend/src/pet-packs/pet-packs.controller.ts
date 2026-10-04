@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,12 +10,17 @@ import {
   Post,
   Put,
   Query,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import * as path from 'path';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PetPacksService } from './pet-packs.service';
-import { ListPetPacksQueryDto, UpdatePetPackDto } from './dto/pet-pack.dto';
+import { CreatePetPackDto, ListPetPacksQueryDto, UpdatePetPackDto } from './dto/pet-pack.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { JwtOptionalGuard } from '../common/guards/jwt-optional.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -22,6 +28,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
 import { ReviewsService } from '../reviews/reviews.service';
+import { PET_PACK_MAX_BYTES } from './pack-inspection';
+import { validateUploadMetadata } from '../uploads/upload-validation';
 
 class PetPackReviewDto {
   @IsOptional()
@@ -39,9 +47,9 @@ class PetPackReviewDto {
 /**
  * 宠物商店（宠物包）接口。
  *
- * ⚠️ 刻意**没有 POST /**（发布）：发布必须先在服务端解包跑 `evaluatePetPack` 并
- * 对不合格包直接拒绝（设计文档 D3），该能力属实施清单第 3 步。在此之前不开放发布入口，
- * 以免重演旧 `pet_assets` 「一张图也能当宠物」的缺陷。
+ * 发布（`POST /pet-packs`）当前**仅管理员可用**（先行用于内部/测试发布与真实包联调）：
+ * 它必须在服务端解包跑 `evaluatePetPack`（设计文档 D3），不合格直接 400 —— 避免重演旧
+ * `pet_assets`「一张图也能当宠物」的缺陷。等桌面端 pack 流程（第 4 步）就绪后再放开给普通用户。
  */
 @Controller('pet-packs')
 export class PetPacksController {
@@ -49,6 +57,50 @@ export class PetPacksController {
     private readonly petPacksService: PetPacksService,
     private readonly reviewsService: ReviewsService,
   ) {}
+
+  /**
+   * 发布宠物包（管理员）。
+   * multipart：`pack`（必填 .zip）、`preview`（可选卡片图）、文本字段见 {@link CreatePetPackDto}。
+   * 校验不通过 → 400（响应体含 `errors` / `rejected`）；通过 → 落库 `status=pending`。
+   */
+  @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'pack', maxCount: 1 },
+        { name: 'preview', maxCount: 1 },
+      ],
+      {
+        storage: memoryStorage(),
+        limits: { fileSize: PET_PACK_MAX_BYTES, files: 2 },
+        fileFilter: (_req, file, cb) => {
+          try {
+            if (file.fieldname === 'pack') {
+              if (path.extname(file.originalname).toLowerCase() !== '.zip') {
+                throw new BadRequestException('宠物包必须是 .zip 压缩包');
+              }
+            } else {
+              validateUploadMetadata(file.originalname, file.mimetype);
+            }
+            cb(null, true);
+          } catch (error) {
+            cb(error as Error, false);
+          }
+        },
+      },
+    ),
+  )
+  publish(
+    @UploadedFiles() files: { pack?: Express.Multer.File[]; preview?: Express.Multer.File[] },
+    @Body() dto: CreatePetPackDto,
+    @CurrentUser() user: User,
+  ) {
+    const pack = files?.pack?.[0];
+    if (!pack) throw new BadRequestException('未收到宠物包文件（字段名 pack）');
+    return this.petPacksService.publish({ pack, preview: files?.preview?.[0], dto, authorId: user.id });
+  }
 
   @Get()
   @UseGuards(JwtOptionalGuard)
