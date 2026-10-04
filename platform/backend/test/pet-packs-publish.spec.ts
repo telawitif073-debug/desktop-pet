@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PetPacksService } from '../src/pet-packs/pet-packs.service';
 import { makeIconOnlyPackZip, makePng, makeValidPackZip } from './pack-fixtures';
@@ -11,14 +11,20 @@ function makeService() {
   const repo = {
     create: jest.fn((value: unknown) => value),
     save: jest.fn(async (value: unknown) => ({ id: 'pack-1', ...(value as object) })),
+    remove: jest.fn(async (value: unknown) => value),
+    findOne: jest.fn(async () => null),
+    increment: jest.fn(async () => undefined),
   };
   const storage = {
     upload: jest.fn(async () => '/uploads/stored.zip'),
     remove: jest.fn(async () => undefined),
   };
-  const reviews = {};
+  const reviews = {
+    purgeAsset: jest.fn(async () => undefined),
+    recordDownload: jest.fn(async () => undefined),
+  };
   const service = new PetPacksService(repo as never, reviews as never, storage as never);
-  return { service, repo, storage };
+  return { service, repo, storage, reviews };
 }
 
 const dto = { name: '测试宠物' };
@@ -114,6 +120,46 @@ describe('PetPacksService.publish · 发布门禁与派生字段', () => {
       }),
     ).rejects.toThrow('DB down');
 
+    expect(storage.remove).toHaveBeenCalledWith('/uploads/pack.zip');
+    expect(storage.remove).toHaveBeenCalledWith('/uploads/preview.png');
+  });
+});
+
+describe('PetPacksService.findOneVisible · 未通过资源不泄露存在性', () => {
+  it('pending 包对非作者/非管理员 → 404（而不是 403「未通过审核」）', async () => {
+    const { service, repo } = makeService();
+    repo.findOne.mockResolvedValue({ id: 'p1', authorId: 'other', status: 'pending' } as never);
+    await expect(service.findOneVisible('p1', 'someone', false)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('作者本人仍能看到自己的 pending 包（审核前自检需要）', async () => {
+    const { service, repo } = makeService();
+    repo.findOne.mockResolvedValue({ id: 'p1', authorId: 'me', status: 'pending' } as never);
+    await expect(service.findOneVisible('p1', 'me', false)).resolves.toMatchObject({ id: 'p1' });
+  });
+
+  it('管理员能看到 pending 包（审核台需要）', async () => {
+    const { service, repo } = makeService();
+    repo.findOne.mockResolvedValue({ id: 'p1', authorId: 'other', status: 'pending' } as never);
+    await expect(service.findOneVisible('p1', 'admin-1', true)).resolves.toMatchObject({ id: 'p1' });
+  });
+});
+
+describe('PetPacksService.remove · 删除时级联清理引用', () => {
+  it('删除成功后清掉该包的评价与下载记录，并删掉落盘文件（不留孤儿行）', async () => {
+    const { service, repo, storage, reviews } = makeService();
+    jest.spyOn(service, 'findOneVisible').mockResolvedValue({
+      id: 'pack-9',
+      authorId: 'admin-1',
+      packUrl: '/uploads/pack.zip',
+      previewUrl: '/uploads/preview.png',
+    } as never);
+
+    await expect(service.remove('pack-9', 'admin-1', false)).resolves.toEqual({ success: true });
+
+    expect(repo.remove).toHaveBeenCalled();
+    // 关键：评价域的资源类型仍叫 'pet'（与载体 pet_packs 不同名），清理必须用 'pet'
+    expect(reviews.purgeAsset).toHaveBeenCalledWith('pet', 'pack-9');
     expect(storage.remove).toHaveBeenCalledWith('/uploads/pack.zip');
     expect(storage.remove).toHaveBeenCalledWith('/uploads/preview.png');
   });

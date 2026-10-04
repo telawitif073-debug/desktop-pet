@@ -108,6 +108,17 @@ export class ReviewsService {
     return { success: true };
   }
 
+  /**
+   * 资源被删除时清掉它的**全部**评价与下载记录。
+   * 不这么做会留下指向已删资源的孤儿行：`listDownloaded` 会把它们静默过滤掉
+   * （用户的「已下载资源」莫名少条目），评分表也会持续膨胀。
+   * 由各资源的 `remove()` 在资源行删除后调用。
+   */
+  async purgeAsset(assetType: AssetType, assetId: string): Promise<void> {
+    await this.reviewsRepo.delete({ assetType, assetId });
+    await this.downloadsRepo.delete({ assetType, assetId });
+  }
+
   private async assertAssetExists(assetType: AssetType, assetId: string) {
     if (assetType === 'voice') {
       if (!(await this.voicesRepo.findOne({ where: { id: assetId } }))) {

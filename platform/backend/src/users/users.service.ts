@@ -27,10 +27,17 @@ export class UsersService {
     return this.usersRepo.save(user);
   }
 
+  /**
+   * **登录校验专用**：需要比对密码，因此显式把 `passwordHash` 选回来
+   * （实体上是 `select: false`，默认查询与关系加载都不会带出，避免泄露到响应里）。
+   * 其它场景请用 `findById` / `findAll`（不带该列）。
+   */
   findByEmailOrUsername(identifier: string): Promise<User | null> {
-    return this.usersRepo.findOne({
-      where: [{ email: identifier }, { username: identifier }],
-    });
+    return this.usersRepo
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('user.email = :identifier OR user.username = :identifier', { identifier })
+      .getOne();
   }
 
   async findById(id: string): Promise<User> {

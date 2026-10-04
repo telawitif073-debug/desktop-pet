@@ -69,7 +69,8 @@ export class VoicesService {
     if (!voice) throw new NotFoundException('音色不存在');
     const isOwner = userId && voice.authorId === userId;
     if (voice.status !== 'approved' && !isOwner && !isAdmin) {
-      throw new ForbiddenException('音色未通过审核');
+      // 对外一律按「不存在」处理：403 等于告诉外界「这个 id 存在但没通过审核」
+      throw new NotFoundException('音色不存在');
     }
     return voice;
   }
@@ -92,6 +93,8 @@ export class VoicesService {
     const voice = await this.findOneVisible(id, userId, isAdmin);
     if (voice.authorId !== userId && !isAdmin) throw new ForbiddenException('无权删除该音色');
     await this.voicesRepo.remove(voice);
+    // 级联清理：否则评价与下载记录会留下指向已删音色的孤儿行
+    await this.reviewsService.purgeAsset('voice', id);
     await this.storage.remove(voice.fileUrl);
     return { success: true };
   }

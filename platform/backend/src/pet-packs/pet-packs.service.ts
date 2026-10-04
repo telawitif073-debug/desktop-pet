@@ -141,7 +141,8 @@ export class PetPacksService {
     if (!pack) throw new NotFoundException('宠物包不存在');
     const isOwner = userId && pack.authorId === userId;
     if (pack.status !== 'approved' && !isOwner && !isAdmin) {
-      throw new ForbiddenException('宠物包未通过审核');
+      // 对外一律按「不存在」处理：403 等于告诉外界「这个 id 存在但没通过审核」
+      throw new NotFoundException('宠物包不存在');
     }
     return pack;
   }
@@ -165,6 +166,8 @@ export class PetPacksService {
     if (pack.authorId !== userId && !isAdmin) throw new ForbiddenException('无权删除该宠物包');
     const { packUrl, previewUrl } = pack;
     await this.packsRepo.remove(pack);
+    // 级联清理：否则评价与下载记录会留下指向已删宠物包的孤儿行
+    await this.reviewsService.purgeAsset('pet', id);
     await this.storage.remove(packUrl);
     await this.storage.remove(previewUrl);
     return { success: true };

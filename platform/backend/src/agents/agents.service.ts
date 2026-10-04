@@ -78,7 +78,8 @@ export class AgentsService {
     if (!agent) throw new NotFoundException('资源不存在');
     const isOwner = userId && agent.authorId === userId;
     if (agent.status !== 'approved' && !isOwner && !isAdmin) {
-      throw new ForbiddenException('资源未通过审核');
+      // 对外一律按「不存在」处理：403 等于告诉外界「这个 id 存在但没通过审核」
+      throw new NotFoundException('资源不存在');
     }
     return agent;
   }
@@ -104,6 +105,8 @@ export class AgentsService {
     const agent = await this.findOneVisible(id, userId, isAdmin);
     if (agent.authorId !== userId && !isAdmin) throw new ForbiddenException('无权删除该资源');
     await this.agentsRepo.remove(agent);
+    // 级联清理：否则评价与下载记录会留下指向已删智能体的孤儿行
+    await this.reviewsService.purgeAsset('agent', id);
     await this.storage.remove(agent.fileUrl);
     return { success: true };
   }
