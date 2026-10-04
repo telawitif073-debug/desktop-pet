@@ -3,6 +3,7 @@ import {
   classifyResource,
   evaluatePetPack,
   groupFrameSequences,
+  isIgnoredPackPath,
   isPetBodyRole,
   isQualifiedBody,
   summarizeRoles,
@@ -290,5 +291,24 @@ describe('辅助判定与统计', () => {
     expect(s.meme).toBe(1);
     expect(s.branding).toBe(1);
     expect(s.ui).toBe(0);
+  });
+});
+
+describe('包内路径忽略口径（桌面遍历与后端解包必须一致）', () => {
+  it('隐藏项与忽略目录内的项一律忽略', () => {
+    expect(isIgnoredPackPath('.git/config')).toBe(true);
+    expect(isIgnoredPackPath('.DS_Store')).toBe(true);
+    expect(isIgnoredPackPath('node_modules/pkg/index.js')).toBe(true);
+    expect(isIgnoredPackPath('__MACOSX/x.png')).toBe(true);
+    expect(isIgnoredPackPath('dist/app.js')).toBe(true);
+    expect(isIgnoredPackPath('pet/.hidden.png')).toBe(true);
+  });
+
+  it('正常本体路径不忽略；同名目录大小写不敏感', () => {
+    expect(isIgnoredPackPath('pet/idle/frame_000.png')).toBe(false);
+    expect(isIgnoredPackPath('cover.png')).toBe(false);
+    expect(isIgnoredPackPath('Node_Modules/x.png')).toBe(true);
+    // 末段是文件名：文件本身叫 dist 不受目录忽略表影响
+    expect(isIgnoredPackPath('pet/dist')).toBe(false);
   });
 });

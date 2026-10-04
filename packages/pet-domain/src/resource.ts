@@ -179,6 +179,28 @@ const segments = (p: string): string[] => normalize(p).split('/').filter((s) => 
  */
 const normDir = (name: string): string => String(name ?? '').toLowerCase().replace(/[\s_\-]+/g, '');
 
+/**
+ * 打包时应忽略的目录名（小写）。
+ * 桌面端 `walkPackFiles`（解压后的目录）与服务端解包（zip 条目名）**必须同一口径**，
+ * 否则会出现「服务端按某文件判合格、客户端却忽略该文件装不上」——这正是设计文档 §3.3 要避免的。
+ */
+export const PACK_SKIP_DIRS: readonly string[] = [
+  '.git', '.github', 'node_modules', '__macosx', 'dist', 'build', '.vite', 'out', 'coverage',
+];
+
+/**
+ * 该包内相对路径是否应被忽略：隐藏项（任一层以 `.` 开头）或位于 {@link PACK_SKIP_DIRS} 目录内。
+ * 只作用于「路径」，与探测/分类无关，供目录遍历与 zip 解包两侧共用。
+ */
+export function isIgnoredPackPath(relPath: string): boolean {
+  const segs = segments(relPath);
+  return segs.some((seg, i) => {
+    if (seg.startsWith('.')) return true;
+    // 仅目录段参与 SKIP_DIRS 判定（末段是文件名）
+    return i < segs.length - 1 && PACK_SKIP_DIRS.includes(seg.toLowerCase());
+  });
+}
+
 /** Live2D 清单后缀（与 `pet_roles.py` 的 `stem_of` 三条后缀逐字对应） */
 const LIVE2D_SUFFIXES = ['.model3.json', '.live2d-lite.json', '.live2d.json'];
 const live2dSuffixOf = (lowerBase: string): string | undefined =>

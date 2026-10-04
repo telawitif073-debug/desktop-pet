@@ -157,6 +157,21 @@ POST /pet-packs (multipart: pack.zip, 可选 preview.png, + 文本字段)
    验证数据已清理、行数与验证前一致。
 3. **服务端包校验**：新增 `pack-inspection.ts`（解包 + 肩部探测 + 调 `evaluatePetPack`），
    与 `uploads/upload-validation.ts`（字节级安全校验）叠加使用。
+   **【已完成】**：新增 `src/pet-packs/zip-reader.ts`（手写最小 ZIP 读取器，无第三方依赖：
+   仅读中央目录、支持 store/deflate、加密与 ZIP64 显式报错、单条/总量解压上限防 zip 炸弹）
+   ＋ `src/pet-packs/pack-inspection.ts`（解包 → 逐条肩部探测 → `evaluatePetPack`；
+   不合格抛 400 并附 `errors`/`rejected[]`，合格产出 `sha256`/`body_kinds`/角色统计/清单快照）。
+   三点实施取舍：
+   - **探测纯解析移入共享包** `packages/pet-domain/src/probe.ts`（`Uint8Array` 接口、不依赖 Node 内置）：
+     桌面 `src/main/petPack.ts` 降为薄包装，服务端直接复用**同一份**（D2 的硬要求，避免两份口径分裂）；
+   - **忽略口径也进共享包**（`resource.ts` 的 `isIgnoredPackPath` / `PACK_SKIP_DIRS`）：
+     目录遍历与 zip 解包同口径，避免「服务端说合格、客户端装不上」；
+   - **包体积上限已定**（§六 风险 3）：包体 32MB、条目 3000、单条解压 32MB、解压总量 128MB，
+     均可用 `PET_PACK_MAX_*` 环境变量覆盖。
+   `POST /pet-packs`（发布路由）**仍未开放**：是否随本步一起开放待确认（本步只交付校验能力）。
+   验证：桌面 `tsc` 0 错、`vitest` 22 文件 / 348 用例全绿；后端 `tsc` 0 错、`jest` 3 套件 / 29 用例全绿
+   （含真实内置宠物 `resources/builtin-pets/sprout-cat` 打包后判合格、仅图标包被拒、ZIP store/deflate/空包/
+   截断/加密/ZIP64/路径穿越/超限等边界）；`nest build` 产物布局不变。
 4. **桌面端**：`platformClient` 的 pet 分支改为 pack 流程（上传/下载/安装/校验），
    `PetPublishForm` 改成"选择宠物包"（而非选一张主图），`PetResources` 商店入口恢复。
 5. **平台前端**：`ResourceListPage` / `ResourceDetailPage` / `ProfilePage` / `WorkshopPage`
