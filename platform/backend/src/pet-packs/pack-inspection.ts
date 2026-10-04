@@ -35,14 +35,14 @@ import { validateUploadFile } from '../uploads/upload-validation';
 // ---------------------------------------------------------------------------
 // 限额（设计文档 §六 风险 3：从「一张图」变成「一个包」必须定上限）
 // ---------------------------------------------------------------------------
-/** 包体上限（zip 字节数） */
-export const PET_PACK_MAX_BYTES = Number(process.env.PET_PACK_MAX_BYTES || 32 * 1024 * 1024);
+/** 包体上限（zip 字节数）：默认 128MB —— 视频动作包（如 dsh-pet 106 段 webm ≈ 52MB）需要 */
+export const PET_PACK_MAX_BYTES = Number(process.env.PET_PACK_MAX_BYTES || 128 * 1024 * 1024);
 /** 包内条目数上限 */
 export const PET_PACK_MAX_ENTRIES = Number(process.env.PET_PACK_MAX_ENTRIES || 3000);
 /** 单条解压上限 */
 export const PET_PACK_MAX_ENTRY_BYTES = Number(process.env.PET_PACK_MAX_ENTRY_BYTES || 32 * 1024 * 1024);
-/** 全部条目解压后总量上限（zip 炸弹兜底） */
-export const PET_PACK_MAX_UNCOMPRESSED_BYTES = Number(process.env.PET_PACK_MAX_UNCOMPRESSED_BYTES || 128 * 1024 * 1024);
+/** 全部条目解压后总量上限（zip 炸弹兜底）：须大于包体上限（已压缩媒体几乎不再压缩） */
+export const PET_PACK_MAX_UNCOMPRESSED_BYTES = Number(process.env.PET_PACK_MAX_UNCOMPRESSED_BYTES || 256 * 1024 * 1024);
 
 /** 包格式版本：将来角色/结构升级时用于判定 `body_kinds` / `manifest` 是否需要重算（§六 风险 5） */
 export const PET_PACK_SCHEMA_VERSION = 1;

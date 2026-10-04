@@ -239,6 +239,18 @@ POST /pet-packs (multipart: pack.zip, 可选 preview.png, + 文本字段)
      `@react-native-async-storage` 的 ESM 未被 jest transform 而失败，属**本次改动之前就存在**的配置问题，未改动。
 8. **测试**：服务端用**真实宠物包**做「合格包通过 / 只有图标的包被拒」的接口级用例；
    客户端保留现有 `petResource.spec.ts` 作为同一标准的回归。
+9. **组装 dsh-pet 宠物包**：新增 `scripts/pets/build-dsh-pet-pack.mjs`（可复现，非手工 zip）。
+   包内布局：`pet/body.gif`（本体；dsh-pet 无角色立绘，用体态动画的预览 GIF）+ `pet/actions.json`
+   （actionModel schemaVersion 3，权重合计 100）+ `pet/actions/<动作名>/clip.webm`（106 段透明视频）
+   + `LICENSE-UPSTREAM.md`（上游许可原文 + 二创署名，随包分发）。
+   脚本会**显式校验**「动作名即目录名」与安装端 `actionPayloadDirName()` 等价，不等价即失败，
+   避免产出安装端找不到帧图的包。
+   合规：dsh-pet 为 E 层「开源非商用」，按既定口径走「宠物包 + 商店按需下载」而非随安装包内置；
+   许可标识写 `SourceAvailable-NonCommercial`（不沿用上游代码的 MIT）。
+   验证（3199 临时端口，未动 3001）：52.1MB 包发布成功（201 pending）→ `body_kinds=['body-animation']`、
+   `manifest.entry=pet/body.gif`、`actions` 解析出 106 条（idle 1 / feed 22 / rest 4 / play 21）、
+   `LICENSE-UPSTREAM.md` 被正确判为 `document` **不进本体**但仍随包存在 → 审核通过 → 下载 `sha256` 一致；
+   随后删除该包与上传文件，`pet_packs` 行数与 uploads 复原（0/0）。**未发布到 3001 正式商店**（待你决定）。
 
 ---
 
@@ -262,6 +274,10 @@ POST /pet-packs (multipart: pack.zip, 可选 preview.png, + 文本字段)
    若要兼容，需要版本门槛（`minVersionCode`）或保留只读的旧接口一段时间。
 3. **包体积**：从"一张图"变成"一个包"，上传/下载体积显著增大（现内置宠物平均 ~2 MB/只，
    资源库单图上限 384px）。需要定包体积上限与超限提示。
+   **【已定 + 实测】**：包体 **128MB**、条目 3000、单条解压 32MB、解压总量 **256MB**
+   （`PET_PACK_MAX_*` 环境变量可覆盖；解压总量必须大于包体上限，因为已压缩媒体几乎不再压缩）。
+   dsh-pet 包（本体 GIF + **106 段 webm**，52.1MB）实测可正常发布、校验、审核与下载，
+   说明 128MB 这一档符合「视频动作包」的真实体量；超限仍回 400 并给出 MB 级提示。
 4. **审核成本**：审核对象从一张图变成若干文件的包，审核页必须**展示自动校验摘要**，
    否则人工无从判断——这是 D3 必须配套做审核页的原因。
 5. **`body_kinds` 的派生一致性**：若将来标准升级（新增角色），历史行的 `body_kinds` 会过期；

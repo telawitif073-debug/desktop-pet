@@ -131,7 +131,7 @@ const PetPublishForm = ({ onNotify }: { onNotify: (text: string) => void }) => {
         accept=".zip"
         value={file}
         onChange={setFile}
-        hint="一个 zip，包根即宠物包根：本体放 pet/body.png、body/xxx.glb、cover.png 等；动作放 pet/actions.json + pet/actions/<动作名>/frame_*.png（视频为 clip.webm）。单文件上限 32MB"
+        hint="一个 zip，包根即宠物包根：本体放 pet/body.png、body/xxx.glb、cover.png 等；动作放 pet/actions.json + pet/actions/<动作名>/frame_*.png（视频为 clip.webm）。单文件上限 128MB"
       />
       <FileField
         label="预览图（可选）"
