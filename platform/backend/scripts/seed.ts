@@ -63,7 +63,7 @@ async function main() {
         authorId: admin.id,
         type: 'chat',
         configSchema: {
-          systemPrompt: '你是桌面宠物助手，回答简洁友好。',
+          systemPrompt: '你是桌面助手，回答简洁友好。',
           temperature: 0.7,
         },
         dependencies: [],
@@ -74,7 +74,7 @@ async function main() {
     );
     console.log('seeded sample agent asset');
 
-    // 自带语音识别的示例：安装后无需下载语音模型包即可对宠物说话（Key 留空，安装者在客户端填自己的）
+    // 自带语音识别的示例：安装后无需下载语音模型包即可对话（Key 留空，安装者在客户端填自己的）
     await agentsRepo.save(
       agentsRepo.create({
         name: '语音陪伴智能体（自带语音识别）',
@@ -83,7 +83,7 @@ async function main() {
         type: 'chat',
         configSchema: {
           name: '语音陪伴小助手',
-          systemPrompt: '你是桌面宠物的语音陪伴助手，回答口语化、简短，适合朗读。',
+          systemPrompt: '你是桌面助手的语音陪伴助手，回答口语化、简短，适合朗读。',
           temperature: 0.7,
           asr: {
             mode: 'transcribe',

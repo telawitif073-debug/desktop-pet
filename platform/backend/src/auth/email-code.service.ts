@@ -91,7 +91,7 @@ export class EmailCodeService {
     await transporter.sendMail({
       from: process.env.SMTP_FROM || process.env.SMTP_USER,
       to,
-      subject: '【掌上宠物】邮箱验证码',
+      subject: '【桌面助手】邮箱验证码',
       text: `你的验证码是 ${code}，10 分钟内有效。若非本人操作，请忽略本邮件。`,
       html: `<p>你的验证码是：<b style="font-size:20px;letter-spacing:4px">${code}</b>，10 分钟内有效。</p><p>若非本人操作，请忽略本邮件。</p>`,
     });

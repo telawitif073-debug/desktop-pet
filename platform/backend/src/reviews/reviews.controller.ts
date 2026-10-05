@@ -1,14 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import {
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min, isUUID } from 'class-validator';
 import { ReviewsService } from './reviews.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -43,6 +35,14 @@ export class ReviewsController {
     @Query('assetType') assetType: AssetType,
     @Query('assetId') assetId: string,
   ) {
+    // 入参必须显式校验：`asset_type` 现在是收窄过的枚举（agent/voice），
+    // 传旧值（如 'pet'）或不合法 uuid 会被 Postgres 拒绝并冒成 500，而不是干净的 400。
+    if (assetType !== 'agent' && assetType !== 'voice') {
+      throw new BadRequestException('资源类型必须是 agent / voice');
+    }
+    if (!isUUID(assetId)) {
+      throw new BadRequestException('assetId 必须是 uuid');
+    }
     return this.reviewsService.listForAsset(assetType, assetId);
   }
 

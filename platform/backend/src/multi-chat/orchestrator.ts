@@ -444,7 +444,7 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<Orchestrate
   if (profilePrompt) parts.push(profilePrompt);
   if (opts.profile.role?.trim()) parts.push(`你的角色：${opts.profile.role.trim()}。`);
   if (opts.profile.style?.trim()) parts.push(`你的说话风格：${opts.profile.style.trim()}，请全程保持。`);
-  if (parts.length === 0) parts.push('你是一个贴心的桌面宠物智能体，回复友好、简洁。');
+  if (parts.length === 0) parts.push('你是一个贴心的桌面助手智能体，回复友好、简洁。');
   const mainSystem = parts.join('\n');
 
   // 3) 无子智能体：单模型直答（编排器退化为主模型）
