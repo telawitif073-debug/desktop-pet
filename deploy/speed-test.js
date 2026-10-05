@@ -16,6 +16,6 @@ function get(path) {
   console.log(`png 1.4MB: ${png.status} ${png.secs.toFixed(1)}s = ${(png.bytes / 1024 / 1024 / png.secs).toFixed(2)} MB/s (${(png.bytes / 1024 / png.secs).toFixed(0)} KB/s)`);
   const zip = await get('/pet-bundle-4.zip');
   console.log(`bundle 343KB: ${zip.status} ${zip.secs.toFixed(1)}s`);
-  const list = await get('/api/pets');
-  console.log(`pets 11KB: ${list.status} ${list.secs.toFixed(1)}s gzip=${list.headers['content-encoding'] || 'none'}`);
+  const list = await get('/api/agents');
+  console.log(`agents 11KB: ${list.status} ${list.secs.toFixed(1)}s gzip=${list.headers['content-encoding'] || 'none'}`);
 })().catch((e) => console.log('ERR', e.code || e.message));

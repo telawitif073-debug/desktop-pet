@@ -52,4 +52,4 @@ if (Test-Port 5174) {
 
 Write-Host ''
 Write-Host 'Platform ready: store UI http://localhost:5174 | API http://localhost:3001/api'
-Write-Host 'Open the store from the desktop pet right-click menu. Close the minimized windows to stop services.'
+Write-Host 'Open the store from the desktop app menu (创作中心 / 资源中心). Close the minimized windows to stop services.'
