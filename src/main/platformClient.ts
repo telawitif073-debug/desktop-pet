@@ -5,6 +5,8 @@ import os from 'os';
 import path from 'path';
 import { app } from 'electron';
 import { loadConfig, saveConfig, type AppConfig, type InstalledVoice, type VoiceConfig } from './config';
+import { PET_PACK_UPLOAD_FIELDS } from '@pet/api';
+import { buildPetPackForPublish, type PackActionInput } from './pet/petPackPublish';
 
 export type PlatformAssetType = 'agent' | 'voice' | 'pet';
 
@@ -16,15 +18,17 @@ export interface UploadFilePayload {
   bytes: Uint8Array;
 }
 
-/** 工作台各页发布的载荷（智能体 → POST /agents，音色 → POST /voices） */
+/** 工作台各页发布的载荷（智能体 → POST /agents，音色 → POST /voices，宠物 → POST /pet-packs） */
 export interface PublishPayload {
   type: PlatformAssetType;
   /** 纯文本字段（name/description/category/tags(JSON)/version/configSchema/dependencies 等） */
   fields: Record<string, string>;
-  /** 资源文件（智能体配置 JSON 等） */
+  /** 资源文件（智能体配置 JSON / 宠物包 zip 等） */
   file?: UploadFilePayload;
   /** 封面图（可选） */
   preview?: UploadFilePayload;
+  /** 宠物包附带动作（仅 type='pet' 使用；随包组装进 pet/actions.json） */
+  actions?: PackActionInput[];
 }
 
 export interface PlatformAuthState {
@@ -227,6 +231,7 @@ export class PlatformClient {
   /** 提交资源到平台（等待管理员审核）：智能体 / 音色走单文件 multipart */
   async publish(payload: PublishPayload) {
     assertAssetType(payload.type);
+    if (payload.type === 'pet') return this.publishPetPack(payload);
     const form = new FormData();
     if (payload.file) form.append('file', this.toBlobPart(payload.file), payload.file.name);
     if (payload.preview) form.append('preview', this.toBlobPart(payload.preview), payload.preview.name);
@@ -234,6 +239,24 @@ export class PlatformClient {
       if (value !== undefined && value !== null && value !== '') form.append(key, value);
     }
     return this.postForm(`/${apiPath(payload.type)}`, form);
+  }
+
+  /**
+   * 发布宠物包：本地组装（解包 → 本体预校验 → 注入附带动作 → 重打包）后按契约字段名 `pack`
+   * 上传 multipart（与后端 FileFieldsInterceptor 同一份 PET_PACK_UPLOAD_FIELDS）。
+   */
+  private async publishPetPack(payload: PublishPayload) {
+    if (!payload.file) throw new Error('宠物包缺少文件（zip）');
+    const assembled = buildPetPackForPublish(Buffer.from(payload.file.bytes), payload.actions ?? []);
+    const form = new FormData();
+    form.append(PET_PACK_UPLOAD_FIELDS.file, new Blob([assembled], { type: 'application/zip' }), payload.file.name);
+    if (payload.preview) {
+      form.append(PET_PACK_UPLOAD_FIELDS.preview, this.toBlobPart(payload.preview), payload.preview.name);
+    }
+    for (const [key, value] of Object.entries(payload.fields)) {
+      if (value !== undefined && value !== null && value !== '') form.append(key, value);
+    }
+    return this.postForm('/pet-packs', form);
   }
 
   /** multipart 提交（大文件不做本地体积限制，超时给足） */

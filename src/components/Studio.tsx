@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
-import type { AgentCapabilityKind, LlmProfile } from '../global.d';
+import type { AgentCapabilityKind, LlmProfile, PetBuiltinSummary } from '../global.d';
 import AgentEditor from './AgentEditor';
 import AgentPublishForm from './publish/AgentPublishForm';
 import VoicePublishForm from './publish/VoicePublishForm';
+import PetPublishForm from './publish/PetPublishForm';
 import {
   exportAgentJson,
   mergeImportedProfiles,
@@ -109,6 +110,9 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
   const [importOutcome, setImportOutcome] = useState<ImportOutcome | null>(null);
   const [capOffers, setCapOffers] = useState<CapabilityOffer[] | null>(null);
   const [capChecked, setCapChecked] = useState<Record<string, AgentCapabilityKind[]>>({});
+  /** 宠物工作区右栏：本机宠物库 / 发布宠物包 */
+  const [petPane, setPetPane] = useState<'library' | 'publish'>('library');
+  const [builtins, setBuiltins] = useState<PetBuiltinSummary[]>([]);
 
   useEffect(() => {
     void loadConfig();
@@ -137,6 +141,16 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
     },
     [],
   );
+
+  // 宠物工作区：读取内置演示宠物（零配置默认形象可一键启用）
+  const reloadBuiltins = async () => {
+    const list = await window.electronAPI?.pet.listBuiltins();
+    setBuiltins(list ?? []);
+  };
+  useEffect(() => {
+    if (workspace !== 'pets') return;
+    void reloadBuiltins();
+  }, [workspace]);
 
   const showNotice = (text: string) => {
     setNotice(text);
@@ -306,6 +320,34 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
     else if (result?.error) showNotice(`导出失败：${result.error}`);
   };
 
+  // ── 宠物工作区操作（形象切换 / 卸载 / 删动作；写操作由主进程落盘并经 config 广播刷新）──
+
+  const petActions = config?.pet?.petActions ?? [];
+  const currentPetId = config?.pet?.currentPet ?? '';
+  const currentBuiltinId = config?.pet?.builtinPet ?? '';
+
+  const useBuiltinPet = async (id: string) => {
+    const result = await window.electronAPI?.pet.useBuiltin(id);
+    showNotice(result?.success ? '已切换到该内置宠物' : result?.error || '切换失败');
+    void reloadBuiltins();
+  };
+
+  const useInstalledPet = async (id: string) => {
+    const result = await window.electronAPI?.pet.useInstalled(id);
+    showNotice(result?.success ? '已选用该宠物' : result?.error || '选用失败');
+  };
+
+  const removeInstalledPet = async (id: string) => {
+    await window.electronAPI?.pet.uninstall(id);
+    showNotice('已卸载该宠物（含其动作）');
+    void reloadBuiltins();
+  };
+
+  const removePetAction = async (id: string) => {
+    await window.electronAPI?.pet.removeAction(id);
+    showNotice('已删除该动作');
+  };
+
   return (
     <div
       style={{
@@ -415,35 +457,169 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
         </main>
       )}
 
-      {/* 宠物：本机宠物库 + 打开桌宠悬浮窗（安装/解包后续接入 main/pet/petPack.ts） */}
+      {/* 宠物：左「本机宠物库 + 内置演示宠物 + 当前动作」+ 右「发布宠物包」 */}
       {workspace === 'pets' && (
-        <main style={{ flex: 1, padding: 16, overflowY: 'auto', minHeight: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>本机宠物库（{installedPets.length}）</div>
-          <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.8, marginBottom: 10 }}>
-            已安装到本机的宠物形象在这里查看；桌宠悬浮窗可从菜单「窗口 → 宠物」打开，或点右侧按钮。
-          </div>
-          <button
-            type="button"
-            onClick={() => void window.electronAPI?.pet.open()}
-            style={{ ...smallBtn(), padding: '5px 12px', borderColor: C.accent, color: C.accent, marginBottom: 12 }}
+        <main style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          <section
+            style={{
+              width: 420,
+              flexShrink: 0,
+              borderRight: `1px solid ${C.border}`,
+              padding: '12px 14px',
+              overflowY: 'auto',
+              minHeight: 0,
+            }}
           >
-            打开桌宠窗口
-          </button>
-          {installedPets.length === 0 ? (
-            <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.8 }}>还没有安装宠物。</div>
-          ) : (
-            installedPets.map((pet) => (
-              <div
-                key={pet.id}
-                style={{ padding: 8, marginBottom: 6, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 6 }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>本机宠物库（{installedPets.length}）</div>
+              <div style={{ flex: 1 }} />
+              <button type="button" onClick={() => void window.electronAPI?.pet.open()} style={smallBtn()}>
+                打开桌宠窗口
+              </button>
+              <button
+                type="button"
+                onClick={() => setPetPane(petPane === 'publish' ? 'library' : 'publish')}
+                style={smallBtn(petPane === 'publish')}
               >
-                <div style={{ fontSize: 12, color: C.text }}>{pet.name}</div>
-                <div style={{ fontSize: 11, color: C.sub }}>
-                  {pet.format || '未知格式'}
-                  {pet.fromStore ? ' · 来自资源中心' : ' · 本机'}
-                </div>
+                发布宠物包
+              </button>
+            </div>
+
+            {installedPets.length === 0 ? (
+              <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.8, marginBottom: 10 }}>
+                还没有从资源中心安装宠物。可在下方启用内置演示宠物（离线可用）。
               </div>
-            ))
+            ) : (
+              installedPets.map((pet) => {
+                const isCurrent = pet.id === currentPetId;
+                return (
+                  <div
+                    key={pet.id}
+                    style={{
+                      padding: 8,
+                      marginBottom: 6,
+                      background: C.panel,
+                      border: `1px solid ${isCurrent ? C.accent : C.border}`,
+                      borderRadius: 6,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: C.text }}>{pet.name}</span>
+                      {isCurrent && (
+                        <span style={{ fontSize: 10, color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 3, padding: '0 4px' }}>
+                          当前
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>
+                      {pet.format || '未知格式'}
+                      {pet.version ? ` · v${pet.version}` : ''}
+                      {pet.fromStore ? ' · 来自资源中心' : ' · 本机'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                      <button
+                        type="button"
+                        disabled={isCurrent}
+                        onClick={() => void useInstalledPet(pet.id)}
+                        style={{ ...smallBtn(), ...(isCurrent ? { opacity: 0.5, cursor: 'default' } : {}) }}
+                      >
+                        选用
+                      </button>
+                      <button type="button" onClick={() => void removeInstalledPet(pet.id)} style={smallBtn(true)}>
+                        卸载
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+
+            <div style={{ fontSize: 13, fontWeight: 600, margin: '12px 0 6px' }}>内置演示宠物（离线）</div>
+            {builtins.length === 0 ? (
+              <div style={{ fontSize: 11, color: C.sub }}>未发现内置宠物资源。</div>
+            ) : (
+              builtins.map((pet) => {
+                const isCurrent = pet.active && !currentPetId;
+                return (
+                  <div
+                    key={pet.id}
+                    style={{
+                      padding: 8,
+                      marginBottom: 6,
+                      background: C.panel,
+                      border: `1px solid ${isCurrent ? C.accent : C.border}`,
+                      borderRadius: 6,
+                      opacity: pet.entry ? 1 : 0.5,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: C.text }}>{pet.name}</span>
+                      {isCurrent && <span style={{ fontSize: 10, color: C.accent }}>当前</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>
+                      {pet.description}
+                      {pet.frameCount ? ` · ${pet.actionCount} 动作 / ${pet.frameCount} 帧` : ' · 静态形象'}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isCurrent}
+                      onClick={() => void useBuiltinPet(pet.id)}
+                      style={{ ...smallBtn(), marginTop: 6, ...(isCurrent ? { opacity: 0.5, cursor: 'default' } : {}) }}
+                    >
+                      使用
+                    </button>
+                  </div>
+                );
+              })
+            )}
+
+            <div style={{ fontSize: 13, fontWeight: 600, margin: '12px 0 6px' }}>当前动作（{petActions.length}）</div>
+            {petActions.length === 0 ? (
+              <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.7 }}>
+                当前宠物没有动作。可在内置宠物清单里声明动作，或发布带动作的宠物包。
+              </div>
+            ) : (
+              petActions.map((action) => (
+                <div
+                  key={action.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '5px 8px',
+                    marginBottom: 4,
+                    background: C.panelAlt,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 5,
+                  }}
+                >
+                  <span style={{ fontSize: 12, color: C.text }}>{action.name}</span>
+                  <span style={{ fontSize: 10, color: C.sub }}>
+                    {action.kind}
+                    {action.interaction && action.interaction !== 'none' ? ` · ${action.interaction}` : ''}
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  <button type="button" onClick={() => void removePetAction(action.id)} style={smallBtn(true)}>
+                    删除
+                  </button>
+                </div>
+              ))
+            )}
+          </section>
+
+          {petPane === 'publish' ? (
+            <PetPublishForm onNotify={showNotice} />
+          ) : (
+            <section style={{ flex: 1, padding: 16, overflowY: 'auto', minWidth: 0 }}>
+              <div style={{ fontSize: 12, color: C.sub, lineHeight: 2 }}>
+                桌宠悬浮窗可从菜单「窗口 → 宠物」打开，或点左侧「打开桌宠窗口」。
+                <br />
+                安装平台宠物包：在「资源中心」浏览并安装；安装后在此选用、查看动作或卸载。
+                <br />
+                发布自己的宠物包：点右上「发布宠物包」，上传一个 zip（包内至少一个合格本体），
+                可附带帧图 / 透明 webm 视频 / 模型 clip 动作。
+              </div>
+            </section>
           )}
         </main>
       )}

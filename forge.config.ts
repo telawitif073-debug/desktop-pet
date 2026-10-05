@@ -10,6 +10,8 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    // 内置演示宠物资源随包分发（打包后位于 resources/builtin，见 src/main/pet/builtinPets.ts）
+    extraResource: ['pet/resources/builtin'],
   },
   rebuildConfig: {},
   makers: [

@@ -95,15 +95,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 宠物窗口 / 宠物库（桌宠功能模块）：窗口与库操作走 IPC，状态与消息走主进程广播
   pet: {
     getState: () => ipcRenderer.invoke('pet:get-state'),
+    /** 当前宠物的渲染模型（形象 URL + 动作 + 决策模型） */
+    getAsset: () => ipcRenderer.invoke('pet:get-asset'),
+    /** 内置演示宠物列表 */
+    listBuiltins: () => ipcRenderer.invoke('pet:list-builtins'),
+    /** 应用某只内置演示宠物为当前形象 */
+    useBuiltin: (id: string) =>
+      ipcRenderer.invoke('pet:use-builtin', id) as Promise<{ success: boolean; error?: string }>,
+    /** 选用本机已安装的某只宠物 */
+    useInstalled: (id: string) =>
+      ipcRenderer.invoke('pet:use-installed', id) as Promise<{ success: boolean; pet?: unknown; error?: string }>,
+    /** 删除一个动作（含磁盘文件） */
+    removeAction: (id: string) => ipcRenderer.invoke('pet:remove-action', id) as Promise<{ success: boolean }>,
     open: () => ipcRenderer.invoke('pet:open') as Promise<{ success: boolean }>,
     close: () => ipcRenderer.invoke('pet:close') as Promise<{ success: boolean }>,
     /** 互动动作：feed / play / rest */
     action: (kind: 'feed' | 'play' | 'rest') =>
       ipcRenderer.invoke('pet:action', kind) as Promise<{ success: boolean; vitals?: unknown }>,
-    install: (id: string) => ipcRenderer.invoke('pet:install', id) as Promise<{ success: boolean; pet?: unknown }>,
+    install: (id: string) =>
+      ipcRenderer.invoke('pet:install', id) as Promise<{ success: boolean; pet?: unknown; error?: string }>,
     uninstall: (id: string) => ipcRenderer.invoke('pet:uninstall', id) as Promise<{ success: boolean }>,
     /** 主进程广播宠物状态变化（四维 / 就绪态 / 当前宠物） */
     onState: createListener('pet:state'),
+    /** 主进程广播宠物形象变化（安装/切换/卸载后刷新渲染） */
+    onAssetChanged: createListener('pet:asset-changed'),
     /** 主进程投递宠物消息（主动搭话等） */
     onMessage: createListener('pet:message'),
   },

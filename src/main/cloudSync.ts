@@ -7,8 +7,9 @@
  * 冲突策略：last-write-wins（后写覆盖）。
  */
 
-import { loadConfig, saveConfig, type AppConfig } from './config';
+import { loadConfig, saveConfig, type AppConfig, type PetSettings } from './config';
 import { platformClient } from './platformClient';
+import { PET_CONFIG_KEYS } from '@pet/api';
 
 export type SyncKind = 'config' | 'chat_history';
 
@@ -36,6 +37,18 @@ function loggedIn(): boolean {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * 宠物在 config jsonb 里的 12 个键（见 `pet/api/syncKeys.ts`）——只有这些随云同步，
+ * 窗口外观/功能开关/总开关等本机偏好不上云。
+ */
+function pickPetSyncKeys(pet: AppConfig['pet']): Partial<PetSettings> | null {
+  if (!pet) return null;
+  const source = pet as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of PET_CONFIG_KEYS) out[key] = source[key];
+  return out as Partial<PetSettings>;
 }
 
 /** 登录后拉取云端数据恢复本地缺失部分（配置 / 智能体人设 / 音色库 / 聊天记录） */
@@ -81,6 +94,12 @@ export async function pullAfterLogin(): Promise<void> {
         const restored = chatStore.restoreAllProfilesFromCloud(data.profileMessages);
         if (restored) console.log(`[cloudSync] 已从云端恢复 ${restored} 个档案的聊天记录`);
       }
+      // 1d. 宠物系统：本地还没有任何宠物/形象时采用云端（12 个键，含四维与已安装宠物）
+      const localPet = loadConfig().pet;
+      if (data.pet && !localPet?.downloadedPets?.length && !localPet?.currentPet && !localPet?.builtinPet) {
+        saveConfig({ pet: data.pet });
+        console.log('[cloudSync] 已从云端恢复宠物设置');
+      }
     }
   } catch (err) {
     console.log('[cloudSync] 拉取配置失败:', errorMessage(err));
@@ -109,7 +128,7 @@ export async function uploadNow(kind: SyncKind): Promise<void> {
         return;
       }
       // 仅同步跨设备相关的配置：智能体档案（Key 服务端加密）+ 当前档案 + 多档聊天记录 +
-      // 音色库与云 TTS 凭证（apiKey 服务端加密）
+      // 音色库与云 TTS 凭证（apiKey 服务端加密）+ 宠物系统 12 个键（四维/形象/动作/已安装宠物）
       await platformClient.syncPut('config', {
         llmProfiles: cfg.llmProfiles ?? [],
         llmActiveProfileId: cfg.llmActiveProfileId ?? '',
@@ -118,6 +137,7 @@ export async function uploadNow(kind: SyncKind): Promise<void> {
         activeCloudVoiceId: cfg.activeCloudVoiceId ?? '',
         ttsCloudConfig: cfg.ttsCloudConfig ?? null,
         installedAgentConfig: cfg.installedAgentConfig ?? null,
+        pet: pickPetSyncKeys(cfg.pet),
       });
     } else if (chatStore) {
       await platformClient.syncPut('chat_history', chatStore.exportHistory());

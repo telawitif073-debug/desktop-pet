@@ -1,4 +1,4 @@
-import { app, BrowserWindow, WebContentsView, ipcMain, Menu, dialog } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, Menu, dialog, protocol } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { loadConfig, saveConfig, getLLMConfig, DEFAULT_TTS_CLOUD_CONFIG, type AppConfig, type VoiceConfig } from './main/config';
@@ -16,8 +16,21 @@ import { edgeSpeak } from './main/tts';
 import { synthVoice, testGptsovitsEngine } from './main/ttsCloud';
 import { startAgentProactive } from './main/agentProactive';
 import { createPetWindow } from './main/pet/petWindow';
-import { installPet, uninstallPet } from './main/pet/petLibrary';
-import { buildPetRuntimeState, interactPetState } from './main/pet/petState';
+import {
+  installPet,
+  uninstallPet,
+  useInstalledPet,
+  resolveCurrentPetAsset,
+} from './main/pet/petLibrary';
+import { applyBuiltinPet, listBuiltinPets, resolveBuiltinPetsDir } from './main/pet/builtinPets';
+import { removeAction } from './main/pet/petActions';
+import {
+  buildPetRuntimeState,
+  interactPetState,
+  startPetStateDecay,
+  stopPetStateDecay,
+} from './main/pet/petState';
+import { serveLocalMediaRange, PETACTION_MEDIA_TYPES } from './main/pet/localMedia';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -45,6 +58,60 @@ const conversationManager = new ConversationManager(
   path.join(app.getPath('userData'), 'chat-history.json')
 );
 bindChatStore(conversationManager);
+
+// ── petaction:// 自定义协议（本地宠物资源读取）──────────────────────────────
+// 渲染端是 http origin，无法直接读磁盘文件；帧图/视频/本体图统一经此协议读取。
+// 视频动作要在 <video> 里拖动进度条，必须支持 Range（net.fetch(file://) 不支持），
+// 因此媒体类型走 localMedia 的 206 分段响应。必须在 app ready 前登记 scheme 权限。
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'petaction',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true },
+  },
+]);
+
+/** child 是否位于 parent 目录内（防目录穿越） */
+function isInsideDir(parent: string, child: string): boolean {
+  const rel = path.relative(parent, child);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/** 只允许读取宠物相关目录下的文件（安装宠物 / 动作载荷 / 内置资源） */
+function isAllowedPetMedia(filePath: string): boolean {
+  const roots = [
+    path.join(app.getPath('userData'), 'pets'),
+    path.join(app.getPath('userData'), 'pet-actions'),
+    path.join(app.getPath('userData'), 'pet-library'),
+    resolveBuiltinPetsDir(),
+  ];
+  return roots.some((root) => isInsideDir(root, filePath));
+}
+
+/** 注册 petaction:// 处理器（app ready 后调用） */
+function registerPetActionProtocol(): void {
+  protocol.handle('petaction', async (request) => {
+    try {
+      const encoded = new URL(request.url).searchParams.get('p');
+      if (!encoded) return new Response('bad request', { status: 400 });
+      const filePath = path.normalize(decodeURIComponent(encoded));
+      if (!isAllowedPetMedia(filePath) || !fs.existsSync(filePath)) {
+        return new Response('not found', { status: 404 });
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const mediaType = PETACTION_MEDIA_TYPES[ext];
+      const cors = { 'Access-Control-Allow-Origin': '*' };
+      if (mediaType) {
+        const range = request.headers.get('range') ?? 'bytes=0-';
+        return serveLocalMediaRange(filePath, mediaType, range, cors);
+      }
+      // 帧图 / 静态本体 / 模型：普通文件响应
+      const data = fs.readFileSync(filePath);
+      return new Response(data, { status: 200, headers: { ...cors, 'Accept-Ranges': 'bytes' } });
+    } catch {
+      return new Response('internal error', { status: 500 });
+    }
+  });
+}
 
 /** 渲染端入口页（dev 用 Vite server，打包后用构建产物） */
 function rendererUrl(hash = ''): { kind: 'url'; url: string } | { kind: 'file'; file: string; hash: string } {
@@ -139,6 +206,12 @@ function openPetWindow(): BrowserWindow {
 function broadcastPetState(): void {
   if (!petWindow || petWindow.isDestroyed()) return;
   petWindow.webContents.send('pet:state', buildPetRuntimeState());
+}
+
+/** 宠物形象广播：安装/切换/卸载/删动作后通知桌宠窗口刷新渲染 */
+function broadcastPetAssetChanged(): void {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  petWindow.webContents.send('pet:asset-changed');
 }
 
 /** 商店启动提示页（拉起平台服务期间展示，避免白屏） */
@@ -251,9 +324,15 @@ ipcMain.handle('platform:getDetail', (_event, type: PlatformAssetType, id: strin
 ipcMain.handle('platform:download', (_event, type: PlatformAssetType, id: string) =>
   platformClient.download(type, id),
 );
-ipcMain.handle('platform:install', (_event, type: PlatformAssetType, id: string) =>
-  platformClient.install(type, id),
-);
+ipcMain.handle('platform:install', async (_event, type: PlatformAssetType, id: string) => {
+  // 宠物的安装链路（解包 + 挑本体 + 装配动作）由宠物库负责，不走通用 install
+  if (type === 'pet') {
+    const result = await installPet(id);
+    afterPetMutation();
+    return result;
+  }
+  return platformClient.install(type, id);
+});
 ipcMain.handle('platform:uninstall', (_event, type: PlatformAssetType, id: string) =>
   platformClient.uninstall(type, id),
 );
@@ -360,6 +439,12 @@ ipcMain.handle(
 // 宠物运行时状态（四维 + 就绪态 + 当前宠物）
 ipcMain.handle('pet:get-state', () => buildPetRuntimeState());
 
+// 当前宠物的渲染模型（形象 URL + 动作 + 决策模型）
+ipcMain.handle('pet:get-asset', () => resolveCurrentPetAsset());
+
+// 内置演示宠物列表（零配置默认形象）
+ipcMain.handle('pet:list-builtins', () => listBuiltinPets());
+
 // 打开 / 关闭桌宠悬浮窗
 ipcMain.handle('pet:open', () => {
   openPetWindow();
@@ -378,16 +463,45 @@ ipcMain.handle('pet:action', (_event, kind: 'feed' | 'play' | 'rest') => {
   return { success: true, vitals };
 });
 
-// 安装宠物（骨架：登记到本机宠物库；真实解包见 main/pet/petPack.ts）
-ipcMain.handle('pet:install', (_event, id: string) => {
-  const pets = installPet({ id, name: id, format: '', installedAt: Date.now(), fromStore: true });
-  return { success: true, pet: pets.find((p) => p.id === id) ?? null };
+/** 宠物形象变更后的统一收口：广播状态 + 形象 + 配置（其它窗口同步 downloadedPets） */
+function afterPetMutation(): void {
+  broadcastPetState();
+  broadcastPetAssetChanged();
+  broadcastConfigChanged();
+}
+
+// 安装宠物：从平台下载并解包安装（见 main/pet/petLibrary.ts）
+ipcMain.handle('pet:install', async (_event, id: string) => {
+  const result = await installPet(id);
+  afterPetMutation();
+  return result;
+});
+
+// 选用本机已安装的某只宠物
+ipcMain.handle('pet:use-installed', (_event, id: string) => {
+  const result = useInstalledPet(id);
+  afterPetMutation();
+  return result;
+});
+
+// 应用某只内置演示宠物为当前形象
+ipcMain.handle('pet:use-builtin', (_event, id: string) => {
+  const result = applyBuiltinPet(id);
+  afterPetMutation();
+  return result;
+});
+
+// 删除一个动作（含磁盘文件）
+ipcMain.handle('pet:remove-action', (_event, id: string) => {
+  removeAction(id);
+  afterPetMutation();
+  return { success: true };
 });
 
 // 卸载宠物
 ipcMain.handle('pet:uninstall', (_event, id: string) => {
   uninstallPet(id);
-  broadcastPetState();
+  afterPetMutation();
   return { success: true };
 });
 
@@ -595,6 +709,8 @@ function buildAppMenu(): void {
 
 app.whenReady().then(() => {
   buildAppMenu();
+  // petaction:// 本地宠物资源协议（帧图 / 视频 / 本体图）
+  registerPetActionProtocol();
   // 启动直接打开工作室（创作中心）窗口；对话与资源中心由菜单按需打开
   openStudioWindow();
 
@@ -604,9 +720,20 @@ app.whenReady().then(() => {
 
   // Start agent proactive conversation scheduler
   startProactive();
+
+  // 宠物四维衰减定时器（每 5s；每 30s 落盘并调度 config 云同步）
+  startPetStateDecay(() => broadcastPetState());
+
+  // 零配置默认形象：首次运行（未装任何宠物）时自动启用首个内置演示宠物
+  const petCfg = loadConfig().pet;
+  if (petCfg && !petCfg.petAssetPath && !petCfg.currentPet && !petCfg.builtinPet) {
+    const firstBuiltin = listBuiltinPets()[0];
+    if (firstBuiltin) applyBuiltinPet(firstBuiltin.id);
+  }
 });
 
 app.on('before-quit', () => {
+  stopPetStateDecay();
   flushAllOnQuit();
 });
 

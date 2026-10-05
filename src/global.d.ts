@@ -1,4 +1,4 @@
-import type { PetVitals } from '@pet/domain';
+import type { PetActionModel, PetVitals } from '@pet/domain';
 
 export {};
 
@@ -219,8 +219,52 @@ export interface PetSettings {
 export interface PetRuntimeState {
   vitals: PetVitals;
   ready: boolean;
-  /** 当前选用的宠物（无则 null） */
+  /** 当前选用的宠物（无则 null；内置演示宠物不在下载库中时也为 null） */
   current: InstalledPet | null;
+}
+
+/** 渲染端可播放的一个动作（路径已由主进程转成 petaction:// URL） */
+export interface PetRenderAction {
+  id: string;
+  name: string;
+  kind: 'frames' | 'clip' | 'video';
+  interaction: 'none' | 'feed' | 'rest' | 'play';
+  frameUrls?: string[];
+  frameRate?: number;
+  videoUrl?: string;
+  clipName?: string;
+}
+
+/** 当前宠物的渲染模型（pet:get-asset 返回） */
+export interface PetRenderAsset {
+  format: string;
+  name: string;
+  imageUrl?: string;
+  actions: PetRenderAction[];
+  model: PetActionModel;
+}
+
+/** 内置演示宠物摘要（pet:list-builtins） */
+export interface PetBuiltinSummary {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  license: string;
+  entry: string;
+  bodyKinds: string[];
+  actionCount: number;
+  frameCount: number;
+  active: boolean;
+}
+
+/** 宠物包发布时附带的动作（渲染端 → 主进程，随包上传） */
+export interface PublishPackAction {
+  name: string;
+  interaction?: 'none' | 'feed' | 'rest' | 'play';
+  kind: 'frames' | 'clip' | 'video';
+  clipName?: string;
+  file?: PublishFilePayload;
 }
 
 export interface AppConfig {
@@ -296,14 +340,16 @@ export interface PublishFilePayload {
   bytes: Uint8Array;
 }
 
-/** 发布载荷（智能体 → POST /agents，音色 → POST /voices） */
+/** 发布载荷（智能体 → POST /agents，音色 → POST /voices，宠物 → POST /pet-packs） */
 export interface PublishPayload {
-  type: 'agent' | 'voice';
+  type: 'agent' | 'voice' | 'pet';
   /** 纯文本字段（tags/configSchema/dependencies 等由渲染端序列化） */
   fields: Record<string, string>;
-  /** 资源文件（智能体配置 JSON 等） */
+  /** 资源文件（智能体配置 JSON / 宠物包 zip 等） */
   file?: PublishFilePayload;
   preview?: PublishFilePayload;
+  /** 宠物包附带动作（仅 type='pet' 使用；随包上传，安装端读 pet/actions.json 装配） */
+  actions?: PublishPackAction[];
 }
 
 /** 发布成功返回的资源摘要 */
@@ -377,6 +423,16 @@ declare global {
       pet: {
         /** 宠物运行时状态（四维 + 就绪态 + 当前宠物） */
         getState: () => Promise<PetRuntimeState>;
+        /** 当前宠物的渲染模型（形象 URL + 动作 + 决策模型）；未选用时 null */
+        getAsset: () => Promise<PetRenderAsset | null>;
+        /** 内置演示宠物列表 */
+        listBuiltins: () => Promise<PetBuiltinSummary[]>;
+        /** 应用某只内置演示宠物为当前形象 */
+        useBuiltin: (id: string) => Promise<{ success: boolean; error?: string }>;
+        /** 选用本机已安装的某只宠物 */
+        useInstalled: (id: string) => Promise<{ success: boolean; pet?: InstalledPet; error?: string }>;
+        /** 删除一个动作（含磁盘文件） */
+        removeAction: (id: string) => Promise<{ success: boolean }>;
         /** 打开桌宠悬浮窗 */
         open: () => Promise<{ success: boolean }>;
         /** 关闭桌宠悬浮窗 */
@@ -384,11 +440,13 @@ declare global {
         /** 互动动作：feed / play / rest，返回互动后的四维 */
         action: (kind: 'feed' | 'play' | 'rest') => Promise<{ success: boolean; vitals?: PetVitals }>;
         /** 安装宠物（资源包 id） */
-        install: (id: string) => Promise<{ success: boolean; pet?: InstalledPet }>;
+        install: (id: string) => Promise<{ success: boolean; pet?: InstalledPet; error?: string }>;
         /** 卸载宠物 */
         uninstall: (id: string) => Promise<{ success: boolean }>;
         /** 主进程广播宠物状态变化 */
         onState: (callback: (state: PetRuntimeState) => void) => (() => void);
+        /** 主进程广播宠物形象变化（安装/切换/卸载后刷新渲染） */
+        onAssetChanged: (callback: () => void) => (() => void);
         /** 主进程投递宠物消息（主动搭话等） */
         onMessage: (callback: (message: string) => void) => (() => void);
       };

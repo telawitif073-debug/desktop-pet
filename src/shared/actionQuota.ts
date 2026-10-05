@@ -42,3 +42,23 @@ export function actionOwnerLabel(owner: string, petName?: string | null): string
   if (owner === ACTIONS_OWNER_USER) return '我的动作';
   return petName ? `${petName} 动作` : '宠物动作';
 }
+
+/**
+ * 动作配额校验（按归属分别计数）：超限即抛错，文案区分「我的动作」与「该宠物动作」，
+ * 便于用户判断该删谁。主进程写入动作前调用（纯函数，无 IO）。
+ */
+export function assertActionQuota(
+  existing: ReadonlyArray<ActionOwnerRef>,
+  incoming: ActionOwnerRef,
+): void {
+  const owner = actionOwnerKey(incoming);
+  const isUser = owner === ACTIONS_OWNER_USER;
+  const limit = actionQuotaLimit(owner);
+  const used = existing.filter((a) => actionOwnerKey(a) === owner).length;
+  if (used >= limit) {
+    const who = isUser ? '我的动作' : '该宠物动作';
+    throw new Error(
+      `${who}数量已达上限（${limit} 个），请先删除部分${isUser ? '自定义' : '该宠物的'}动作`,
+    );
+  }
+}
