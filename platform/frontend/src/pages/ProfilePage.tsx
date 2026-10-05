@@ -80,19 +80,22 @@ export default function ProfilePage() {
         <div className="page-heading"><Typography.Title level={3}>已下载资源</Typography.Title><Typography.Paragraph>下载的资源会安装到桌面客户端的数据目录，在这里可以随时更换。</Typography.Paragraph></div>
         {downloadLoading ? <div className="loading-state"><Spin /></div> : downloaded.length ? <div className="mine-list">{downloaded.map((entry) => {
           const asset = entry.asset!;
+          const isPet = entry.assetType === 'pet';
           const isActive = activeIds[entry.assetType] === entry.assetId;
           return <Card key={`${entry.assetType}-${entry.assetId}`} className="mine-card downloaded-card" variant="borderless">
             <div className="downloaded-info">
               {asset.previewUrl ? <div className="downloaded-thumb"><img src={assetUrl(asset.previewUrl)} alt={asset.name} /></div> : <div className="downloaded-thumb downloaded-thumb-empty">{asset.name.slice(0, 1)}</div>}
               <div>
                 <div className="downloaded-title"><Typography.Title level={5}>{asset.name}</Typography.Title>{isActive && <Tag color="cyan">当前使用</Tag>}</div>
-                <Space size={6} wrap><Tag color="purple">智能体</Tag>{statusTag(asset.status)}<Typography.Text type="secondary">下载于 {formatDate(entry.downloadedAt)}</Typography.Text></Space>
+                <Space size={6} wrap><Tag color={isPet ? 'green' : 'purple'}>{isPet ? '宠物包' : '智能体'}</Tag>{statusTag(asset.status)}<Typography.Text type="secondary">下载于 {formatDate(entry.downloadedAt)}</Typography.Text></Space>
               </div>
             </div>
             <Space>
-              {electronPlatform
-                ? <Button type={isActive ? 'default' : 'primary'} icon={<SwapOutlined />} loading={applying === entry.assetId} disabled={isActive} onClick={() => applyDownloaded(entry)}>{isActive ? '使用中' : '设为智能体'}</Button>
-                : <Typography.Text type="secondary">在桌面客户端中可一键更换</Typography.Text>}
+              {isPet
+                ? <Typography.Text type="secondary">宠物包暂不支持一键安装</Typography.Text>
+                : electronPlatform
+                  ? <Button type={isActive ? 'default' : 'primary'} icon={<SwapOutlined />} loading={applying === entry.assetId} disabled={isActive} onClick={() => applyDownloaded(entry)}>{isActive ? '使用中' : '设为智能体'}</Button>
+                  : <Typography.Text type="secondary">在桌面客户端中可一键更换</Typography.Text>}
               <Popconfirm title="确定删除这个已下载资源吗？" description={electronPlatform ? '本地安装文件将一并移除；若正在使用，重启客户端后恢复默认。' : '仅移除下载记录。'} onConfirm={() => removeDownloaded(entry)}><Button danger icon={<DeleteOutlined />}>删除</Button></Popconfirm>
             </Space>
           </Card>;
