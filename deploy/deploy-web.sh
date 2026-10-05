@@ -49,5 +49,5 @@ echo '--- verify ---'
 curl -s -o /dev/null -w 'web: %{http_code} %{size_download}\n' http://127.0.0.1/
 curl -s -o /dev/null -w 'spa fallback: %{http_code}\n' http://127.0.0.1/store
 curl -s -o /dev/null -w 'apk: %{http_code} %{size_download}\n' http://127.0.0.1/MobilePet-1.0.apk
-curl -s -o /dev/null -w 'api: %{http_code}\n' http://127.0.0.1/api/pets
+curl -s -o /dev/null -w 'api: %{http_code}\n' http://127.0.0.1/api/agents
 curl -s -o /dev/null -w 'bundle3: %{http_code}\n' http://127.0.0.1/pet-bundle-3.zip

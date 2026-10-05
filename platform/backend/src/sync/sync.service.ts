@@ -15,7 +15,7 @@ interface LibraryItem {
 }
 
 /**
- * 用户数据云同步：config / pet_state / chat_history 三类数据按用户存储。
+ * 用户数据云同步：config / chat_history 两类数据按用户存储。
  * config 中的 LLM API Key 等敏感字段以 AES-256-GCM 加密落库（密钥来自 SYNC_ENCRYPTION_KEY），
  * 响应时解密，防止拖库明文泄露。
  */

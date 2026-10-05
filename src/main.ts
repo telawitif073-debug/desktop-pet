@@ -509,7 +509,7 @@ function startProactive() {
 
 // ── 应用生命周期与菜单 ─────────────────────────────────────────────────────
 
-/** 应用菜单：替代宠物右键菜单，提供各窗口的打开入口 */
+/** 应用菜单：提供各窗口的打开入口 */
 function buildAppMenu(): void {
   const menu = Menu.buildFromTemplate([
     {

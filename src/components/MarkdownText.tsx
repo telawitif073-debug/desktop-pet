@@ -17,7 +17,7 @@ export function renderMarkdown(text: string): string {
 
 /**
  * 助手消息的 Markdown 渲染：代码块由渲染后注入的「复制」按钮承担（不写进 HTML，避免属性注入面）；
- * 容器级点击拦截确保链接不会让宠物窗口导航离开（面板内不打开外链）。
+ * 容器级点击拦截确保链接不会让对话窗口导航离开（面板内不打开外链）。
  */
 const MarkdownText = ({ content, className }: { content: string; className?: string }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +56,7 @@ const MarkdownText = ({ content, className }: { content: string; className?: str
     <div
       ref={containerRef}
       className={className ? `md-body ${className}` : 'md-body'}
-      // 链接点击一律拦截：宠物窗被导航离开会导致整个应用不可用
+      // 链接点击一律拦截：对话窗被导航离开会导致整个应用不可用
       onClick={(event) => {
         const anchor = (event.target as Element | null)?.closest?.('a');
         if (anchor) event.preventDefault();

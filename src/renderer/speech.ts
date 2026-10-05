@@ -1,5 +1,5 @@
 /**
- * 宠物语音朗读统一入口（三引擎，对齐手机端 voiceEngine.speakReply 的优先级）：
+ * 语音朗读统一入口（三引擎，对齐手机端 voiceEngine.speakReply 的优先级）：
  *   1) 智能体专属音色（档案 boundVoiceId）→ 2) 全局云音色（activeCloudVoiceId）
  *   → 3) 桌面 Edge 神经音色（免费在线）→ 4) 系统 Web Speech（离线兜底）
  * 云音色合成在主进程 ttsCloud.ts（API Key 留在主进程）；任何一级失败自动降级下一级，
@@ -323,7 +323,7 @@ export function previewSystemVoice(voiceURI?: string, speech?: SpeechSettings): 
   speakWithSystem(DEFAULT_PREVIEW_TEXT, cfg, tone, voiceURI || '');
 }
 
-/** 是否正在朗读（持续语音监听防自听：宠物说话期间麦克风识别忽略输入） */
+/** 是否正在朗读（持续语音监听防自听：朗读期间麦克风识别忽略输入） */
 export function isSpeaking(): boolean {
   if (currentAudio) return true;
   return typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking;

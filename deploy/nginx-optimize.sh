@@ -40,7 +40,7 @@ server {
         proxy_read_timeout 120s;
     }
 
-    # 宠物资源 nginx 静态直出（带浏览器缓存，比 node 代理快）
+    # 上传资源 nginx 静态直出（带浏览器缓存，比 node 代理快）
     location /uploads/ {
         alias /opt/pet/backend/uploads/;
         expires 7d;
@@ -53,6 +53,6 @@ systemctl reload nginx
 sleep 1
 echo '--- verify ---'
 curl -s -o /dev/null -w 'png direct: %{http_code} %{size_download}\n' -H 'Accept-Encoding: gzip' http://127.0.0.1/uploads/1789719223734-f273859e6f78a60e.png
-curl -s -o /dev/null -w 'pets gzip: %{http_code} %{size_download} enc=%{content_type}\n' -H 'Accept-Encoding: gzip' http://127.0.0.1/api/pets
+curl -s -o /dev/null -w 'agents gzip: %{http_code} %{size_download} enc=%{content_type}\n' -H 'Accept-Encoding: gzip' http://127.0.0.1/api/agents
 curl -s -o /dev/null -w 'apk: %{http_code}\n' http://127.0.0.1/MobilePet-1.0.apk
 curl -s -o /dev/null -w 'web: %{http_code}\n' http://127.0.0.1/

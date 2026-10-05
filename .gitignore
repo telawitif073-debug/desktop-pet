@@ -102,11 +102,6 @@ platform/backend/dist/
 platform/frontend/dist/
 platform/backend/uploads/*
 !platform/backend/uploads/sample-agent-config.json
-!platform/backend/uploads/sample-pet-asset.png
-
-# 共享包 @pet/domain 同步到后端的生成物（源在 packages/pet-domain/src/，
-# 由 scripts/sync-pet-domain.mjs 在 build/start:dev/test/seed/migration:* 前自动同步）
-platform/backend/src/pet-domain/
 
 # 本地工具链与发布产物（体积大、机器相关，不入库）
 android-sdk/

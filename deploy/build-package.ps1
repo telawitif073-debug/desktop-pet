@@ -1,4 +1,4 @@
-﻿# 本地打包部署产物：dist-share + backend(dist/node_modules/uploads/.env/app-update.json) + deploy 脚本
+# 本地打包部署产物：dist-share + backend(dist/node_modules/uploads/.env/app-update.json) + deploy 脚本
 # 产出 e:\desktop-pet\deploy\pet-deploy.tar.gz，scp 到服务器 /tmp/ 后执行 server-setup.sh
 $ErrorActionPreference = 'Stop'
 $root = 'e:\desktop-pet'
@@ -22,7 +22,7 @@ Copy-Item "$root\platform\backend\package-lock.json" $backend
 Push-Location $backend
 cmd /c "npm ci --omit=dev --no-audit --no-fund 2>&1" | Select-Object -Last 1
 Pop-Location
-# uploads 宠物资源（若有）
+# uploads 上传资源（若有）
 if (Test-Path "$root\platform\backend\uploads") { Copy-Item "$root\platform\backend\uploads" "$backend\uploads" -Recurse }
 # .env：云端版（DB 走本机 postgres，密码与 server-setup.sh 一致）
 $envContent = Get-Content "$root\platform\backend\.env" -Raw
