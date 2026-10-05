@@ -2,6 +2,10 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 悬浮窗宠物：在其他应用上层显示（需用户在系统设置中授权） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 应用内更新：下载 APK 后拉起系统安装器（Android 8+ 需用户授予安装未知应用） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -34,6 +38,12 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <!-- 悬浮窗宠物前台服务（在其他应用上方显示宠物） -->
+      <service
+        android:name=".OverlayPetService"
+        android:exported="false"
+        android:foregroundServiceType="mediaPlayback" />
 
       <!-- 应用内更新：向系统安装器共享下载的 APK 文件 -->
       <provider

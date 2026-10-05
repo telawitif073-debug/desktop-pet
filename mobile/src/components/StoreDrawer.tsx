@@ -8,7 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as platform from '../api/platform';
 import { scheduleUpload } from '../api/sync';
 import { useAppStore } from '../store/appStore';
-import { type AssetItem, type InstalledVoice } from '../types';
+import { type AssetItem, type InstalledVoice, type PetAssetRef, type PetPackSummary } from '../types';
+import { unzipPetPack } from '../pet/petFiles';
 import { cloudVoiceReady, previewInstalled, stopAllVoice } from '../voiceEngine';
 import { VOICE_GUIDE } from './voiceGuide';
 import PublishVoiceModal from './PublishVoiceModal';
@@ -27,10 +28,27 @@ interface DetailAsset extends AssetItem {
   dependencies?: string[];
   configSchema?: Record<string, unknown> | null;
   author?: { id?: string; username?: string } | null;
+  /** 宠物包：服务端校验快照（本体入口 / 形态），仅宠物详情有 */
+  manifest?: { entry?: string; bodyKinds?: string[] } | null;
 }
 
 function agentTypeLabel(type?: string): string {
   return type === 'task' ? '任务智能体' : type === 'mixed' ? '混合智能体' : '对话智能体';
+}
+
+/** 宠物包详情 → 移动端渲染形态（与 PetView 分流一致；本体入口来自 manifest.entry） */
+function petFormatOfPack(detail: { manifest?: { entry?: string; bodyKinds?: string[] } | null }): string {
+  const entry = detail.manifest?.entry ?? '';
+  if (/\.(model3|live2d(-lite)?)\.json$/i.test(entry)) return 'live2d';
+  if (/\.(glb|gltf|vrm|fbx|obj)$/i.test(entry)) return 'model3d';
+  if ((detail.manifest?.bodyKinds ?? []).includes('body-animation') && /\.(png|jpe?g|webp|gif)$/i.test(entry)) return 'pack';
+  return 'image';
+}
+
+/** 宠物形态文案 */
+function petFormatLabel(detail: { manifest?: { entry?: string; bodyKinds?: string[] } | null }): string {
+  const f = petFormatOfPack(detail);
+  return f === 'image' ? '静态形象' : f === 'pack' ? '帧动画' : f === 'live2d' ? 'Live2D' : '3D 模型';
 }
 
 /** 从智能体实体依赖声明 + 配置文件里提取「需要的 API / 依赖」清单 */
@@ -63,17 +81,22 @@ function extractAgentDeps(detail: DetailAsset, config: Record<string, unknown> |
 
 export default function StoreDrawer({
   visible,
+  initialTab = 'agent',
   onClose,
   onOpenSettings,
   onOpenAdmin,
 }: {
   visible: boolean;
+  /** 抽屉打开时的默认标签（宠物页「去商店」→ pet） */
+  initialTab?: 'pet' | 'agent' | 'voice';
   onClose: () => void;
   onOpenSettings: () => void;
   onOpenAdmin: () => void;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<'agent' | 'voice'>('agent');
+  const [tab, setTab] = useState<'pet' | 'agent' | 'voice'>('agent');
+  // 宠物板块数据（pet-packs 接口结构与 agents 不同，单独一套 state）
+  const [petItems, setPetItems] = useState<PetPackSummary[]>([]);
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<AssetItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -108,6 +131,9 @@ export default function StoreDrawer({
   );
   const downloadedVoices = useAppStore((s) => s.downloadedVoices);
   const activeCloudVoiceId = useAppStore((s) => s.activeCloudVoiceId);
+  // 宠物：当前选用形象与已下载列表（安装/已下载判定用）
+  const currentPetId = useAppStore((s) => s.petAsset?.id);
+  const downloadedPets = useAppStore((s) => s.downloadedPets);
   const token = useAppStore((s) => s.token);
   const username = useAppStore((s) => s.user?.username ?? '用户');
   const isAdmin = useAppStore((s) => s.user?.role === 'admin');
@@ -138,17 +164,26 @@ export default function StoreDrawer({
       if (tab === 'voice') {
         const res = await platform.listVoices(search.trim() ? { search: search.trim() } : undefined);
         setVoiceItems(res.items);
+      } else if (tab === 'pet') {
+        const res = await platform.listPetPacks(search.trim() ? { search: search.trim() } : undefined);
+        setPetItems(res.items);
       } else {
         const res = await platform.listAssets(search.trim() || undefined);
         setItems(res.items);
       }
     } catch {
       if (tab === 'voice') setVoiceItems([]);
+      else if (tab === 'pet') setPetItems([]);
       else setItems([]);
     } finally {
       setLoading(false);
     }
   }, [tab, search]);
+
+  // 打开抽屉时切到外部指定的默认标签（宠物页「去商店」→ pet）
+  useEffect(() => {
+    if (visible) setTab(initialTab);
+  }, [visible, initialTab]);
 
   useEffect(() => {
     if (visible) void load();
@@ -168,6 +203,12 @@ export default function StoreDrawer({
         if (tab === 'voice') {
           const d = await platform.getVoiceDetail(item.id);
           setVoiceDetail(d);
+          setDetailLoading(false);
+          return;
+        }
+        if (tab === 'pet') {
+          const d = await platform.getPetPack(item.id);
+          setDetail(d as unknown as DetailAsset);
           setDetailLoading(false);
           return;
         }
@@ -206,9 +247,44 @@ export default function StoreDrawer({
     stopAllVoice();
   }, []);
 
+  /** 安装宠物包：下载 zip → 解压到本机（离线可用）→ 入库并设为当前宠物 */
+  const installPet = async (id: string): Promise<void> => {
+    const detail = await platform.getPetPack(id);
+    const dl = await platform.downloadPetPack(id);
+    const entryPath = detail.manifest?.entry || undefined;
+    // 解压失败仍入库（渲染时 PetView 会再补一次解压，失败才提示）
+    let localPath: string | undefined;
+    try {
+      const dir = await unzipPetPack(detail.id, dl.url || detail.packUrl);
+      localPath = entryPath ? `${dir}/${entryPath}` : undefined;
+    } catch {
+      localPath = undefined;
+    }
+    const ref: PetAssetRef = {
+      id: detail.id,
+      name: detail.name,
+      format: petFormatOfPack(detail),
+      packUrl: detail.packUrl,
+      entryPath,
+      localPath,
+    };
+    const store = useAppStore.getState();
+    store.patch({
+      downloadedPets: [...store.downloadedPets.filter((p) => p.id !== ref.id), ref],
+      petAsset: ref,
+      petStateReady: !!localPath,
+    });
+    scheduleUpload('pet_state');
+  };
+
   const install = async (item: AssetItem): Promise<void> => {
     setBusyId(item.id);
     try {
+      if (tab === 'pet') {
+        await installPet(item.id);
+        Alert.alert('已领养', `${item.name} 已下载并设为当前宠物。`);
+        return;
+      }
       const detail = await platform.getAssetDetail(item.id);
       await platform.downloadAsset(item.id);
       const res = await fetch(platform.assetUrl(detail.fileUrl ?? ''));
@@ -365,6 +441,10 @@ export default function StoreDrawer({
   };
 
   const detailItem = selected;
+  // 宠物详情：是否已是当前宠物 / 已下载（按钮态）
+  const detailIsPet = tab === 'pet';
+  const detailPetCurrent = detailIsPet && !!detailItem && currentPetId === detailItem.id;
+  const detailPetDownloaded = detailIsPet && !!detailItem && downloadedPets.some((p) => p.id === detailItem.id);
   // 详情大图：展示卡片预览图（preview_url）
   const detailImgSource = (() => {
     if (!detail || imgError) return null;
@@ -500,7 +580,7 @@ export default function StoreDrawer({
                 )}
                 <View style={styles.detailBadgeRow}>
                   <View style={styles.detailBadge}>
-                    <Text style={styles.detailBadgeText}>{agentTypeLabel(detail.type)}</Text>
+                    <Text style={styles.detailBadgeText}>{tab === 'pet' ? petFormatLabel(detail) : agentTypeLabel(detail.type)}</Text>
                   </View>
                   {typeof detail.version === 'string' && <Text style={styles.detailVersion}>v{detail.version}</Text>}
                 </View>
@@ -564,12 +644,12 @@ export default function StoreDrawer({
                   </>
                 )}
                 <Pressable
-                  style={[styles.installBig, busyId === detail.id && styles.installDisabled]}
-                  disabled={!!busyId}
+                  style={[styles.installBig, (busyId === detail.id || detailPetCurrent) && styles.installDisabled]}
+                  disabled={!!busyId || detailPetCurrent}
                   onPress={() => void install(detail as DetailAsset)}
                 >
                   <Text style={styles.installBigText}>
-                    {busyId === detail.id ? '安装中…' : '安装'}
+                    {busyId === detail.id ? '安装中…' : detailPetCurrent ? '当前宠物' : detailPetDownloaded ? '设为当前宠物' : '安装'}
                   </Text>
                 </Pressable>
               </ScrollView>
@@ -581,7 +661,7 @@ export default function StoreDrawer({
               <Text style={styles.searchIcon}>⌕</Text>
               <TextInput
                 style={styles.search}
-                placeholder={tab === 'voice' ? '搜索音色…' : '搜索智能体…'}
+                placeholder={tab === 'voice' ? '搜索音色…' : tab === 'pet' ? '搜索宠物…' : '搜索智能体…'}
                 placeholderTextColor="#B2B2B2"
                 value={search}
                 onChangeText={setSearch}
@@ -591,10 +671,10 @@ export default function StoreDrawer({
             </View>
 
             <View style={styles.tabs}>
-              {(['agent', 'voice'] as const).map((t) => (
+              {(['pet', 'agent', 'voice'] as const).map((t) => (
                 <Pressable key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
                   <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-                    {t === 'agent' ? '智能体' : '音色'}
+                    {t === 'pet' ? '宠物' : t === 'agent' ? '智能体' : '音色'}
                   </Text>
                 </Pressable>
               ))}
@@ -617,6 +697,34 @@ export default function StoreDrawer({
 
             {loading ? (
               <ActivityIndicator style={styles.loading} />
+            ) : tab === 'pet' ? (
+              <FlatList
+                data={petItems}
+                keyExtractor={(item) => item.id}
+                ListEmptyComponent={<Text style={styles.empty}>暂无宠物包，来上架第一只吧</Text>}
+                renderItem={({ item }) => {
+                  const isCurrent = currentPetId === item.id;
+                  const isDownloaded = downloadedPets.some((p) => p.id === item.id);
+                  const btnDisabled = !!busyId || isCurrent;
+                  const btnText = isCurrent ? '当前' : isDownloaded ? '设为当前' : busyId === item.id ? '…' : '领养';
+                  const meta = `${item.description ? `${item.description} · ` : ''}${typeof item.downloads === 'number' ? `${item.downloads} 次下载` : ''} · v${item.version}`;
+                  return (
+                    <View style={styles.item}>
+                      <Pressable style={{ flex: 1 }} onPress={() => void openDetail(item as unknown as AssetItem)}>
+                        <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.itemMeta} numberOfLines={1}>{meta}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.installBtn, btnDisabled && styles.installDisabled]}
+                        disabled={btnDisabled}
+                        onPress={() => void install(item as unknown as AssetItem)}
+                      >
+                        <Text style={styles.installText}>{btnText}</Text>
+                      </Pressable>
+                    </View>
+                  );
+                }}
+              />
             ) : tab === 'voice' ? (
               <FlatList
                 data={voiceItems}

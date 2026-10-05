@@ -18,7 +18,7 @@ import {
 } from '../types';
 import { sanitizeAgentTasks } from '../agentTasks';
 // 宠物四维规则（纯函数）来自共享包 pet/domain，经 mobile/src/pet/domain.ts shim 引用
-import { DEFAULT_VITALS, feed, normalizeVitals, play, rest, type PetVitals } from '../pet/domain';
+import { DEFAULT_VITALS, decay, feed, normalizeVitals, play, rest, type PetVitals } from '../pet/domain';
 
 const STORAGE_KEY = 'mobile-pet-store';
 /** 默认走阿里云 ECS 常驻服务（7×24）；Android 模拟器可在设置中改为 http://10.0.2.2:3001/api */
@@ -122,6 +122,8 @@ interface AppStore {
   playWithPet: () => void;
   /** 休息：精力 +30、饱腹 -5 */
   restPet: () => void;
+  /** 自然衰减（定时调用）：饱腹 -0.5 / 心情 -0.2 / 精力 -0.1，好感不衰减；功能关闭时不衰减 */
+  decayPet: () => void;
   /** 设置当前宠物形象（安装/选用后写入） */
   setPetAsset: (asset: PetAssetRef) => void;
   /** 清除当前宠物形象（卸载/停用） */
@@ -131,7 +133,7 @@ interface AppStore {
 
 type PersistState = Omit<
   AppStore,
-  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setTtsEnabled' | 'hydrate' | 'removeMessage' | 'switchProfile' | 'toggleProfileEnabled' | 'duplicateProfile' | 'addAgentTask' | 'patchAgentTasks' | 'pushAgentTaskMessage' | 'feedPet' | 'playWithPet' | 'restPet' | 'setPetAsset' | 'clearPetAsset'
+  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setTtsEnabled' | 'hydrate' | 'removeMessage' | 'switchProfile' | 'toggleProfileEnabled' | 'duplicateProfile' | 'addAgentTask' | 'patchAgentTasks' | 'pushAgentTaskMessage' | 'feedPet' | 'playWithPet' | 'restPet' | 'decayPet' | 'setPetAsset' | 'clearPetAsset'
 >;
 
 const PERSIST_KEYS: Array<keyof PersistState> = [
@@ -389,6 +391,8 @@ export const useAppStore = create<AppStore>((set) => ({
   feedPet: () => set((s) => ({ petState: feed(s.petState) })),
   playWithPet: () => set((s) => ({ petState: play(s.petState) })),
   restPet: () => set((s) => ({ petState: rest(s.petState) })),
+  // 关闭宠物功能时不衰减（返回原 state，避免无意义渲染）
+  decayPet: () => set((s) => (s.petStateEnabled ? { petState: decay(s.petState) } : s)),
   setPetAsset: (asset) => set({ petAsset: asset }),
   clearPetAsset: () => set({ petAsset: null }),
 

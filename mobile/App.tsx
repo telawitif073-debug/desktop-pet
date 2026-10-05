@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
 import { useAppStore } from './src/store/appStore';
-import { flushAllOnQuit } from './src/api/sync';
+import { flushAllOnQuit, pullPetState } from './src/api/sync';
 import { reportCrash } from './src/diagnostics/crashReport';
 import VoicePlayer from './src/components/VoicePlayer';
 
@@ -57,7 +57,10 @@ export default function App(): React.JSX.Element {
         // 忽略读取失败
       }
     })();
-    void useAppStore.getState().hydrate();
+    void useAppStore.getState().hydrate().then(() => {
+      // 冷启动水合后：已登录则拉取云端宠物状态（本地未就绪时采用云端）
+      if (useAppStore.getState().token) void pullPetState();
+    });
     // 退到后台时 flush 待上传的同步数据（与桌面端 before-quit 对应）
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') flushAllOnQuit();

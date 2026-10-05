@@ -40,6 +40,8 @@ class MainApplication : Application(), ReactApplication {
             add(HotUpdatePackage())
             // 真实安装版本信息（更新检测与关于页）
             add(PetInfoPackage())
+            // 系统级悬浮窗宠物（在其他应用上方显示，见 OverlayPetService）
+            add(OverlayPetPackage())
           }
     }
   }

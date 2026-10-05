@@ -11,10 +11,13 @@
  */
 import { syncGet, syncPut } from './platform';
 import { useAppStore, sanitizeMessages } from '../store/appStore';
+// 宠物状态同步：REST 段与载荷契约来自共享包 pet/api（前后端同一份）
+import { PET_SYNC_ROUTE, type PetStatePayload } from '../../../pet/api';
+import { isDefaultVitals, normalizeVitals } from '../pet/domain';
 import type { LlmProfile } from '../types';
 
 const UPLOAD_DELAY = 60_000;
-const timers: Partial<Record<'config' | 'chat_history', ReturnType<typeof setTimeout>>> = {};
+const timers: Partial<Record<'config' | 'pet_state' | 'chat_history', ReturnType<typeof setTimeout>>> = {};
 
 function isLoggedIn(): boolean {
   return !!useAppStore.getState().token;
@@ -146,11 +149,33 @@ export async function pullAfterLogin(): Promise<PullSummary> {
     console.log('[sync] 拉取聊天记录失败:', e instanceof Error ? e.message : e);
   }
 
+  // 3. 宠物状态（本地未就绪时采用云端；随后随变更防抖上传）
+  await pullPetState();
+
   return summary;
 }
 
+/**
+ * 拉取云端宠物状态（本地仍是初值时采用云端版本）。
+ * 登录后（pullAfterLogin）与冷启动水合后各调用一次；本机已有养成进度时不覆盖。
+ */
+export async function pullPetState(): Promise<void> {
+  if (!isLoggedIn()) return;
+  try {
+    const remote = await syncGet(PET_SYNC_ROUTE);
+    const st = useAppStore.getState();
+    // 本机已玩过（非初值）则保留本地进度，不采用云端
+    if (!isDefaultVitals(st.petState) || !remote.data) return;
+    const payload = remote.data as Partial<PetStatePayload>;
+    st.patch({ petState: normalizeVitals(payload.vitals) });
+    console.log('[sync] 已从云端恢复宠物状态');
+  } catch (e) {
+    console.log('[sync] 拉取宠物状态失败:', e instanceof Error ? e.message : e);
+  }
+}
+
 /** 上传单类数据（本地为准，覆盖云端；智能体列表为空时跳过 config，避免误删被同步成不可逆丢失） */
-async function uploadNow(kind: 'config' | 'chat_history'): Promise<void> {
+async function uploadNow(kind: 'config' | 'pet_state' | 'chat_history'): Promise<void> {
   if (!isLoggedIn()) return;
   const store = useAppStore.getState();
   try {
@@ -173,6 +198,10 @@ async function uploadNow(kind: 'config' | 'chat_history'): Promise<void> {
           ? { id: store.llmActiveProfileId, name: store.llmProfiles.find((p) => p.id === store.llmActiveProfileId)?.name, systemPrompt: store.llmProfiles.find((p) => p.id === store.llmActiveProfileId)?.systemPrompt }
           : null,
       });
+    } else if (kind === 'pet_state') {
+      // 宠物状态：四维 + 就绪标记（契约见 pet/api PetStatePayload）
+      const payload: PetStatePayload = { vitals: store.petState, ready: store.petStateReady, updatedAt: Date.now() };
+      await syncPut(PET_SYNC_ROUTE, payload);
     } else {
       // chat-history: 上传当前智能体的消息
       await syncPut('chat-history', store.messages);
@@ -183,7 +212,7 @@ async function uploadNow(kind: 'config' | 'chat_history'): Promise<void> {
 }
 
 /** 本地变更防抖上传（60s 合并多次变更） */
-export function scheduleUpload(kind: 'config' | 'chat_history'): void {
+export function scheduleUpload(kind: 'config' | 'pet_state' | 'chat_history'): void {
   if (!isLoggedIn() || timers[kind]) return;
   timers[kind] = setTimeout(() => {
     timers[kind] = undefined;
@@ -193,7 +222,7 @@ export function scheduleUpload(kind: 'config' | 'chat_history'): void {
 
 /** 退出前 flush 全部待上传数据 */
 export function flushAllOnQuit(): void {
-  (['config', 'chat_history'] as const).forEach((kind) => {
+  (['config', 'pet_state', 'chat_history'] as const).forEach((kind) => {
     if (timers[kind]) {
       clearTimeout(timers[kind]);
       timers[kind] = undefined;

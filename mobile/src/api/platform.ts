@@ -321,8 +321,8 @@ export async function verifyDependency(options: {
   });
 }
 
-// --- 用户数据云同步（与桌面端 cloudSync.ts 对齐的 kind 命名） ---
-type SyncKind = 'config' | 'chat-history' | 'library';
+// --- 用户数据云同步（与桌面端 cloudSync.ts 对齐的 kind 命名；宠物状态走 REST 段 pet-state） ---
+type SyncKind = 'config' | 'chat-history' | 'library' | 'pet-state';
 
 export async function syncGet(kind: SyncKind): Promise<{ data: unknown; updatedAt: string | null }> {
   return request<{ data: unknown; updatedAt: string | null }>(`/sync/${kind}`);

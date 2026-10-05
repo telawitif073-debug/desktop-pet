@@ -11,6 +11,7 @@ import ChatScreen from '../screens/ChatScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AdminScreen from '../screens/AdminScreen';
 import PetScreen from '../screens/PetScreen';
+import FloatingPet from '../pet/FloatingPet';
 import StoreDrawer from '../components/StoreDrawer';
 import { useAgentTaskScheduler } from '../agentTaskScheduler';
 import { useAgentProactive } from '../agentProactive';
@@ -22,9 +23,11 @@ export default function MainShell(): React.JSX.Element {
   // 自主主动搭话：无用户排期时智能体也会按间隔来找你说话（见 agentProactive.ts）
   useAgentProactive();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // 商店抽屉进入时默认标签（聊天/汉堡 → 智能体；宠物页「去商店」→ 宠物）
+  const [storeTab, setStoreTab] = useState<'pet' | 'agent' | 'voice'>('agent');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
-  // 宠物页（占位骨架）：从右下角浮标进入，后续阶段替换为悬浮形象
+  // 宠物页：从右下角浮标进入（展示形象/体征/互动），也可由此去商店「宠物」板块
   const [petOpen, setPetOpen] = useState(false);
   // drawerOpen 的最新值（PanResponder 闭包只创建一次，须经 ref 读取，避免陈旧闭包）
   const drawerOpenRef = useRef(false);
@@ -44,9 +47,12 @@ export default function MainShell(): React.JSX.Element {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }} {...swipeOpenPan.panHandlers}>
-      <ChatScreen onOpenDrawer={() => setDrawerOpen(true)} />
+      <ChatScreen onOpenDrawer={() => { setStoreTab('agent'); setDrawerOpen(true); }} />
+      {/* 应用内常驻悬浮宠物（可拖动，三连击出互动菜单；未安装形象时不渲染） */}
+      <FloatingPet />
       <StoreDrawer
         visible={drawerOpen}
+        initialTab={storeTab}
         onClose={() => setDrawerOpen(false)}
         onOpenSettings={() => {
           setDrawerOpen(false);
@@ -58,7 +64,7 @@ export default function MainShell(): React.JSX.Element {
         }}
       />
       <SettingsScreen visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      {/* 宠物入口浮标：进入宠物页（占位骨架），zIndex 低于商店抽屉，抽屉打开时被遮罩覆盖 */}
+      {/* 宠物入口浮标：进入宠物页，zIndex 低于商店抽屉，抽屉打开时被遮罩覆盖 */}
       <Pressable
         style={[styles.petEntry, { bottom: insets.bottom + 112 }]}
         onPress={() => setPetOpen(true)}
@@ -75,6 +81,7 @@ export default function MainShell(): React.JSX.Element {
         <PetScreen
           onOpenStore={() => {
             setPetOpen(false);
+            setStoreTab('pet');
             setDrawerOpen(true);
           }}
         />
