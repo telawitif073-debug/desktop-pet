@@ -31,7 +31,7 @@ function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, o
 
   if (adminView) {
     return <Header className="site-header admin-header">
-      <Link to="/admin" className="brand"><span className="brand-mark"><SafetyCertificateOutlined /></span><span>桌面宠物管理后台</span></Link>
+      <Link to="/admin" className="brand"><span className="brand-mark"><SafetyCertificateOutlined /></span><span>桌面助手管理后台</span></Link>
       <Menu theme="dark" mode="horizontal" selectedKeys={['admin']} items={[{ key: 'admin', label: <Link to="/admin">审核工作台</Link>, icon: <SafetyCertificateOutlined /> }]} />
       <div className="header-account">{isDeveloper && viewSwitch}<Typography.Text className="account-label">管理员 · {user!.username}</Typography.Text><Button type="text" className="account-button" onClick={onLogout} icon={<LogoutOutlined />}>退出</Button></div>
     </Header>;
@@ -39,15 +39,15 @@ function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, o
 
   return (
     <Header className="site-header">
-      <Link to="/" className="brand"><span className="brand-mark"><HeartOutlined /></span><span>桌面宠物资源库</span></Link>
+      <Link to="/" className="brand"><span className="brand-mark"><HeartOutlined /></span><span>桌面助手资源库</span></Link>
       <Menu
         theme="dark"
         mode="horizontal"
         selectedKeys={[selected]}
         items={[
           { key: 'browse', label: <Link to="/">探索资源</Link>, icon: <ShopOutlined /> },
-          // 原「上传资源」页已删除：上传/发布收口到宠工坊，内容直接嵌在本窗口内容区
-          { key: 'workshop', label: <Link to="/workshop">宠工坊</Link>, icon: <AppstoreOutlined /> },
+          // 原「上传资源」页已删除：上传/发布收口到资源工坊，内容直接嵌在本窗口内容区
+          { key: 'workshop', label: <Link to="/workshop">资源工坊</Link>, icon: <AppstoreOutlined /> },
           ...(user ? [{ key: 'profile', label: <Link to="/profile">个人中心</Link>, icon: <UserOutlined /> }, { key: 'agents', label: <Link to="/agents">智能体</Link>, icon: <RobotOutlined /> }] : []),
           { key: 'settings', label: <Link to="/settings">设置</Link>, icon: <SettingOutlined /> },
         ]}
@@ -72,7 +72,7 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
-      // 桌面客户端可能已经登录（宠工坊上传/下载共用同一账号）：先沿用桌面端令牌
+      // 桌面客户端可能已经登录（资源工坊上传/下载共用同一账号）：先沿用桌面端令牌
       await adoptDesktopAuth();
       if (!localStorage.getItem('platform_access_token')) return;
       try {
@@ -120,7 +120,7 @@ export default function App() {
             <Route path="/login" element={<AuthPage onAuthenticated={setUser} />} />
             <Route path="/" element={adminView ? <Navigate to="/admin" replace /> : <ResourceListPage />} />
             <Route path="/asset/:type/:id" element={<ResourceDetailPage user={user} />} />
-            {/* 宠工坊：内容区由主进程嵌入桌面端宠工坊视图（不新开窗口） */}
+            {/* 资源工坊：内容区由主进程嵌入桌面端工坊视图（不新开窗口） */}
             <Route path="/workshop" element={<WorkshopPage />} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
@@ -129,7 +129,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Content>
-        <footer className="site-footer"><Typography.Text type="secondary">一处收集，轻松安装到你的桌面宠物</Typography.Text></footer>
+        <footer className="site-footer"><Typography.Text type="secondary">一处收集，轻松安装到你的桌面助手</Typography.Text></footer>
       </Layout>
     </ConfigProvider>
   );

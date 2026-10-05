@@ -403,7 +403,7 @@ export default function AgentsPage() {
         <div>
           <span className="eyebrow">AGENTS</span>
           <Typography.Title>智能体管理</Typography.Title>
-          <Paragraph>你的个人智能体（云端加密同步，手机端与桌面端共用）。每个智能体绑定专属宠物形象、拥有独立对话。支持 JSON 导出（不含密钥）与导入合并。</Paragraph>
+          <Paragraph>你的个人智能体（云端加密同步，手机端与桌面端共用）。每个智能体拥有独立对话。支持 JSON 导出（不含密钥）与导入合并。</Paragraph>
         </div>
       </div>
       {contextHolder}
@@ -455,11 +455,6 @@ export default function AgentsPage() {
                       {p.style && <Tag>{p.style}</Tag>}
                     </Space>
                   )}
-                  <div style={{ marginTop: 2 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {p.petAssetId ? `已绑定宠物形象 ID：${p.petAssetId}` : '未绑定宠物形象（可在手机端智能体管理中绑定）'}
-                    </Text>
-                  </div>
                 </div>
                 <Space>
                   <Switch checked={enabled} onChange={(v) => void toggle(p, v)} />
@@ -531,7 +526,7 @@ export default function AgentsPage() {
             value={multiRaw}
             onChange={(e) => setMultiRaw(e.target.value)}
             rows={6}
-            placeholder={'kind: multi_agent\nname: 宠物管家团\norchestrator:\n  type: supervisor\n  model: ${MODEL_API}\nagents:\n  - id: health\n    endpoint: ${HEALTH_AGENT_API}\n    api_key: ${HEALTH_AGENT_KEY}'}
+            placeholder={'kind: multi_agent\nname: 智能体管家团\norchestrator:\n  type: supervisor\n  model: ${MODEL_API}\nagents:\n  - id: health\n    endpoint: ${HEALTH_AGENT_API}\n    api_key: ${HEALTH_AGENT_KEY}'}
             style={{ fontFamily: 'monospace', fontSize: 12, marginBottom: 8 }}
           />
           <Space wrap style={{ marginBottom: 12 }}>

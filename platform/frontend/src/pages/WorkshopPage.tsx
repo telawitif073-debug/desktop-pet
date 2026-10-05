@@ -2,14 +2,14 @@ import { useEffect, useRef } from 'react';
 import { Empty, Typography } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 
-/** 允许的落地工作区（与桌面端 StudioWorkspaceTab 一致；动作已并入宠物资源） */
-const TAB_KEYS = ['pets', 'agents', 'voices'] as const;
+/** 允许的落地工作区（与桌面端 StudioWorkspaceTab 一致） */
+const TAB_KEYS = ['agents', 'voices'] as const;
 type WorkshopTab = (typeof TAB_KEYS)[number];
-/** 历史入口（上传/发布、动作）统一落到「宠物资源」页 */
-const LEGACY_TABS: Record<string, WorkshopTab> = { publish: 'pets', actions: 'pets' };
+/** 历史入口（上传/发布、动作）统一落到「智能体」页 */
+const LEGACY_TABS: Record<string, WorkshopTab> = { publish: 'agents', actions: 'agents' };
 
 /**
- * 资源中心内的「宠工坊」页：内容区交给主进程嵌入的宠工坊视图（同一份桌面渲染包），
+ * 资源中心内的「资源工坊」页：内容区交给主进程嵌入的工坊视图（同一份桌面渲染包），
  * 本站顶栏/导航常驻，不再新开独立窗口。页面只负责测量内容区并把矩形上报给主进程。
  * 浏览器环境（没有 Electron 桥）下给出说明，不显示空白。
  */
@@ -26,7 +26,7 @@ export default function WorkshopPage() {
     const container = containerRef.current;
     if (!bridge || !container) return;
 
-    // 内嵌视图贴的是窗口坐标，页面滚动会让矩形漂移：进入宠工坊期间禁掉页面滚动
+    // 内嵌视图贴的是窗口坐标，页面滚动会让矩形漂移：进入资源工坊期间禁掉页面滚动
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     window.scrollTo(0, 0);
@@ -77,9 +77,9 @@ export default function WorkshopPage() {
             <Empty
               description={
                 <span>
-                  宠工坊在桌面宠物客户端中打开
+                  资源工坊在桌面客户端中打开
                   <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                    这个页面会把宠工坊（智能体 / 动作 / 音色 / 上传发布）嵌进资源中心窗口的内容区，需要桌面客户端环境。
+                    这个页面会把资源工坊（智能体 / 音色 / 上传发布）嵌进资源中心窗口的内容区，需要桌面客户端环境。
                   </Typography.Paragraph>
                 </span>
               }

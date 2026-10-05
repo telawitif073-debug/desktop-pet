@@ -48,7 +48,7 @@ a { color: inherit; text-decoration: none; }
 .auth-card-heading h3 { margin-bottom: 6px; }
 .form-alert { margin-bottom: 20px; }
 .page-heading { margin-bottom: 34px; }
-/* 宠工坊内嵌区：主进程把桌面端宠工坊视图挂在这块内容区上（本站顶栏/导航常驻，不新开窗口） */
+/* 资源工坊内嵌区：主进程把桌面端工坊视图挂在这块内容区上（本站顶栏/导航常驻，不新开窗口） */
 .workshop-page { width: 100%; padding: 0; }
 .workshop-embed-area { width: 100%; height: calc(100vh - 72px); min-height: 520px; background: #1e1f22; }
 .workshop-embed-fallback { min-height: 420px; display: grid; place-items: center; padding: 24px; text-align: center; }

@@ -1,5 +1,5 @@
 /** 智能体配置导入/导出、Schema 校验与多智能体识别（P1-1/P1-2，逻辑与手机端 mobile/src/agentPort.ts 同构）
- *  导出剥离凭证（apiKey/本地 id/绑定形象/凭证值）；导入按名称合并；
+ *  导出剥离凭证（apiKey/本地 id/凭证值）；导入按名称合并；
  *  多智能体：解析 YAML/JSON → 识别编排结构 → 提取外部依赖（${VAR}/{{VAR}}/env:/secret:）→ 占位符替换为内部引用 cred://dep_N。
  */
 import type { LlmProfile, AgentMultiConfig, MultiAgentDependency } from './types';
@@ -500,7 +500,7 @@ function inferDependency(key: string): Pick<MultiAgentDependency, 'type' | 'prot
 export function buildDependencyList(value: unknown, keyHint: string): MultiAgentDependency[] {
   const keys = new Set<string>();
   collectPlaceholderKeys(value, keys);
-  // 也收集位于配置 key 中的占位符（如 name: ${PET_NAME}）
+  // 也收集位于配置 key 中的占位符（如 name: ${AGENT_NAME}）
   collectPlaceholderKeys(keyHint, keys);
   const deps: MultiAgentDependency[] = [];
   let idx = 0;

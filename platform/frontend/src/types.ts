@@ -1,23 +1,5 @@
-export type AssetType = 'pet' | 'agent';
+export type AssetType = 'agent';
 export type AssetStatus = 'pending' | 'approved' | 'rejected';
-/** 宠物资源形态：image=单张图片（含 GIF），pack=多图模型包，live2d=Live2D 模型包，model3d=3D 模型 */
-export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
-
-/** 感知能力开关（隐私敏感，默认全关）：对应客户端聊天面板的桌面截屏/语音输入/摄像头拍照 */
-export interface PetSensesSettings {
-  screen: boolean;
-  mic: boolean;
-  camera: boolean;
-}
-
-/** 宠物附带的动作（随宠物上传/安装，不可跨宠物使用） */
-export interface PetActionSummary {
-  id: string;
-  name: string;
-  interaction?: 'none' | 'feed' | 'rest' | 'play';
-  kind: 'frames' | 'clip';
-  clipName?: string | null;
-}
 
 export interface User {
   id: string;
@@ -27,9 +9,6 @@ export interface User {
   avatarUrl?: string | null;
 }
 
-/** 宠物本体类型（由服务端包校验派生，不是用户填写） */
-export type PetBodyKind = 'body-model' | 'body-animation' | 'body-still';
-
 export interface Asset {
   id: string;
   name: string;
@@ -37,28 +16,12 @@ export interface Asset {
   category?: string | null;
   tags?: string[];
   type?: 'chat' | 'task' | 'mixed';
-  /** 宠物资源形态（旧字段，智能体分支仍在用） */
-  format?: PetFormat;
-  /** 宠物附带的动作清单（详情接口返回） */
-  actions?: PetActionSummary[];
   configSchema?: Record<string, unknown> | null;
   dependencies?: string[];
   previewUrl?: string | null;
   backgroundUrl?: string | null;
-  /** 资源文件地址：宠物包没有该字段（改用 packUrl），故为可选 */
+  /** 资源文件地址 */
   fileUrl?: string | null;
-  /** 宠物包 zip 地址（宠物商店的唯一必填载体） */
-  packUrl?: string | null;
-  /** 包体 sha256（十六进制小写），下载/安装两侧比对 */
-  packSha256?: string | null;
-  /** 包体字节数 */
-  packBytes?: number | null;
-  /** 包格式版本 */
-  packSchemaVersion?: number;
-  /** 包内合格本体类型（服务端校验派生） */
-  bodyKinds?: PetBodyKind[];
-  /** 服务端校验清单快照（本体/被拒资源/角色统计等） */
-  manifest?: Record<string, unknown> | null;
   version: string;
   downloads: number;
   rating: number;
@@ -97,23 +60,6 @@ export interface DownloadedEntry {
   asset: Asset | null;
 }
 
-// 桌面宠物客户端的宠物窗口设置
-export interface PetWindowSettings {
-  width: number;
-  height: number;
-  opacity: number;
-  /** 是否置顶显示（默认 true） */
-  alwaysOnTop?: boolean;
-}
-
-// 桌面宠物客户端的宠物互动功能开关（关闭后隐藏对应按钮与进度条）
-export interface PetFeaturesSettings {
-  feedEnabled: boolean;
-  restEnabled: boolean;
-  playEnabled: boolean;
-  affectionEnabled: boolean;
-}
-
 /** 云端同步数据的 LLM 档案 = 智能体（与手机端 mobile/types.ts 的 LlmProfile 同构） */
 export interface LlmProfile {
   id: string;
@@ -122,7 +68,6 @@ export interface LlmProfile {
   baseUrl: string;
   model: string;
   systemPrompt?: string;
-  petAssetId?: string;
   // 智能体页面 P0 扩展字段（均可选）
   avatar?: string;
   intro?: string;
@@ -171,7 +116,6 @@ export interface AgentMultiConfig {
 export interface SyncConfigPayload {
   llmProfiles: LlmProfile[];
   llmActiveProfileId: string;
-  petSelfDescription?: string;
   profileMessages?: Record<string, unknown>;
   [key: string]: unknown;
 }

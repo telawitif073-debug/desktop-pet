@@ -70,17 +70,14 @@ api.interceptors.response.use(
   },
 );
 
-/** 资源载体路径：宠物 = 宠物包（/pet-packs），智能体仍为 /agents */
-function assetPath(type: AssetType): string {
-  return type === 'pet' ? 'pet-packs' : 'agents';
+/** 资源载体路径：当前仅智能体，走 /agents */
+function assetPath(_type: AssetType): string {
+  return 'agents';
 }
 
-/**
- * admin 审核载体名：与「评价域资源类型」(`pet`/`agent`) **刻意不同名**，
- * 见后端 `admin.controller.ts` 的 updateStatus —— 宠物载体叫 `pet_pack`，智能体保持 `agent`。
- */
-function adminCarrierName(type: AssetType): string {
-  return type === 'pet' ? 'pet_pack' : 'agent';
+/** admin 审核载体名：与「评价域资源类型」(`agent`) 一致，见后端 `admin.controller.ts` 的 updateStatus */
+function adminCarrierName(_type: AssetType): string {
+  return 'agent';
 }
 
 export function assetUrl(url?: string | null): string | undefined {
@@ -165,7 +162,7 @@ export async function getMe() {
   return response.data;
 }
 
-export async function listAssets(type: AssetType, params: { search?: string; page?: number; limit?: number; sort?: string; category?: string; status?: string; bodyKind?: string }) {
+export async function listAssets(type: AssetType, params: { search?: string; page?: number; limit?: number; sort?: string; category?: string; status?: string }) {
   const response = await api.get<PageResponse>(`/${assetPath(type)}`, { params });
   return response.data;
 }
@@ -191,7 +188,7 @@ export async function downloadAsset(type: AssetType, id: string) {
 }
 
 export async function listReviews(type: AssetType, id: string) {
-  // 评价域资源类型仍叫 pet/agent（见后端 review.entity.ts 注释），不随载体改名
+  // 评价域资源类型与载体一致（见后端 review.entity.ts 注释）
   const response = await api.get<Review[]>('/reviews', { params: { assetType: type, assetId: id } });
   return response.data;
 }
@@ -223,9 +220,6 @@ export async function updateAsset(type: AssetType, id: string, values: Record<st
 export async function deleteAsset(type: AssetType, id: string) {
   await api.delete(`/${assetPath(type)}/${id}`);
 }
-
-// 前端不再发布资源：宠物发布已收口到桌面端宠工坊（`POST /pet-packs`，multipart 字段 pack），
-// 智能体走 /api/sync/config 云同步。此处原有的 uploadAsset / uploadPet 已下线。
 
 // ── 个人智能体云同步（/api/sync/config，与手机端/桌面端共库） ──
 
