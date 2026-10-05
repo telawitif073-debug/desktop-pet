@@ -4,7 +4,7 @@
  * 生成一句自然的主动开场。非流式、60s 超时；失败由调用方降级（任务）或跳过（自主搭话）。
  */
 import type { LlmProfile } from './types';
-import { buildProactivePrompt } from './petCapabilities';
+import { buildProactivePrompt } from './agentCapabilities';
 
 export interface ActiveMessageContext {
   /** 到点要说的正事（提醒内容或搭话话题）；为空表示纯闲聊 */

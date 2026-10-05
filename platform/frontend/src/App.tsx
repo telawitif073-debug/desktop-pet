@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Layout, Menu, Avatar, Button, ConfigProvider, Segmented, Typography } from 'antd';
-import { AppstoreOutlined, HeartOutlined, LogoutOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, UserOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, HeartOutlined, LogoutOutlined, RobotOutlined, SafetyCertificateOutlined, ShopOutlined, UserOutlined } from '@ant-design/icons';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { adoptDesktopAuth, clearAuth, getMe, getStoredUser, syncAuthToDesktop } from './api';
 import type { User } from './types';
@@ -10,7 +10,6 @@ import ResourceDetailPage from './pages/ResourceDetailPage';
 import ProfilePage from './pages/ProfilePage';
 import WorkshopPage from './pages/WorkshopPage';
 import AdminPage from './pages/AdminPage';
-import SettingsPage from './pages/SettingsPage';
 import AgentsPage from './pages/AgentsPage';
 
 const { Header, Content } = Layout;
@@ -26,7 +25,7 @@ const DEVELOPER_ACCOUNTS = ['developer'];
 function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, onLogout }: { user: User | null; viewMode: 'user' | 'admin'; adminView: boolean; isDeveloper: boolean; onViewModeChange: (mode: 'user' | 'admin') => void; onLogout: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const selected = location.pathname.startsWith('/profile') ? 'profile' : location.pathname.startsWith('/agents') ? 'agents' : location.pathname.startsWith('/workshop') ? 'workshop' : location.pathname.startsWith('/admin') ? 'admin' : location.pathname.startsWith('/settings') ? 'settings' : 'browse';
+  const selected = location.pathname.startsWith('/profile') ? 'profile' : location.pathname.startsWith('/agents') ? 'agents' : location.pathname.startsWith('/workshop') ? 'workshop' : location.pathname.startsWith('/admin') ? 'admin' : 'browse';
   const viewSwitch = <Segmented size="small" value={viewMode} onChange={(value) => onViewModeChange(value as 'user' | 'admin')} options={[{ label: '用户视图', value: 'user' }, { label: '管理员视图', value: 'admin' }]} />;
 
   if (adminView) {
@@ -49,7 +48,6 @@ function AppHeader({ user, viewMode, adminView, isDeveloper, onViewModeChange, o
           // 原「上传资源」页已删除：上传/发布收口到资源工坊，内容直接嵌在本窗口内容区
           { key: 'workshop', label: <Link to="/workshop">资源工坊</Link>, icon: <AppstoreOutlined /> },
           ...(user ? [{ key: 'profile', label: <Link to="/profile">个人中心</Link>, icon: <UserOutlined /> }, { key: 'agents', label: <Link to="/agents">智能体</Link>, icon: <RobotOutlined /> }] : []),
-          { key: 'settings', label: <Link to="/settings">设置</Link>, icon: <SettingOutlined /> },
         ]}
       />
       <div className="header-account">
@@ -124,7 +122,6 @@ export default function App() {
             <Route path="/workshop" element={<WorkshopPage />} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
-            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/admin" element={user?.role === 'admin' ? <AdminPage user={user} /> : <Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

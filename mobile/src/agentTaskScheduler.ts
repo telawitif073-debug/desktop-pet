@@ -1,6 +1,6 @@
 /**
- * 宠物定时任务·运行时（存储落地 + 调度触发 + 到点消息生成）。
- * - 意图落地：handlePetIntent 把识别结果落到 store（建任务/查询/取消/暂停/继续）
+ * 智能体定时任务·运行时（存储落地 + 调度触发 + 到点消息生成）。
+ * - 意图落地：handleAgentIntent 把识别结果落到 store（建任务/查询/取消/暂停/继续）
  * - 调度：App 前台期间每 15s 扫描到期任务；冷启动/回前台补触发 2 小时内错过的
  *   （更久的：重复任务顺延、一次性任务作废，不打扰）
  * - 到点消息：优先调用该智能体 LLM 按人设主动开场；无有效 API / 调用失败降级为模板文案
@@ -9,7 +9,7 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { useAppStore } from './store/appStore';
-import type { ChatMsg, PetTask } from './types';
+import type { ChatMsg, AgentTask } from './types';
 import {
   CLARIFY_REPLY,
   cancelReply,
@@ -20,11 +20,11 @@ import {
   queryReply,
   resumeReply,
   taskDisplay,
-  type PetIntent,
-  type PetTaskKind,
+  type AgentIntent,
+  type AgentTaskKind,
   type TaskDirective,
-} from './petTasks';
-import { generateActiveMessage, generatePersonaReply } from './petActiveMessage';
+} from './agentTasks';
+import { generateActiveMessage, generatePersonaReply } from './agentActiveMessage';
 
 /** 扫描间隔 */
 const TICK_MS = 15000;
@@ -69,7 +69,7 @@ export function mentionsDue(text: string): boolean {
 
 /** 建任务入参（本地意图 / 模型指令共用） */
 interface ScheduleInput {
-  kind: PetTaskKind;
+  kind: AgentTaskKind;
   content: string;
   rawText: string;
   due: number;
@@ -77,7 +77,7 @@ interface ScheduleInput {
 }
 
 type ScheduleResult =
-  | { ok: true; label: string; task: PetTask }
+  | { ok: true; label: string; task: AgentTask }
   | { ok: false; reason: 'dup' | 'limit' | 'daily' | 'no-capability'; dupLabel?: string };
 
 /**
@@ -90,7 +90,7 @@ function scheduleTask(profileId: string, input: ScheduleInput): ScheduleResult {
   const owner = store.llmProfiles.find((p) => p.id === profileId);
   if (!owner?.capabilities?.enabled?.includes('tasks')) return { ok: false, reason: 'no-capability' };
   const dailyLimit = owner.capabilities.spec.maxActiveTasksPerDay ?? MAX_DAILY_TASKS;
-  const mine = store.petTasks.filter((k) => k.profileId === profileId);
+  const mine = store.agentTasks.filter((k) => k.profileId === profileId);
   const active = mine.filter((k) => k.status === 'pending' || k.status === 'paused');
   // 防重复（对齐人设卡 frequency_control.avoid_spam）：同一件事、同一触发时间不重复排
   const dup = active.find((k) => k.content === input.content && Math.abs(k.due - input.due) < 60000);
@@ -101,7 +101,7 @@ function scheduleTask(profileId: string, input: ScheduleInput): ScheduleResult {
   todayStart.setHours(0, 0, 0, 0);
   const todayCount = mine.filter((k) => k.createdAt >= todayStart.getTime()).length;
   if (todayCount >= dailyLimit) return { ok: false, reason: 'daily' };
-  const task: PetTask = {
+  const task: AgentTask = {
     id: `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     profileId,
     kind: input.kind,
@@ -113,14 +113,14 @@ function scheduleTask(profileId: string, input: ScheduleInput): ScheduleResult {
     status: 'pending',
     createdAt: Date.now(),
   };
-  store.addPetTask(task);
+  store.addAgentTask(task);
   return { ok: true, label: task.timeLabel, task };
 }
 
 /** 把识别到的意图落到 store，返回给用户的回复文案（措辞由该智能体按人设产出，失败回退中性文案） */
-export async function handlePetIntent(intent: PetIntent, profileId: string): Promise<string> {
+export async function handleAgentIntent(intent: AgentIntent, profileId: string): Promise<string> {
   const store = useAppStore.getState();
-  const mine = (): PetTask[] => useAppStore.getState().petTasks.filter((k) => k.profileId === profileId);
+  const mine = (): AgentTask[] => useAppStore.getState().agentTasks.filter((k) => k.profileId === profileId);
   switch (intent.kind) {
     case 'query': {
       const list = mine().filter((k) => k.status === 'pending' || k.status === 'paused');
@@ -133,7 +133,7 @@ export async function handlePetIntent(intent: PetIntent, profileId: string): Pro
     }
     case 'pause': {
       const list = mine().filter((k) => k.status === 'pending');
-      store.patchPetTasks(list.map((k) => ({ id: k.id, status: 'paused' as const })));
+      store.patchAgentTasks(list.map((k) => ({ id: k.id, status: 'paused' as const })));
       const fact = list.length
         ? `用户让你先别提醒，你已经把 ${list.length} 件事暂停了（ta 说「继续提醒」就能恢复）`
         : '用户让你先别提醒，但你手上本来就没有进行中的事。';
@@ -141,14 +141,14 @@ export async function handlePetIntent(intent: PetIntent, profileId: string): Pro
     }
     case 'resume': {
       const list = mine().filter((k) => k.status === 'paused');
-      store.patchPetTasks(list.map((k) => ({ id: k.id, status: 'pending' as const })));
+      store.patchAgentTasks(list.map((k) => ({ id: k.id, status: 'pending' as const })));
       const fact = list.length ? `用户让你继续提醒，你已经把之前暂停的 ${list.length} 件事恢复了` : '用户让你继续提醒，但没有被暂停的事。';
       return speak(profileId, fact, resumeReply(list.length));
     }
     case 'cancel': {
       const all = mine().filter((k) => k.status === 'pending' || k.status === 'paused');
       const targets = pickCancelTargets(all, intent.hint);
-      store.patchPetTasks(targets.map((k) => ({ id: k.id, status: 'canceled' as const })));
+      store.patchAgentTasks(targets.map((k) => ({ id: k.id, status: 'canceled' as const })));
       const labels = targets.map((k) => `${formatDueLabel(k.due, k.repeat)} — ${taskDisplay(k.content)}`);
       const fact = labels.length
         ? `用户让你别提醒了，你已经取消这 ${labels.length} 件：${labels.join('；')}`
@@ -261,7 +261,7 @@ export async function createTaskFromDirective(
 }
 
 /** 取消指代匹配：提示词命中任务内容/原话（含 2 字滑窗）则只取消该任务，否则全部取消 */
-function pickCancelTargets(tasks: PetTask[], hint: string): PetTask[] {
+function pickCancelTargets(tasks: AgentTask[], hint: string): AgentTask[] {
   const h = hint.trim();
   if (h.length >= 2) {
     const hit = tasks.filter((k) => {
@@ -282,7 +282,7 @@ async function tick(): Promise<void> {
   const st = useAppStore.getState();
   if (!st.hydrated) return;
   const now = Date.now();
-  const due = st.petTasks
+  const due = st.agentTasks
     .filter((k) => k.status === 'pending' && k.due <= now && !inFlight.has(k.id))
     .slice(0, 3);
   for (const task of due) {
@@ -294,16 +294,16 @@ async function tick(): Promise<void> {
 }
 
 /** 触发一个任务：生成主动消息 → 落到对应智能体的对话（无论是否当前激活档案）→ 更新任务状态 */
-async function fireTask(task: PetTask, now: number): Promise<void> {
+async function fireTask(task: AgentTask, now: number): Promise<void> {
   const owner = useAppStore.getState().llmProfiles.find((p) => p.id === task.profileId);
   // 智能体已删除：任务作废
   if (!owner) {
-    useAppStore.getState().patchPetTasks([{ id: task.id, status: 'canceled' }]);
+    useAppStore.getState().patchAgentTasks([{ id: task.id, status: 'canceled' }]);
     return;
   }
   // 超出补触发窗口：重复任务顺延、一次性任务作废（不再打扰）
   if (now - task.due > GRACE_MS) {
-    useAppStore.getState().patchPetTasks([
+    useAppStore.getState().patchAgentTasks([
       task.repeat === 'none'
         ? { id: task.id, status: 'done', firedAt: now }
         : { id: task.id, due: nextRepeatDue(task, now), firedAt: now },
@@ -328,8 +328,8 @@ async function fireTask(task: PetTask, now: number): Promise<void> {
     role: 'assistant',
     content,
   };
-  useAppStore.getState().pushPetTaskMessage(task.profileId, msg);
-  useAppStore.getState().patchPetTasks([
+  useAppStore.getState().pushAgentTaskMessage(task.profileId, msg);
+  useAppStore.getState().patchAgentTasks([
     task.repeat === 'none'
       ? { id: task.id, status: 'done', firedAt: now }
       : { id: task.id, due: nextRepeatDue(task, now), firedAt: now },
@@ -337,7 +337,7 @@ async function fireTask(task: PetTask, now: number): Promise<void> {
 }
 
 /** 重复任务的下一次触发时间（跳过已过去的周期） */
-function nextRepeatDue(task: PetTask, now: number): number {
+function nextRepeatDue(task: AgentTask, now: number): number {
   const step = task.repeat === 'daily' ? DAY_MS : 7 * DAY_MS;
   let due = task.due + step;
   while (due <= now) due += step;
@@ -345,7 +345,7 @@ function nextRepeatDue(task: PetTask, now: number): number {
 }
 
 /** 定时任务调度器：挂在主壳（登录后的常驻页面）。默认导出便于单处挂载 */
-export function usePetTaskScheduler(): void {
+export function useAgentTaskScheduler(): void {
   const hydrated = useAppStore((s) => s.hydrated);
   useEffect(() => {
     if (!hydrated) return;

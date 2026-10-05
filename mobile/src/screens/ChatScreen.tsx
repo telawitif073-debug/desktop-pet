@@ -31,9 +31,9 @@ import {
   capabilityLabel,
   detectCapabilities,
   type CapabilityDetection,
-} from '../petCapabilities';
-import { extractTaskDirectives, detectPetIntent, stripTaskMarkers } from '../petTasks';
-import { createTaskFromDirective, handlePetIntent, mentionsDue } from '../petTaskScheduler';
+} from '../agentCapabilities';
+import { extractTaskDirectives, detectAgentIntent, stripTaskMarkers } from '../agentTasks';
+import { createTaskFromDirective, handleAgentIntent, mentionsDue } from '../agentTaskScheduler';
 import type { AgentCapabilities, AgentCapabilityKind, AgentCapabilitySpec, WebSearchProvider, WebSearchSpec } from '../types';
 import { PROVIDER_LABEL, WEB_COST_HINT } from '../webSearch';
 import { WebView } from 'react-native-webview';
@@ -253,7 +253,7 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
   /** 编辑表单选中的专属朗读音色 id（''=跟随全局默认音色） */
   const [bindVoiceId, setBindVoiceId] = useState<string>('');
   const [search, setSearch] = useState('');
-  // ── 主动能力（来自导入 JSON 的检测结果 + 用户勾选；见 petCapabilities.ts）──
+  // ── 主动能力（来自导入 JSON 的检测结果 + 用户勾选；见 agentCapabilities.ts）──
   /** 编辑表单里勾选的该智能体能力 */
   const [formCaps, setFormCaps] = useState<AgentCapabilityKind[]>([]);
   /** 该智能体自己的能力规格（间隔/时段/示例任务，来自它的 JSON） */
@@ -1174,8 +1174,8 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
     setInput('');
     // 定时任务：本地识别「定时提醒 / 到点主动搭话 / 任务管理」指令，
     // 动作由 App 直接落地（不经过模型，离线可用）；回复措辞由该智能体按人设产出，
-    // 无 API / 调用失败才回退中性文案（见 petTaskScheduler 的 speak）
-    const intent = detectPetIntent(text);
+    // 无 API / 调用失败才回退中性文案（见 agentTaskScheduler 的 speak）
+    const intent = detectAgentIntent(text);
     if (intent) {
       const st0 = useAppStore.getState();
       const assistantId = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1187,7 +1187,7 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
       followRef.current = true;
       requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
       try {
-        const reply = await handlePetIntent(intent, st0.llmActiveProfileId);
+        const reply = await handleAgentIntent(intent, st0.llmActiveProfileId);
         useAppStore.getState().patchMessage(assistantId, { content: reply, pending: false, streaming: false });
       } catch (e) {
         useAppStore.getState().patchMessage(assistantId, {

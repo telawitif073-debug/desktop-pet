@@ -3,7 +3,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 /**
  * 新建宠物包表 `pet_packs` + 为 reviews / download_records 回补 `'pet'` 枚举值
  * ===========================================================================
- * 背景（设计文档 `.trae/documents/pet-store-successor-design.md` 实施清单第 2 步）：
+ * 背景（宠物商店后继设计实施清单第 2 步）：
  * 旧宠物商店（`pet_assets` / `action_assets`）已由 1791036000000 删除，平台侧
  * 「发布 / 浏览 / 下载 / 安装」一度没有承接方。本迁移落地新载体——**宠物包**：
  *

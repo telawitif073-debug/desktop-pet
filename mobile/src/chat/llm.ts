@@ -5,7 +5,7 @@
 import { useAppStore } from '../store/appStore';
 import type { ChatMsg, LlmProfile } from '../types';
 import { ensureMultiSession, multiChatSend, toolFootball, toolStock, toolWeather } from '../api/platform';
-import { buildTaskProtocolPrompt } from '../petCapabilities';
+import { buildTaskProtocolPrompt } from '../agentCapabilities';
 import { buildSearchResultPrompt, buildWebPrompt, extractSearchQuery, runWebSearch } from '../webSearch';
 import {
   buildSkillsPrompt,
@@ -51,7 +51,7 @@ function buildSystemPrompt(): string {
   if (profile?.style?.trim()) parts.push(`你的说话风格：${profile.style.trim()}。请全程保持该风格。`);
   if (userNickname.trim()) parts.push(`请用「${userNickname.trim()}」来称呼用户。`);
   // 智能体自带能力（来自它自己的 JSON + 用户导入时的选择）：只有启用「定时任务」的智能体才注入
-  // 建任务协议，且用该智能体自己的示例任务/频率约束合成（见 petCapabilities.ts）
+  // 建任务协议，且用该智能体自己的示例任务/频率约束合成（见 agentCapabilities.ts）
   if (profile?.capabilities?.enabled?.includes('tasks')) {
     parts.push(buildTaskProtocolPrompt(profile.capabilities.spec));
   }

@@ -185,7 +185,7 @@ export interface ChatMsg {
 }
 
 /** 定时任务：用户让智能体在指定时间做的事（提醒/主动搭话），到点由智能体主动发消息 */
-export interface PetTask {
+export interface AgentTask {
   id: string;
   /** 归属智能体档案（每个智能体自己的任务） */
   profileId: string;

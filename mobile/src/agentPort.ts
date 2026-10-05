@@ -9,7 +9,7 @@ import type {
   AgentMultiConfig,
   MultiAgentDependency,
 } from './types';
-import { detectCapabilities, type CapabilityDetection } from './petCapabilities';
+import { detectCapabilities, type CapabilityDetection } from './agentCapabilities';
 
 /** 导出文件结构：type 标识 + profiles（无密钥） */
 export interface AgentExportFile {
@@ -33,7 +33,7 @@ export interface NormalizedAgent {
   greeting: string;
   exampleQuestions: string[];
   apiKey: string;
-  /** 从该条 JSON 检测到的自带能力（导入时询问用户是否添加，见 petCapabilities.ts） */
+  /** 从该条 JSON 检测到的自带能力（导入时询问用户是否添加，见 agentCapabilities.ts） */
   detection?: CapabilityDetection;
   enabled: boolean;
 }

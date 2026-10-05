@@ -11,11 +11,11 @@ import {
   type ChatMsg,
   type InstalledVoice,
   type LlmProfile,
-  type PetTask,
+  type AgentTask,
   type PlatformUser,
   type TtsCloudConfig,
 } from '../types';
-import { sanitizePetTasks } from '../petTasks';
+import { sanitizeAgentTasks } from '../agentTasks';
 
 const STORAGE_KEY = 'mobile-pet-store';
 /** 默认走阿里云 ECS 常驻服务（7×24）；Android 模拟器可在设置中改为 http://10.0.2.2:3001/api */
@@ -70,7 +70,7 @@ interface AppStore {
   /** 曾「启动异常被自动回滚」的热更版本黑名单（不再重复推送，防止更新死循环；持久化） */
   hotRolledBack: number[];
   /** 定时任务（用户让智能体在指定时间做的事，到点由智能体主动发消息；持久化） */
-  petTasks: PetTask[];
+  agentTasks: AgentTask[];
   /** 用户最近一次发言时间戳（主动搭话避让用；不持久化，冷启动清零） */
   lastUserMsgAt: number;
   /** 智能体最近一次主动消息（到点任务/自主搭话）时间戳：自主搭话据此重新计时，避免连环打扰（不持久化） */
@@ -96,17 +96,17 @@ interface AppStore {
   duplicateProfile: (id: string) => void;
   setTtsEnabled: (enabled: boolean) => void;
   /** 新增定时任务（去重不处理，同一诉求允许多条） */
-  addPetTask: (task: PetTask) => void;
+  addAgentTask: (task: AgentTask) => void;
   /** 批量局部更新任务（按 id；状态流转/顺延下一次触发时间） */
-  patchPetTasks: (patches: Array<Partial<PetTask> & { id: string }>) => void;
+  patchAgentTasks: (patches: Array<Partial<AgentTask> & { id: string }>) => void;
   /** 到点消息落地：写入该智能体的对话存档；仅当它是当前激活档案时才同时更新顶层 messages */
-  pushPetTaskMessage: (profileId: string, msg: ChatMsg) => void;
+  pushAgentTaskMessage: (profileId: string, msg: ChatMsg) => void;
   hydrate: () => Promise<void>;
 }
 
 type PersistState = Omit<
   AppStore,
-  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setTtsEnabled' | 'hydrate' | 'removeMessage' | 'switchProfile' | 'toggleProfileEnabled' | 'duplicateProfile' | 'addPetTask' | 'patchPetTasks' | 'pushPetTaskMessage'
+  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setTtsEnabled' | 'hydrate' | 'removeMessage' | 'switchProfile' | 'toggleProfileEnabled' | 'duplicateProfile' | 'addAgentTask' | 'patchAgentTasks' | 'pushAgentTaskMessage'
 >;
 
 const PERSIST_KEYS: Array<keyof PersistState> = [
@@ -132,7 +132,7 @@ const PERSIST_KEYS: Array<keyof PersistState> = [
   'updateSnooze',
   'hotApply',
   'hotRolledBack',
-  'petTasks',
+  'agentTasks',
 ];
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -204,7 +204,7 @@ export const useAppStore = create<AppStore>((set) => ({
   updateSnooze: null,
   hotApply: null,
   hotRolledBack: [],
-  petTasks: [],
+  agentTasks: [],
   lastUserMsgAt: 0,
   lastAgentMsgAt: 0,
 
@@ -256,15 +256,15 @@ export const useAppStore = create<AppStore>((set) => ({
       return { messages, ...(s.llmActiveProfileId ? { profileMessages: { ...s.profileMessages, [s.llmActiveProfileId]: messages } } : {}) };
     }),
 
-  // ── 定时任务（到点由智能体主动发消息，见 petTaskScheduler.ts）──
-  addPetTask: (task) => set((s) => ({ petTasks: [...s.petTasks, task] })),
-  patchPetTasks: (patches) =>
+  // ── 定时任务（到点由智能体主动发消息，见 agentTaskScheduler.ts）──
+  addAgentTask: (task) => set((s) => ({ agentTasks: [...s.agentTasks, task] })),
+  patchAgentTasks: (patches) =>
     set((s) => {
       if (!patches.length) return s;
       const map = new Map(patches.map((p) => [p.id, p]));
-      return { petTasks: s.petTasks.map((k) => (map.has(k.id) ? { ...k, ...map.get(k.id) } : k)) };
+      return { agentTasks: s.agentTasks.map((k) => (map.has(k.id) ? { ...k, ...map.get(k.id) } : k)) };
     }),
-  pushPetTaskMessage: (profileId, msg) =>
+  pushAgentTaskMessage: (profileId, msg) =>
     set((s) => {
       // 消息始终归档到任务归属智能体的对话；仅当它正是当前激活档案时才更新顶层 messages（实时可见）
       const archived = [...(s.profileMessages[profileId] ?? []), msg];
@@ -446,7 +446,8 @@ export const useAppStore = create<AppStore>((set) => ({
           updateSnooze: (data.updateSnooze as { versionName: string; until: number } | null | undefined) ?? null,
           hotApply: (data.hotApply as { version: number; ts: number } | null | undefined) ?? null,
           hotRolledBack: Array.isArray(data.hotRolledBack) ? (data.hotRolledBack as number[]) : [],
-          petTasks: sanitizePetTasks(data.petTasks),
+          // 旧版持久化字段 petTasks → agentTasks：升级后不丢已排期的任务
+          agentTasks: sanitizeAgentTasks(data.agentTasks ?? data.petTasks),
         });
       }
     } catch {

@@ -11,15 +11,15 @@ import ChatScreen from '../screens/ChatScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AdminScreen from '../screens/AdminScreen';
 import StoreDrawer from '../components/StoreDrawer';
-import { usePetTaskScheduler } from '../petTaskScheduler';
-import { usePetProactive } from '../petProactive';
+import { useAgentTaskScheduler } from '../agentTaskScheduler';
+import { useAgentProactive } from '../agentProactive';
 
 export default function MainShell(): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  // 定时任务调度：前台期间扫描到期任务，到点由智能体主动发消息（见 petTaskScheduler.ts）
-  usePetTaskScheduler();
-  // 自主主动搭话：无用户排期时智能体也会按间隔来找你说话（见 petProactive.ts）
-  usePetProactive();
+  // 定时任务调度：前台期间扫描到期任务，到点由智能体主动发消息（见 agentTaskScheduler.ts）
+  useAgentTaskScheduler();
+  // 自主主动搭话：无用户排期时智能体也会按间隔来找你说话（见 agentProactive.ts）
+  useAgentProactive();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);

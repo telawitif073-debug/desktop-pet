@@ -1,12 +1,12 @@
 /**
- * 宠物定时任务·纯逻辑层（不依赖 React Native，可直接被 Node 单测）。
+ * 智能体定时任务·纯逻辑层（不依赖 React Native，可直接被 Node 单测）。
  * 落实人设卡 active_execution 描述的能力：
  * - natural_language_to_cron：中文自然语言时间解析（相对时间 / 每天 / 每周X / 明早 / 今晚 / 整点 / HH:MM）
  * - task_types：reminder（到点提醒）/ active_chat（到点主动发起对话）
  * - task_management：建任务、查询任务、取消、暂停/继续（关键词识别）
- * 调度触发与消息落地见 petTaskScheduler.ts；类型定义见 types.ts 的 PetTask。
+ * 调度触发与消息落地见 agentTaskScheduler.ts；类型定义见 types.ts 的 AgentTask。
  */
-import type { PetTask } from './types';
+import type { AgentTask } from './types';
 import { SEARCH_DIRECTIVE_RE } from './webSearch';
 import { stripSkillDirectives, stripUnclosedToolTail } from './skills';
 
@@ -243,10 +243,10 @@ export function parseSchedule(text: string, now: Date = new Date()): ParsedSched
 }
 
 // ────────────────────────────── 意图识别 ──────────────────────────────
-export type PetTaskKind = 'reminder' | 'active_chat';
+export type AgentTaskKind = 'reminder' | 'active_chat';
 
-export type PetIntent =
-  | { kind: 'create'; schedule: ParsedSchedule; rawText: string; content: string; display: string; taskKind: PetTaskKind }
+export type AgentIntent =
+  | { kind: 'create'; schedule: ParsedSchedule; rawText: string; content: string; display: string; taskKind: AgentTaskKind }
   | { kind: 'query' }
   | { kind: 'cancel'; hint: string }
   | { kind: 'pause' }
@@ -292,7 +292,7 @@ export function taskDisplay(content: string): string {
  * 识别一句话是否为定时任务指令。优先级：查询 → 暂停 → 继续 → 取消 → 建任务 → 补时间追问。
  * 返回 null 表示普通聊天（交给模型）。
  */
-export function detectPetIntent(text: string, now: Date = new Date()): PetIntent | null {
+export function detectAgentIntent(text: string, now: Date = new Date()): AgentIntent | null {
   const t = text.trim();
   if (!t) return null;
   if (RE_QUERY.test(t)) return { kind: 'query' };
@@ -309,7 +309,7 @@ export function detectPetIntent(text: string, now: Date = new Date()): PetIntent
   const schedule = parseSchedule(t, now);
   if (schedule && RE_VERB.test(t)) {
     const content = extractContent(t, schedule.raw);
-    const taskKind: PetTaskKind =
+    const taskKind: AgentTaskKind =
       /问我|跟我聊|跟我说|来找我|陪我|主动(来)?(找|聊|说|问)/.test(t) && !/提醒/.test(t) ? 'active_chat' : 'reminder';
     return { kind: 'create', schedule, rawText: t, content, display: taskDisplay(content), taskKind };
   }
@@ -322,11 +322,11 @@ export function detectPetIntent(text: string, now: Date = new Date()): PetIntent
  * 智能体在回复末尾附加的隐藏任务指令（用户看不到），App 解析后替用户排期。
  * 形如：[[TASK|reminder|2026-09-25T08:00:00+08:00|none|叫我起床]]
  * 字段：类型 | ISO 本地时间（带时区） | 重复 | 内容；第三段也可省略重复（按 none 处理）。
- * 提示词由 petCapabilities.buildTaskProtocolPrompt 按「该智能体自己的 JSON 规格」合成
+ * 提示词由 agentCapabilities.buildTaskProtocolPrompt 按「该智能体自己的 JSON 规格」合成
  * （只有启用该能力的智能体才会被注入），本地固定句式命中时亦走本地建任务。
  */
 export interface TaskDirective {
-  kind: PetTaskKind;
+  kind: AgentTaskKind;
   /** 触发时间戳（ms） */
   due: number;
   repeat: 'none' | 'daily' | 'weekly';
@@ -341,7 +341,7 @@ const TASK_DIRECTIVE_RE = /\[\[\s*TASK\s*[|｜]\s*([^|｜\]]+?)\s*[|｜]\s*([^|�
 /** 指令最长可接受时限（超出视为模型胡写）：90 天 */
 const DIRECTIVE_MAX_AHEAD_MS = 90 * 86400000;
 
-function normKind(raw: string): PetTaskKind | null {
+function normKind(raw: string): AgentTaskKind | null {
   const k = raw.trim().toLowerCase().replace(/\s+/g, '');
   if (/^(reminder|remind|提醒|提醒类|提醒事项)$/.test(k)) return 'reminder';
   if (/^(active_chat|active|chat|搭话|主动|主动搭话|闲聊|关心)$/.test(k)) return 'active_chat';
@@ -418,13 +418,13 @@ export function stripTaskMarkers(text: string): string {
 // ────────────────────────────── 文案 ──────────────────────────────
 export const CLARIFY_REPLY = '好呀，你想让我什么时候做这件事？可以说「1分钟后提醒我喝水」，或「明早8点叫我起床」。';
 
-export function createReply(label: string, display: string, taskKind: PetTaskKind): string {
+export function createReply(label: string, display: string, taskKind: AgentTaskKind): string {
   return taskKind === 'active_chat'
     ? `好，${label}我会主动来找你聊：${display}。`
     : `好，${label}我会准时提醒你：${display}。到点我主动来找你。`;
 }
 
-export function queryReply(tasks: PetTask[], now: number = Date.now()): string {
+export function queryReply(tasks: AgentTask[], now: number = Date.now()): string {
   if (!tasks.length) return '当前没有进行中的任务。你可以说「1分钟后提醒我喝水」或「明早8点叫我起床」来安排。';
   const lines = tasks.map(
     (k, i) => `${i + 1}. ${k.status === 'paused' ? '（已暂停）' : ''}${formatDueLabel(k.due, k.repeat, now)} — ${taskDisplay(k.content)}`,
@@ -446,16 +446,16 @@ export function resumeReply(n: number): string {
 }
 
 /** 到点消息模板（无可用 LLM 时的降级文案） */
-export function fallbackMessage(task: PetTask): string {
+export function fallbackMessage(task: AgentTask): string {
   const d = taskDisplay(task.content);
   return task.kind === 'active_chat' ? `💬 ${d}` : `⏰ 到点了：${d}`;
 }
 
 /** 持久化数据消毒：过滤形状不合法的任务（版本升级/脏数据兜底） */
-export function sanitizePetTasks(list: unknown): PetTask[] {
+export function sanitizeAgentTasks(list: unknown): AgentTask[] {
   if (!Array.isArray(list)) return [];
-  const out: PetTask[] = [];
-  for (const raw of list as PetTask[]) {
+  const out: AgentTask[] = [];
+  for (const raw of list as AgentTask[]) {
     if (!raw || typeof raw !== 'object') continue;
     if (typeof raw.id !== 'string' || typeof raw.profileId !== 'string' || typeof raw.due !== 'number') continue;
     if (raw.status !== 'pending' && raw.status !== 'paused' && raw.status !== 'done' && raw.status !== 'canceled') continue;

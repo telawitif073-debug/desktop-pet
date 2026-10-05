@@ -119,10 +119,6 @@ dist-share/*
 deploy/*.tar.gz
 deploy/*.dump
 
-# 上游「pet」项目资源检索/清点的本地缓存（十几 MB、机器相关、可重跑生成）
-# 结论性产物已单独落在 docs/upstream-pet-assets/，本目录不入库
-.pet-research/
-
 # 开发环境收拢目录（Environment/）：工具链/下载/构建产物/缓存/临时目录
 # 合计 4GB+ 且机器相关（node_modules、android-sdk、jdk17、pyenv venv、上游批量抓取 3.2GB、
 # electron-forge 产物），绝不能入库；只保留说明文档，保证「怎么重建环境」可追溯。

@@ -11,14 +11,14 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { useAppStore } from './store/appStore';
-import { generateActiveMessage } from './petActiveMessage';
-import { DEFAULT_WAKING_HOURS, isWithinHours, normalizeIntervalMinutes, shouldFireProactive } from './petProactiveGate';
+import { generateActiveMessage } from './agentActiveMessage';
+import { DEFAULT_WAKING_HOURS, isWithinHours, normalizeIntervalMinutes, shouldFireProactive } from './agentProactiveGate';
 
 /** 检查周期 */
 const CHECK_MS = 60000;
 
 /** 自主主动搭话调度器：挂在主壳（与定时任务调度器并列） */
-export function usePetProactive(): void {
+export function useAgentProactive(): void {
   const hydrated = useAppStore((s) => s.hydrated);
   useEffect(() => {
     if (!hydrated) return;
@@ -33,7 +33,7 @@ export function usePetProactive(): void {
       if (!profile) return;
       const text = await generateActiveMessage(profile, {});
       lastFiredAt = Date.now();
-      useAppStore.getState().pushPetTaskMessage(profileId, {
+      useAppStore.getState().pushAgentTaskMessage(profileId, {
         id: `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
         role: 'assistant',
         content: text,
@@ -55,7 +55,7 @@ export function usePetProactive(): void {
         enabled,
         configured,
         wakingHour: isWithinHours(now, hours),
-        // 计时基准 = 最近一次搭话 与 最近一次宠物主动消息（到点任务）取较晚者：
+        // 计时基准 = 最近一次搭话 与 最近一次智能体主动消息（到点任务）取较晚者：
         // 到点任务优先，发完任务消息后搭话重新计时，避免连环打扰
         sinceLastFireMs: now - Math.max(lastFiredAt, st.lastAgentMsgAt),
         sinceUserActiveMs: now - Math.max(foregroundAt, st.lastUserMsgAt),
