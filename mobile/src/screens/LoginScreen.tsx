@@ -66,13 +66,12 @@ export default function LoginScreen(): React.JSX.Element {
     }
   };
 
-  /** 登录/注册成功后统一处理：拉取云端数据（智能体/聊天记录/形象恢复） */
+  /** 登录/注册成功后统一处理：拉取云端数据（智能体/聊天记录恢复） */
   const afterAuth = (): void => {
     void pullAfterLogin().then((sum) => {
-      if (sum.agents || sum.messages || sum.pets) {
+      if (sum.agents || sum.messages) {
         const parts = [
           sum.agents ? `智能体 ${sum.agents} 个` : '',
-          sum.pets ? `宠物形象 ${sum.pets} 个` : '',
           sum.messages ? `聊天记录 ${sum.messages} 条` : '',
         ].filter(Boolean);
         Alert.alert('已从云端恢复', `这台设备上恢复了：${parts.join('、')}`);

@@ -16,7 +16,7 @@ import type { InstalledVoice, VoiceConfig } from './types';
 
 /** 云 TTS 单句最大字符数（超了截断；OpenAI 系上限 4096，这里控制流量与首字延迟） */
 const MAX_SPEAK_CHARS = 600;
-const DEFAULT_PREVIEW_TEXT = '你好呀，我是你的桌面小宠，今天也要开开心心的哦！';
+const DEFAULT_PREVIEW_TEXT = '你好呀，这是一段语音试听，今天也要开心哦！';
 
 /** 当前生效的云音色（选中 id 命中已安装列表且为云引擎 cloud/gptsovits），否则 null */
 export function currentCloudVoice(): InstalledVoice | null {

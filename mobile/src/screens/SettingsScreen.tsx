@@ -3,23 +3,16 @@
  * 打开方式：抽屉底部头像或 …（MainShell 传入 visible/onClose）。
  * 服务器地址已内置隐藏：长按「检查更新」行的版本号可打开调试弹窗。
  */
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { flushAllOnQuit, scheduleUpload } from '../api/sync';
-import { DEFAULT_BASE_URL, useAppStore, type PetAssetRef } from '../store/appStore';
+import { DEFAULT_BASE_URL, useAppStore } from '../store/appStore';
 import { listVoices } from '../native/Voice';
 import { speakReply, previewInstalled, previewSystemVoice, cloudVoiceReady, stopAllVoice, testGptsovitsEngine } from '../voiceEngine';
 import type { InstalledVoice, TtsCloudConfig } from '../types';
 import { APP_VERSION_NAME, checkAppUpdate } from '../update/checkUpdate';
 import { nativeVersionName } from '../native/PetInfo';
-import {
-  checkOverlayPermission,
-  isOverlaySupported,
-  requestOverlayPermission,
-  startOverlay,
-  stopOverlay,
-} from '../native/OverlayPet';
 
 /** 步进调节行（语速/音调） */
 function Stepper({
@@ -118,12 +111,8 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
   const baseUrl = useAppStore((s) => s.baseUrl);
   const llmProfiles = useAppStore((s) => s.llmProfiles);
   const llmActiveProfileId = useAppStore((s) => s.llmActiveProfileId);
-  const petAsset = useAppStore((s) => s.petAsset);
-  const overlayEnabled = useAppStore((s) => s.overlayEnabled);
-  const setOverlayEnabled = useAppStore((s) => s.setOverlayEnabled);
   const ttsEnabled = useAppStore((s) => s.ttsEnabled);
   const setTtsEnabled = useAppStore((s) => s.setTtsEnabled);
-  const petName = useAppStore((s) => s.petName);
   const userNickname = useAppStore((s) => s.userNickname);
   const showThinking = useAppStore((s) => s.showThinking);
   const thinkingLang = useAppStore((s) => s.thinkingLang);
@@ -134,15 +123,10 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
   const activeCloudVoiceId = useAppStore((s) => s.activeCloudVoiceId);
   const ttsCloudConfig = useAppStore((s) => s.ttsCloudConfig);
   const chatClearConfirm = useAppStore((s) => s.chatClearConfirm);
-  const petStateEnabled = useAppStore((s) => s.petStateEnabled);
-  const moodFromChat = useAppStore((s) => s.moodFromChat);
-  const petSelfDescription = useAppStore((s) => s.petSelfDescription);
 
   const [url, setUrl] = useState(baseUrl);
   const [serverModal, setServerModal] = useState(false);
-  const [overlay, setOverlay] = useState(overlayEnabled);
   const [tts, setTts] = useState(ttsEnabled);
-  const [busy, setBusy] = useState(false);
   const [voiceModal, setVoiceModal] = useState(false);
   const [speechModal, setSpeechModal] = useState(false);
   const [voices, setVoices] = useState<Array<{ name: string; label: string }>>([]);
@@ -153,8 +137,6 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
   const [ttsTestResult, setTtsTestResult] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
   const [personaOpen, setPersonaOpen] = useState(false);
-  const [descOpen, setDescOpen] = useState(false);
-  const downloadedPets = useAppStore((s) => s.downloadedPets);
   const activeCloudVoiceName = downloadedVoices.find((v) => v.id === activeCloudVoiceId)?.name ?? '';
 
   /** 试听已安装云音色（错误如缺 Key 直接弹窗指引） */
@@ -236,21 +218,9 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
     if (personaOpen) setPersona(activeProfile?.systemPrompt ?? '');
   }, [personaOpen, activeProfile?.id, activeProfile?.systemPrompt]);
 
-  const [desc, setDesc] = useState(petSelfDescription);
-  useEffect(() => {
-    setDesc(petSelfDescription);
-  }, [petSelfDescription]);
-
-  // 进设置页时刷新开关显示（权限可能在系统设置中被收回）
-  useEffect(() => {
-    setOverlay(overlayEnabled);
-  }, [overlayEnabled]);
-
   useEffect(() => {
     setTts(ttsEnabled);
   }, [ttsEnabled]);
-
-  const overlaySupported = isOverlaySupported();
 
   /** 清洗用户输入：截取首个合法 URL 起点（兜住 `;` 等误输入前缀），缺 scheme 自动补 https:// */
   function normalizeServerUrl(raw: string): string {
@@ -287,15 +257,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
       .patch({ llmProfiles: llmProfiles.map((p) => (p.id === activeProfile.id ? { ...p, systemPrompt: trimmed } : p)) });
     setPersonaOpen(false);
     scheduleUpload('config');
-    Alert.alert('已保存', trimmed ? '聊天人设已更新并云同步' : '已清空人设，使用默认宠物人格');
-  };
-
-  const saveDesc = (): void => {
-    const trimmed = desc.trim();
-    useAppStore.getState().patch({ petSelfDescription: trimmed });
-    setDescOpen(false);
-    scheduleUpload('config');
-    Alert.alert('已保存', '宠物自我描述已更新');
+    Alert.alert('已保存', trimmed ? '聊天人设已更新并云同步' : '已清空人设，使用默认智能体人格');
   };
 
   const syncNow = (): void => {
@@ -308,56 +270,6 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
     onClose();
     setTimeout(() => useAppStore.getState().logout(), 50);
   };
-
-  const toggleOverlay = useCallback(
-    async (next: boolean) => {
-      if (busy) return;
-      if (!next) {
-        setBusy(true);
-        try {
-          await stopOverlay();
-          setOverlayEnabled(false);
-          setOverlay(false);
-        } catch (e) {
-          Alert.alert('关闭失败', e instanceof Error ? e.message : String(e));
-        } finally {
-          setBusy(false);
-        }
-        return;
-      }
-      setBusy(true);
-      try {
-        const granted = await checkOverlayPermission();
-        if (!granted) {
-          Alert.alert(
-            '需要悬浮窗权限',
-            '请在接下来的系统设置中为本应用开启「显示在其他应用上层」权限，开启后回到本应用再次打开开关',
-            [
-              { text: '取消', style: 'cancel' },
-              {
-                text: '去授权',
-                onPress: () => {
-                  void requestOverlayPermission().catch(() => undefined);
-                },
-              },
-            ],
-          );
-          setOverlay(false);
-          return;
-        }
-        await startOverlay(petAsset);
-        setOverlayEnabled(true);
-        setOverlay(true);
-        Alert.alert('已开启', '宠物悬浮在其他应用上方，可拖动到任意位置');
-      } catch (e) {
-        Alert.alert('开启失败', e instanceof Error ? e.message : String(e));
-        setOverlay(false);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [busy, petAsset, setOverlayEnabled],
-  );
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -401,7 +313,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
           </Section>
 
           <Section title="语音">
-            <Row icon="🔊" label="朗读宠物回复" switchValue={tts} onSwitch={(next) => { setTts(next); setTtsEnabled(next); }} />
+            <Row icon="🔊" label="朗读回复" switchValue={tts} onSwitch={(next) => { setTts(next); setTtsEnabled(next); }} />
             <View style={st.divider} />
             <Row
               icon="🎙"
@@ -432,29 +344,6 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
             />
             <View style={st.divider} />
             <Row icon="🎚" label="语速与音调" value={`${speechRate.toFixed(1)}x · ${speechPitch.toFixed(1)}x`} showArrow disabled={!tts} onPress={() => setSpeechModal(true)} />
-          </Section>
-
-          <Section title="宠物">
-            <Row icon="🐾" label="宠物状态功能" switchValue={petStateEnabled} onSwitch={(next) => useAppStore.getState().setPetStateEnabled(next)} />
-            <View style={st.divider} />
-            <Row icon="❤️" label="心情随对话变化" switchValue={moodFromChat} onSwitch={(next) => useAppStore.getState().setMoodFromChat(next)} />
-            <Text style={st.hint}>开启后智能体聊得开心心情+8，不愉快心情-8；需宠物状态功能开启</Text>
-            <View style={st.divider} />
-            <Row icon="✏️" label="宠物自我描述" value={petSelfDescription ? petAsset?.name ?? '已设置' : '未设置'} showArrow onPress={() => setDescOpen(true)} />
-            <View style={st.divider} />
-            <Row
-              icon="🪟"
-              label="悬浮窗宠物（其他应用上层）"
-              switchValue={overlay}
-              onSwitch={toggleOverlay}
-            />
-            <Text style={st.hint}>
-              {!overlaySupported
-                ? Platform.OS === 'ios'
-                  ? 'iOS 系统不支持悬浮窗，请使用 App 内形态（宠物已常驻聊天页上层）'
-                  : '当前环境不支持悬浮窗功能'
-                : '应用内宠物已常驻聊天页上层；此开关控制退出应用后仍悬浮在其他应用上方'}
-            </Text>
           </Section>
 
           <Section title="关于">
@@ -503,32 +392,6 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
           </View>
         </Modal>
 
-        {/* 宠物自我描述编辑 */}
-        <Modal visible={descOpen} transparent animationType="fade" onRequestClose={() => setDescOpen(false)}>
-          <Pressable style={st.modalMask} onPress={() => setDescOpen(false)}>
-            <Pressable style={st.modalCard} onPress={() => undefined}>
-              <Text style={st.modalTitle}>宠物自我描述</Text>
-              <TextInput
-                style={st.areaInput}
-                value={desc}
-                onChangeText={(v) => setDesc(v.slice(0, 200))}
-                placeholder="例如：一只白色的小猫，性格黏人爱撒娇"
-                maxLength={200}
-                multiline
-              />
-              <Text style={st.hint}>描述宠物的形象与性格，会作为智能体人设的一部分并同步到桌面端</Text>
-              <View style={st.modalBtns}>
-                <Pressable style={[st.btn, st.btnGhost]} onPress={() => setDescOpen(false)}>
-                  <Text style={st.btnGhostText}>取消</Text>
-                </Pressable>
-                <Pressable style={[st.btn, st.btnPrimary]} onPress={saveDesc}>
-                  <Text style={st.btnPrimaryText}>保存</Text>
-                </Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
-
         {/* 语速与音调 */}
         <Modal visible={speechModal} transparent animationType="fade" onRequestClose={() => setSpeechModal(false)}>
           <Pressable style={st.modalMask} onPress={() => setSpeechModal(false)}>
@@ -539,7 +402,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               <Pressable
                 style={[st.btn, st.btnPrimary, { marginTop: 16 }]}
                 onPress={() => {
-                  void speakReply('你好，我是你的宠物，很高兴见到你。', null);
+                  void speakReply('你好，这是一段语音试听，很高兴见到你。', null);
                 }}>
                 <Text style={st.btnPrimaryText}>试听</Text>
               </Pressable>
@@ -784,8 +647,6 @@ const st = StyleSheet.create({
   modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 18, width: '100%' },
   modalTitle: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 12 },
   textInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
-  areaInput: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, minHeight: 90, textAlignVertical: 'top' },
-  modalBtns: { flexDirection: 'row', marginTop: 14 },
   btn: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
   btnGhost: { borderWidth: 1, borderColor: '#DDD', marginRight: 10 },
   btnGhostText: { color: '#666', fontSize: 14 },
@@ -801,22 +662,4 @@ const st = StyleSheet.create({
   stepperBtn: { width: 34, height: 30, borderRadius: 8, backgroundColor: '#F0F2F5', alignItems: 'center', justifyContent: 'center' },
   stepperBtnText: { fontSize: 18, color: '#333', lineHeight: 22 },
   stepperVal: { minWidth: 56, textAlign: 'center', fontSize: 14, color: '#333' },
-  // 智能体管理
-  agentEmpty: { paddingVertical: 16, paddingHorizontal: 10, alignItems: 'center' },
-  agentEmptyText: { fontSize: 14, color: '#999' },
-  agentPet: { fontSize: 12, color: '#9AA0A6', marginTop: 2 },
-  agentEditBox: { paddingVertical: 6, paddingHorizontal: 4 },
-  petBindRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
-  petBindRowActive: { backgroundColor: '#F0F6FF', borderRadius: 8, paddingHorizontal: 8, marginHorizontal: -8 },
-  petBindName: { fontSize: 14, color: '#1A1A1A', flex: 1, marginRight: 8 },
-  petBindNameActive: { color: '#4D6BFE', fontWeight: '600' },
-  petBindCheck: { fontSize: 16, color: '#4D6BFE', fontWeight: '600' },
-  // 智能体列表 Modal
-  modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  modalCloseText: { fontSize: 18, color: '#999', padding: 4 },
-  modalHint: { fontSize: 12, color: '#AAA', marginTop: 10, textAlign: 'center' },
-  agentMgrRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8, marginVertical: 2, borderRadius: 8 },
-  agentMgrRowActive: { backgroundColor: '#F0F6FF' },
-  agentMgrName: { fontSize: 15, color: '#1A1A1A', fontWeight: '500' },
-  agentMgrPet: { fontSize: 12, color: '#9AA0A6', marginTop: 2 },
 });

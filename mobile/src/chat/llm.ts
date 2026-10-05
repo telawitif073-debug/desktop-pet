@@ -1,9 +1,9 @@
 /**
  * 手机端直连用户 LLM API（OpenAI 兼容 /chat/completions，非流式）。
- * 档案从云同步的 config 来（Key 由服务端解密下发）；人设 = 已安装智能体 + 宠物自我描述。
+ * 档案从云同步的 config 来（Key 由服务端解密下发）；人设 = 已安装智能体档案。
  */
 import { useAppStore } from '../store/appStore';
-import type { ChatMsg, LlmProfile, PetState } from '../types';
+import type { ChatMsg, LlmProfile } from '../types';
 import { ensureMultiSession, multiChatSend, toolFootball, toolStock, toolWeather } from '../api/platform';
 import { buildTaskProtocolPrompt } from '../petCapabilities';
 import { buildSearchResultPrompt, buildWebPrompt, extractSearchQuery, runWebSearch } from '../webSearch';
@@ -19,28 +19,7 @@ import {
   type SkillKind,
 } from '../skills';
 
-const DEFAULT_SYSTEM = '你是一只可爱的桌面宠物，说话简短活泼、口语化，单次回复尽量不超过 80 字。';
-
-/** 宠物状态 → 自然语言描述（与桌面端 describePetState 同规则），空串表示状态平淡 */
-function describePetState(state: PetState): string {
-  const parts: string[] = [];
-  if (state.hunger < 30) parts.push('现在有点饿了');
-  else if (state.hunger > 80) parts.push('吃得很饱');
-  if (state.mood < 30) parts.push('心情不太好');
-  else if (state.mood > 80) parts.push('心情很好');
-  if (state.energy < 30) parts.push('有点累了想休息');
-  else if (state.energy > 80) parts.push('精力充沛');
-  if (state.affection > 80) parts.push('和主人很亲近');
-  else if (state.affection < 20) parts.push('还不太熟悉主人');
-  return parts.join('，');
-}
-
-/** 仅好感度 → 自然语言描述（状态功能关闭时使用，空串表示关系平淡） */
-function describeAffection(state: PetState): string {
-  if (state.affection > 80) return '和主人很亲近';
-  if (state.affection < 20) return '还不太熟悉主人';
-  return '';
-}
+const DEFAULT_SYSTEM = '你是一个乐于助人的 AI 助手，说话简短自然、口语化，单次回复尽量不超过 80 字。';
 
 export function activeProfile(): LlmProfile | null {
   const { llmProfiles, llmActiveProfileId } = useAppStore.getState();
@@ -53,8 +32,8 @@ export function isConfigured(): boolean {
 }
 
 function buildSystemPrompt(): string {
-  const { petSelfDescription, petName, userNickname, showThinking, thinkingLang } = useAppStore.getState();
-  // LlmProfile = 智能体，档案自带 systemPrompt（人设主体），没填才用默认宠物人格
+  const { userNickname, showThinking, thinkingLang } = useAppStore.getState();
+  // LlmProfile = 智能体，档案自带 systemPrompt（人设主体），没填才用默认人格
   const profile = activeProfile();
   const profilePrompt = profile?.systemPrompt?.trim();
   const parts: string[] = [];
@@ -70,20 +49,7 @@ function buildSystemPrompt(): string {
   // 智能体页面 P0：角色/风格注入人设（角色提升为拟人身份，风格约束说话口吻）
   if (profile?.role?.trim()) parts.push(`你的角色是：${profile.role.trim()}。`);
   if (profile?.style?.trim()) parts.push(`你的说话风格：${profile.style.trim()}。请全程保持该风格。`);
-  if (petName && petName !== '小宠') parts.push(`你的名字叫「${petName}」，用户会用这个名字称呼你。`);
   if (userNickname.trim()) parts.push(`请用「${userNickname.trim()}」来称呼用户。`);
-  if (petSelfDescription) parts.push(`你的形象：${petSelfDescription}`);
-  // 宠物状态实装：状态注入提示词，智能体语气随状态变化。
-  // 状态功能关闭时不再注入任何饥饿/心情/精力信息（智能体不知道饿不饿，自然不会喊饿）；
-  // 好感度不受状态开关影响（始终真实累积），单独注入。
-  const { petState, petStateEnabled } = useAppStore.getState();
-  if (petStateEnabled) {
-    const stateDesc = describePetState(petState);
-    parts.push(`你当前的状态：${stateDesc || '平静正常'}（饱足/心情/精力/好感会影响你的语气，可自然融入回复，不要生硬罗列数值）`);
-  } else {
-    const affectionDesc = describeAffection(petState);
-    if (affectionDesc) parts.push(`你与主人的关系：${affectionDesc}。`);
-  }
   // 智能体自带能力（来自它自己的 JSON + 用户导入时的选择）：只有启用「定时任务」的智能体才注入
   // 建任务协议，且用该智能体自己的示例任务/频率约束合成（见 petCapabilities.ts）
   if (profile?.capabilities?.enabled?.includes('tasks')) {

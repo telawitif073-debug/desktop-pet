@@ -1,9 +1,9 @@
 /**
- * 宠物自主主动搭话（能力来自「智能体自己」：导入 JSON 声明的 active_execution + 用户导入时的选择）：
- * App 前台期间每 60s 检查一次，满足全部条件才让宠物主动开口：
+ * 智能体自主主动搭话（能力来自「智能体自己」：导入 JSON 声明的 active_execution + 用户导入时的选择）：
+ * App 前台期间每 60s 检查一次，满足全部条件才让智能体主动开口：
  * - 当前智能体启用了「主动发起对话」能力（档案 capabilities.enabled 含 proactive）且已配置直连对话 API
  * - 落在该智能体自己的搭话时段内（JSON waking_hours，缺省 8:00–22:00）
- * - 距上次宠物开口 ≥ 该智能体自己的间隔（JSON interval_minutes，缺省 30 分钟，下限 5 分钟）
+ * - 距上次智能体开口 ≥ 该智能体自己的间隔（JSON interval_minutes，缺省 30 分钟，下限 5 分钟）
  * - 用户 2 分钟内发过消息则跳过本轮（不和用户抢话）
  * - 冷启动 / 回到前台后重新计时，避免刚打开 App 就被搭话
  * 消息落到该智能体对话（与定时任务同一落地通道），生成失败静默跳过（不发模板）。
@@ -11,7 +11,7 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { useAppStore } from './store/appStore';
-import { generateActiveMessage, proactiveStateHint } from './petActiveMessage';
+import { generateActiveMessage } from './petActiveMessage';
 import { DEFAULT_WAKING_HOURS, isWithinHours, normalizeIntervalMinutes, shouldFireProactive } from './petProactiveGate';
 
 /** 检查周期 */
@@ -31,8 +31,7 @@ export function usePetProactive(): void {
       const st = useAppStore.getState();
       const profile = st.llmProfiles.find((p) => p.id === profileId);
       if (!profile) return;
-      const stateHint = st.petStateEnabled ? proactiveStateHint(st.petState) : '';
-      const text = await generateActiveMessage(profile, { stateHint });
+      const text = await generateActiveMessage(profile, {});
       lastFiredAt = Date.now();
       useAppStore.getState().pushPetTaskMessage(profileId, {
         id: `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,

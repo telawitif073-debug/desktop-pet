@@ -1,26 +1,13 @@
-const path = require('path');
-const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const { getDefaultConfig } = require('@react-native/metro-config');
 
 /**
  * Metro configuration
  * https://reactnative.dev/docs/metro
  *
- * 关键点：**共享桌面端与移动端的宠物主体功能模块**。
- * 纯 TypeScript、无 DOM/Node 依赖的领域逻辑现在归位于共享包 `packages/pet-domain/src/**`，
- * 桌面侧通过 `src/pet/**` 的再导出 shim 引用它，移动端则直接引用（`src/pet/vitals`）。
- * 两条路径都落在 mobile/ 之外，因此必须把 `src/` 与 `packages/` 都加入 watchFolders，
- * Metro 才能解析并打包。桌面与移动必须给出同一套数值规则（否则两边状态会漂移）。
- *
- * 注意：watchFolders 只加源码目录（不含任何 node_modules），不会引入重复模块解析问题。
+ * 说明：此前移动端引用桌面端共享的宠物主体功能模块（`src/pet/**` / `packages/pet-domain`），
+ * 故在 watchFolders 里加入了 mobile/ 之外的源码目录；宠物系统下线后移动端不再引用任何
+ * mobile/ 之外的源码，watchFolders 及共享源码解析一并移除，回到 RN 默认配置。
  *
  * @type {import('@react-native/metro-config').MetroConfig}
  */
-const config = {
-  watchFolders: [path.resolve(__dirname, '..', 'src'), path.resolve(__dirname, '..', 'packages')],
-  resolver: {
-    // 共享源码希望优先用 mobile 自己的依赖（如 zustand 只有 mobile 装）
-    nodeModulesPaths: [path.resolve(__dirname, 'node_modules')],
-  },
-};
-
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+module.exports = getDefaultConfig(__dirname);

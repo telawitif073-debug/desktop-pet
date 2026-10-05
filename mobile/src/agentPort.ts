@@ -1,5 +1,5 @@
 /** 智能体配置的导入/导出与 Schema 校验、多智能体识别（P1-1/P1-2，与桌面端 platform/frontend/src/agentPort.ts 同构）
- *  导出剥离凭证（apiKey/本地 id/绑定形象/凭证值）；导入按名称合并；
+ *  导出剥离凭证（apiKey/本地 id/凭证值）；导入按名称合并；
  *  多智能体：解析 YAML/JSON → 识别编排结构 → 提取外部依赖（${VAR}/{{VAR}}/env:/secret:）→ 占位符替换为内部引用 cred://dep_N。
  */
 import type {
@@ -19,7 +19,7 @@ export interface AgentExportFile {
   profiles: NormalizedAgent[];
 }
 
-/** 一条可导入的智能体配置（不含 id/petAssetId，apiKey 可为空） */
+/** 一条可导入的智能体配置（不含 id，apiKey 可为空） */
 export interface NormalizedAgent {
   name: string;
   baseUrl: string;
@@ -60,7 +60,7 @@ export interface CapabilityOffer {
   reasons: string[];
 }
 
-/** 导出：剥离 apiKey / id / petAssetId / 凭证值，保留可移植的文本与展示字段 */
+/** 导出：剥离 apiKey / id / 凭证值，保留可移植的文本与展示字段 */
 export function exportAgentJson(profiles: LlmProfile[]): string {
   const safe: NormalizedAgent[] = profiles.map((p) => {
     const base = {
@@ -241,7 +241,7 @@ export function normalizeAgentText(
   return { ok: true, items, skipped };
 }
 
-/** 合并：同名视为更新（保留本地 id/apiKey/绑定形象/启停与对话），新名称追加为新智能体（不切换激活）
+/** 合并：同名视为更新（保留本地 id/apiKey/启停与对话），新名称追加为新智能体（不切换激活）
  *  自带能力：检测结果写入档案的 capabilities.spec（enabled 留空，由导入弹窗询问用户后启用）；
  *  同名更新时保留用户此前已启用的能力选择，仅刷新规格。 */
 export function mergeImportedProfiles(current: LlmProfile[], items: NormalizedAgent[]): ImportOutcome {

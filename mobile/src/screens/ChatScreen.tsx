@@ -246,12 +246,10 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
   const { kbHeight, kbVisible } = useKeyboardHeight();
   const profiles = useAppStore((s) => s.llmProfiles);
   const activeId = useAppStore((s) => s.llmActiveProfileId);
-  const downloadedPets = useAppStore((s) => s.downloadedPets);
   const downloadedVoices = useAppStore((s) => s.downloadedVoices);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState('');
   const [form, setForm] = useState(emptyForm());
-  const [bindPetId, setBindPetId] = useState<string>('');
   /** 编辑表单选中的专属朗读音色 id（''=跟随全局默认音色） */
   const [bindVoiceId, setBindVoiceId] = useState<string>('');
   const [search, setSearch] = useState('');
@@ -276,7 +274,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
   const openAdd = (): void => {
     setEditingId('');
     setForm(emptyForm());
-    setBindPetId('');
     setBindVoiceId('');
     setFormCaps([]);
     setFormCapSpec({});
@@ -300,7 +297,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
       greeting: p.greeting ?? '',
       exampleQuestions: (p.exampleQuestions ?? []).join('\n'),
     });
-    setBindPetId(p.petAssetId ?? '');
     setBindVoiceId(p.boundVoiceId ?? '');
     // 回填该智能体的主动能力（来自导入 JSON 的检测结果与用户此前的勾选）
     setFormCaps(p.capabilities?.enabled ?? []);
@@ -318,7 +314,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
       return;
     }
     const store = useAppStore.getState();
-    const petAssetId = bindPetId || undefined;
     const newFields = {
       avatar: form.avatar.trim() || undefined,
       intro: form.intro.trim() || undefined,
@@ -343,7 +338,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
               baseUrl,
               model,
               systemPrompt: form.systemPrompt.trim(),
-              petAssetId,
               boundVoiceId: bindVoiceId || undefined,
               capabilities,
               ...newFields,
@@ -351,17 +345,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
           : p,
       );
       store.patch({ llmProfiles: next });
-      // 严格绑定：保存的是当前激活智能体时，绑定形象变了同步更新 petAsset；解绑（无形象）则该智能体无法继续使用
-      if (editingId === store.llmActiveProfileId) {
-        const newPet = petAssetId ? store.downloadedPets.find((p) => p.id === petAssetId) : null;
-        if (newPet) {
-          if (newPet.id !== store.petAsset?.id) store.patch({ petAsset: newPet });
-        } else {
-          // 严格绑定：激活智能体解绑形象 → 清空当前宠物，聊天发送将被拦截
-          store.patch({ petAsset: null });
-          Alert.alert('当前智能体已解绑形象', '已清空当前宠物，该智能体将不能继续对话，请重新绑定宠物形象，或切换到其他已绑定形象的智能体');
-        }
-      }
     } else {
       const id = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
       const profile: LlmProfile = {
@@ -371,27 +354,12 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
         baseUrl,
         model,
         systemPrompt: form.systemPrompt.trim(),
-        petAssetId,
         boundVoiceId: bindVoiceId || undefined,
         enabled: true,
         capabilities,
         ...newFields,
       };
-      if (petAssetId) {
-        // 严格绑定：新建智能体已绑定形象 → 直接激活并同步切换宠物
-        const newPet = store.downloadedPets.find((p) => p.id === petAssetId);
-        if (newPet) {
-          store.patch({ llmProfiles: [...store.llmProfiles, profile], llmActiveProfileId: id, petAsset: newPet });
-        } else {
-          // 绑定 id 不在已下载列表（选择器来自下载列表，理论不可达）：保守只保存不激活
-          store.patch({ llmProfiles: [...store.llmProfiles, profile] });
-          Alert.alert('绑定形象未下载', '所选宠物形象未在本地，智能体已保存但未激活，请先下载该形象');
-        }
-      } else {
-        // 严格绑定：无形象只允许保存、不激活，稍后绑定后才可使用
-        store.patch({ llmProfiles: [...store.llmProfiles, profile] });
-        Alert.alert('已保存', '尚未绑定宠物形象，该智能体暂不能使用：请在编辑中绑定一个已下载的宠物形象后再切换使用');
-      }
+      store.patch({ llmProfiles: [...store.llmProfiles, profile] });
     }
     scheduleUpload('config');
     setFormOpen(false);
@@ -409,25 +377,17 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
           // 同时删除该智能体的对话记录
           const profileMessages = { ...store.profileMessages };
           delete profileMessages[p.id];
-          // 删除当前智能体时自动切到剩余第一个（优先选「已绑定且形象已下载」的，保证可用）
+          // 删除当前智能体时自动切到剩余第一个启用档案
           const isActive = store.llmActiveProfileId === p.id;
           const nextActiveId = isActive
-            ? next.find((x) => x.enabled !== false && x.petAssetId && store.downloadedPets.some((d) => d.id === x.petAssetId))?.id ?? next[0]?.id ?? ''
+            ? next.find((x) => x.enabled !== false)?.id ?? next[0]?.id ?? ''
             : store.llmActiveProfileId;
           const nextMessages = isActive ? (profileMessages[nextActiveId] ?? []) : store.messages;
-          // 严格绑定：下一智能体已绑定且形象已下载时切换宠物，否则不切（避免展示不存在的形象）
-          const nextProfile = isActive ? next.find((x) => x.id === nextActiveId) ?? null : null;
-          const nextPet = isActive
-            ? (nextProfile && nextProfile.petAssetId
-                ? store.downloadedPets.find((x) => x.id === nextProfile.petAssetId) ?? null
-                : null)
-            : store.petAsset;
           store.patch({
             llmProfiles: next,
             llmActiveProfileId: nextActiveId,
             profileMessages,
             messages: nextMessages,
-            ...(nextPet ? { petAsset: nextPet } : {}),
           });
           scheduleUpload('config');
         },
@@ -436,15 +396,7 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
   };
 
   const switchTo = (id: string): void => {
-    const store = useAppStore.getState();
-    const target = store.llmProfiles.find((p) => p.id === id);
-    // 严格绑定：未配置形象 / 绑定形象未下载的智能体无法使用，拦截切换
-    const boundPet = target?.petAssetId ? store.downloadedPets.find((p) => p.id === target.petAssetId) : null;
-    if (!target?.petAssetId || !boundPet) {
-      Alert.alert('该智能体无法使用', '未绑定宠物形象（或所绑形象未下载），请先在「智能体管理 → 编辑」中绑定一个已下载的宠物形象', [{ text: '好的' }]);
-      return;
-    }
-    store.switchProfile(id);
+    useAppStore.getState().switchProfile(id);
     scheduleUpload('config');
   };
 
@@ -658,11 +610,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
       setFormImportError('未能识别配置字段：请粘贴智能体配置（name / baseUrl / model / systemPrompt 等），或人设卡（agent_name / persona）');
       return;
     }
-    let bind = s(d.petAssetId);
-    if (!bind) {
-      const pa = d.petAsset as Record<string, unknown> | string | null | undefined;
-      bind = typeof pa === 'string' ? pa : pa && typeof pa === 'object' ? s((pa as Record<string, unknown>).id) : '';
-    }
     setForm({
       name,
       apiKey: s(d.apiKey ?? d.api_key),
@@ -677,7 +624,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
       greeting,
       exampleQuestions: qs,
     });
-    setBindPetId(bind || (editingId ? bindPetId : ''));
     // 主动能力检测：该 JSON 声明了「主动发起对话 / 定时任务」时，勾选能力并说明（用户可取消）
     const det: CapabilityDetection = detectCapabilities(d);
     if (det.kinds.length) {
@@ -739,7 +685,7 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
                   multiline
                   value={formImportText}
                   onChangeText={setFormImportText}
-                  placeholder={'{\n  "name": "宠物医生",\n  "systemPrompt": "你是一位……",\n  "avatar": "🐱",\n  "domainTags": ["医疗"]\n}'}
+                  placeholder={'{\n  "name": "营养师",\n  "systemPrompt": "你是一位……",\n  "avatar": "🥗",\n  "domainTags": ["医疗"]\n}'}
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
@@ -774,26 +720,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
             {field('接口地址', 'baseUrl')}
             {field('模型', 'model')}
             <Text style={pm.fieldHint}>多个智能体可复用同一套对话 API；从商店安装新智能体时会询问绑定哪个 API（只有一个时自动绑定）。</Text>
-            <Text style={pm.fieldLabel}>绑定宠物形象</Text>
-            {downloadedPets.length === 0 ? (
-              <Text style={pm.fieldHint}>还没有已下载的宠物形象，去商店安装一个</Text>
-            ) : (
-              downloadedPets.map((pet) => {
-                const selected = bindPetId === pet.id;
-                return (
-                  <Pressable
-                    key={pet.id}
-                    style={[pm.bindRow, selected && pm.bindRowActive]}
-                    onPress={() => setBindPetId(selected ? '' : pet.id)}>
-                    <Text style={[pm.bindRowName, selected && pm.bindRowNameActive]} numberOfLines={1}>
-                      {pet.name}
-                    </Text>
-                    {selected && <Text style={pm.bindCheck}>✓</Text>}
-                  </Pressable>
-                );
-              })
-            )}
-            <Text style={pm.fieldHint}>一个智能体必须且只能绑定一个宠物形象</Text>
 
             {/* ── 朗读音色：默认跟随全局，或指定某个已下载音色（系统/云/GPT-SoVITS）── */}
             <Text style={pm.fieldLabel}>朗读音色</Text>
@@ -973,7 +899,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
               ListEmptyComponent={<Text style={pm.empty}>还没有智能体，点右上角「新增」创建一个</Text>}
               renderItem={({ item }) => {
                 const active = item.id === activeId;
-                const boundPet = item.petAssetId ? downloadedPets.find((p) => p.id === item.petAssetId) : null;
                 const enabled = item.enabled !== false;
                 const avatar = item.avatar?.trim() || item.name.slice(0, 1).toUpperCase();
                 return (
@@ -991,7 +916,6 @@ function ProfileManager({ visible, onClose }: { visible: boolean; onClose: () =>
                       </Text>
                       <Text style={pm.rowSub} numberOfLines={1}>
                         {item.model || '未设置模型'}
-                        {boundPet ? ` · ${boundPet.name}` : ' · 未绑定形象'}
                       </Text>
                       {item.multiConfig ? <Text style={pm.multiBadge}>多智能体</Text> : null}
                       {item.capabilities?.enabled?.length ? (
@@ -1196,17 +1120,6 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
           ]);
         }
       }
-      // 互动实装：聊天成功好感+1（好感度不受状态开关影响，见宠物页说明）
-      useAppStore.getState().addAffection(1);
-      // 心情与对话关联：按回复情绪词调整心情（设置里可关闭；需宠物状态功能开启）
-      const stMood = useAppStore.getState();
-      if (stMood.petStateEnabled && stMood.moodFromChat) {
-        const text = (target?.content || content || '').slice(0, 300);
-        const negative = /(生气|讨厌|不理你|不想理|烦死了|无聊|凶|哭|委屈|骂你|打你|坏主人)/.test(text);
-        const positive = /(开心|高兴|喜欢|谢谢|感谢|么么|愉快|爱你|真棒|好耶|嘻嘻|哈哈|摸摸|夸你|原谅你)/.test(text);
-        if (negative && !positive) useAppStore.getState().adjustMood(-8);
-        else if (positive && !negative) useAppStore.getState().adjustMood(8);
-      }
       // 开启朗读时读出回复（错误提示不读；云音色/系统音色由引擎按设置自动选择）
       const st = useAppStore.getState();
       if (st.ttsEnabled) {
@@ -1255,24 +1168,11 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
     }
   };
 
-  /** 严格绑定守卫：当前激活智能体必须已绑定且已下载形象才能对话，否则提示并返回 false */
-  const activePetReady = (): boolean => {
-    const s = useAppStore.getState();
-    const target = s.llmProfiles.find((p) => p.id === s.llmActiveProfileId);
-    const ready = !!target?.petAssetId && !!s.downloadedPets.find((p) => p.id === target.petAssetId);
-    if (!ready) {
-      Alert.alert('该智能体未绑定宠物形象', '无法对话。请先在「智能体管理 → 编辑」中绑定一个已下载的宠物形象后使用');
-    }
-    return ready;
-  };
-
   const send = async (textArg?: string): Promise<void> => {
     const text = (textArg ?? input).trim();
     if (!text || sending) return;
-    // 严格绑定：无形象智能体不能使用，拦截发送
-    if (!activePetReady()) return;
     setInput('');
-    // 宠物定时任务：本地识别「定时提醒 / 到点主动搭话 / 任务管理」指令，
+    // 定时任务：本地识别「定时提醒 / 到点主动搭话 / 任务管理」指令，
     // 动作由 App 直接落地（不经过模型，离线可用）；回复措辞由该智能体按人设产出，
     // 无 API / 调用失败才回退中性文案（见 petTaskScheduler 的 speak）
     const intent = detectPetIntent(text);
@@ -1318,8 +1218,6 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
   // 错误气泡点击重试：以该消息之前的历史重发
   const retryMsg = (id: string): void => {
     if (sending) return;
-    // 严格绑定：无形象智能体不能使用，拦截重试
-    if (!activePetReady()) return;
     const store = useAppStore.getState();
     const idx = store.messages.findIndex((m) => m.id === id);
     if (idx < 0) return;
@@ -1340,7 +1238,7 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
     try {
       const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, {
         title: '麦克风权限',
-        message: '用于按住说话和宠物语音对话',
+        message: '用于按住说话和语音输入',
         buttonPositive: '允许',
         buttonNegative: '拒绝',
       });
@@ -1436,7 +1334,7 @@ export default function ChatScreen({ onOpenDrawer }: { onOpenDrawer?: () => void
           // inverted 列表的空态会整体颠倒，需 scaleY 翻转回来
           <View style={styles.emptyWrap}>
             <Text style={styles.empty}>
-              {profile?.greeting?.trim() || `和${profile?.name ?? '宠物'}聊点什么吧`}
+              {profile?.greeting?.trim() || `和${profile?.name ?? '智能体'}聊点什么吧`}
             </Text>
             {(profile?.exampleQuestions ?? []).slice(0, 4).map((q) => (
               <Pressable

@@ -1,12 +1,10 @@
-/** 审核工作台（仅管理员）：查看待审核宠物/智能体，通过或驳回，对齐平台 Web 端 AdminPage */
+/** 审核工作台（仅管理员）：查看待审核智能体，通过或驳回，对齐平台 Web 端 AdminPage */
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { approveAsset, listAssets, rejectAsset } from '../api/platform';
 import { useAppStore } from '../store/appStore';
 import type { AssetItem } from '../types';
-
-type AuditType = 'pet' | 'agent';
 
 function AssetCard({
   item,
@@ -47,17 +45,16 @@ function AssetCard({
 export default function AdminScreen(): React.JSX.Element {
   const user = useAppStore((s) => s.user);
   const insets = useSafeAreaInsets();
-  const [type, setType] = useState<AuditType>('pet');
   const [items, setItems] = useState<AssetItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
 
-  const load = useCallback(async (t: AuditType): Promise<void> => {
+  const load = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError('');
     try {
-      const res = await listAssets(t, { status: 'pending', limit: 50, sort: 'createdAt' });
+      const res = await listAssets({ status: 'pending', limit: 50, sort: 'createdAt' });
       setItems(res.items);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -67,14 +64,14 @@ export default function AdminScreen(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void load(type);
-  }, [type, load]);
+    void load();
+  }, [load]);
 
   const updateStatus = async (asset: AssetItem, action: 'approve' | 'reject'): Promise<void> => {
     if (busyId) return;
     setBusyId(asset.id);
     try {
-      await (action === 'approve' ? approveAsset(type, asset.id) : rejectAsset(type, asset.id));
+      await (action === 'approve' ? approveAsset(asset.id) : rejectAsset(asset.id));
       setItems((list) => list.filter((x) => x.id !== asset.id));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -94,12 +91,8 @@ export default function AdminScreen(): React.JSX.Element {
   return (
     <View style={styles.container}>
       <View style={[styles.tabs, { paddingTop: insets.top + 10 }]}>
-        {([['pet', '待审宠物'], ['agent', '待审智能体']] as Array<[AuditType, string]>).map(([key, label]) => (
-          <Pressable key={key} style={[styles.tab, type === key && styles.tabActive]} onPress={() => setType(key)}>
-            <Text style={[styles.tabText, type === key && styles.tabTextActive]}>{label}</Text>
-          </Pressable>
-        ))}
-        <Pressable style={styles.reload} onPress={() => void load(type)}>
+        <Text style={styles.tabTitle}>待审智能体</Text>
+        <Pressable style={styles.reload} onPress={() => void load()}>
           <Text style={styles.reloadText}>刷新</Text>
         </Pressable>
       </View>
@@ -112,7 +105,7 @@ export default function AdminScreen(): React.JSX.Element {
         data={items}
         keyExtractor={(item) => item.id}
         refreshing={loading}
-        onRefresh={() => void load(type)}
+        onRefresh={() => void load()}
         ListEmptyComponent={
           loading ? undefined : <Text style={styles.empty}>{error ? '加载失败，下拉重试' : '当前没有待审核资源'}</Text>
         }
@@ -134,10 +127,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   centerText: { color: '#999', fontSize: 14 },
   tabs: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: '#fff', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
-  tab: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 16, backgroundColor: '#F2F3F5', marginRight: 8 },
-  tabActive: { backgroundColor: '#1C6EF2' },
-  tabText: { fontSize: 13, color: '#666' },
-  tabTextActive: { color: '#fff', fontWeight: '600' },
+  tabTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
   reload: { marginLeft: 'auto', paddingHorizontal: 8 },
   reloadText: { fontSize: 13, color: '#1C6EF2' },
   error: { color: '#E5484D', fontSize: 12, paddingHorizontal: 16, paddingTop: 8 },

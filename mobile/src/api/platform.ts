@@ -154,31 +154,16 @@ export async function toolFootball(date?: string): Promise<Record<string, unknow
   return request<Record<string, unknown>>(`/tools/football${q}`);
 }
 
-// --- 资源列表 ---
+// --- 资源列表（智能体） ---
 export interface ListAssetParams {
   search?: string;
   status?: string;
   page?: number;
   limit?: number;
   sort?: string;
-  /** 只看包含指定本体类型的宠物包（body-model / body-animation / body-still） */
-  bodyKind?: string;
 }
 
-/** 资源载体路径：宠物 = 宠物包（/pet-packs），智能体仍为 /agents */
-function assetPath(type: 'pet' | 'agent'): string {
-  return type === 'pet' ? 'pet-packs' : 'agents';
-}
-
-/**
- * admin 审核载体名：与「评价域资源类型」(`pet`/`agent`) **刻意不同名**——
- * 见后端 `admin.controller.ts`：宠物载体叫 `pet_pack`，智能体保持 `agent`。
- */
-function adminCarrierName(type: 'pet' | 'agent'): string {
-  return type === 'pet' ? 'pet_pack' : 'agent';
-}
-
-export async function listAssets(type: 'pet' | 'agent', params?: ListAssetParams | string): Promise<{ items: AssetItem[]; total: number }> {
+export async function listAssets(params?: ListAssetParams | string): Promise<{ items: AssetItem[]; total: number }> {
   let query = '';
   if (typeof params === 'string') {
     query = params ? `?search=${encodeURIComponent(params)}` : '';
@@ -189,46 +174,35 @@ export async function listAssets(type: 'pet' | 'agent', params?: ListAssetParams
     if (params.page) usp.set('page', String(params.page));
     if (params.limit) usp.set('limit', String(params.limit));
     if (params.sort) usp.set('sort', params.sort);
-    if (params.bodyKind) usp.set('bodyKind', params.bodyKind);
     query = usp.toString() ? `?${usp.toString()}` : '';
   }
-  const res = await request<{ items: AssetItem[]; total: number }>(`/${assetPath(type)}${query}`);
+  const res = await request<{ items: AssetItem[]; total: number }>(`/agents${query}`);
   // 平台返回 items/total，兼容直接返回数组
   return Array.isArray(res) ? { items: res, total: res.length } : res;
 }
 
 // --- 管理员审核（需 admin 角色，后端 RolesGuard 校验） ---
-export async function approveAsset(type: 'pet' | 'agent', id: string): Promise<void> {
-  await request(`/admin/approve/${adminCarrierName(type)}/${id}`, { method: 'POST' });
+export async function approveAsset(id: string): Promise<void> {
+  await request(`/admin/approve/agent/${id}`, { method: 'POST' });
 }
 
-export async function rejectAsset(type: 'pet' | 'agent', id: string): Promise<void> {
-  await request(`/admin/reject/${adminCarrierName(type)}/${id}`, { method: 'POST' });
+export async function rejectAsset(id: string): Promise<void> {
+  await request(`/admin/reject/agent/${id}`, { method: 'POST' });
 }
 
-export async function getAssetDetail(type: 'pet' | 'agent', id: string): Promise<AssetItem> {
-  return request<AssetItem>(`/${assetPath(type)}/${id}`);
+export async function getAssetDetail(id: string): Promise<AssetItem> {
+  return request<AssetItem>(`/agents/${id}`);
 }
 
-/**
- * 下载资源：触发后端计数并返回可直接使用的文件 URL。
- * 宠物返回的是**包 zip**（另有 sha256 / 体积 / 版本）；移动端不做 sha256 校验——
- * RN 无内置摘要原语，为一个校验引入新依赖不划算，服务端校验 + 专用签名 URL 是当前边界。
- */
-export async function downloadAsset(
-  type: 'pet' | 'agent',
-  id: string,
-): Promise<{ url: string; sha256?: string; bytes?: number | null; version?: string }> {
-  const res = await request<{ url: string; sha256?: string; bytes?: number | null; version?: string }>(
-    `/${assetPath(type)}/${id}/download`,
-    { method: 'POST' },
-  );
+/** 下载资源：触发后端计数并返回可直接使用的文件 URL */
+export async function downloadAsset(id: string): Promise<{ url: string; version?: string }> {
+  const res = await request<{ url: string; version?: string }>(`/agents/${id}/download`, { method: 'POST' });
   const { baseUrl } = useAppStore.getState();
   const root = baseUrl.replace(/\/api\/?$/, '');
   return { ...res, url: new URL(res.url, `${root}/`).toString() };
 }
 
-// --- 音色资产（商店「音色」板块；返回结构与 pets/agents 不同，独立一套） ---
+// --- 音色资产（商店「音色」板块；返回结构与 agents 不同，独立一套） ---
 export interface VoiceAssetItem {
   id: string;
   name: string;
@@ -338,7 +312,7 @@ export async function verifyDependency(options: {
 }
 
 // --- 用户数据云同步（与桌面端 cloudSync.ts 对齐的 kind 命名） ---
-type SyncKind = 'config' | 'pet-state' | 'chat-history' | 'library';
+type SyncKind = 'config' | 'chat-history' | 'library';
 
 export async function syncGet(kind: SyncKind): Promise<{ data: unknown; updatedAt: string | null }> {
   return request<{ data: unknown; updatedAt: string | null }>(`/sync/${kind}`);

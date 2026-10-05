@@ -1,6 +1,5 @@
 /**
  * 主壳：应用直接进入聊天界面（DeepSeek 式单页）。
- * - 宠物以应用内悬浮形态常驻最上层（FloatingPet，可拖动、三连击互动）
  * - 左上汉堡或全屏右滑打开商店抽屉（StoreDrawer），抽屉内左滑返回聊天
  * - 抽屉底部头像/… → 用户设置（DeepSeek 样式设置页，全屏弹层）
  * - 管理员可从抽屉进入内容审核（AdminScreen，全屏弹层）
@@ -12,15 +11,14 @@ import ChatScreen from '../screens/ChatScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AdminScreen from '../screens/AdminScreen';
 import StoreDrawer from '../components/StoreDrawer';
-import FloatingPet from '../pet/FloatingPet';
 import { usePetTaskScheduler } from '../petTaskScheduler';
 import { usePetProactive } from '../petProactive';
 
 export default function MainShell(): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  // 宠物定时任务调度：前台期间扫描到期任务，到点由智能体主动发消息（见 petTaskScheduler.ts）
+  // 定时任务调度：前台期间扫描到期任务，到点由智能体主动发消息（见 petTaskScheduler.ts）
   usePetTaskScheduler();
-  // 自主主动搭话：无用户排期时宠物也会按间隔来找你说话（见 petProactive.ts）
+  // 自主主动搭话：无用户排期时智能体也会按间隔来找你说话（见 petProactive.ts）
   usePetProactive();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -44,7 +42,6 @@ export default function MainShell(): React.JSX.Element {
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }} {...swipeOpenPan.panHandlers}>
       <ChatScreen onOpenDrawer={() => setDrawerOpen(true)} />
-      <FloatingPet />
       <StoreDrawer
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}

@@ -1,6 +1,6 @@
 /** 与桌面端共享的数据结构（经平台 /api/sync/* 同步） */
 
-/** LLM API 档案 = 智能体：每个档案就是一个独立智能体，绑定专属宠物形象与独立对话
+/** LLM API 档案 = 智能体：每个档案就是一个独立智能体，人设 + 独立对话
  *  桌面端 config.llmProfiles 同构，Key 服务端加密落库、传输时解密 */
 export interface LlmProfile {
   id: string;
@@ -11,8 +11,6 @@ export interface LlmProfile {
   model: string;
   /** 智能体人设（系统提示词） */
   systemPrompt?: string;
-  /** 绑定的宠物形象 ID（一个智能体必须且只能绑定一个宠物形象） */
-  petAssetId?: string;
   // ── 智能体页面 P0 扩展字段（均可选，旧数据向后兼容）──
   /** 头像（emoji 或文字，不填默认取 name 首字符） */
   avatar?: string;
@@ -169,16 +167,6 @@ export interface AgentMultiConfig {
   credentials: Record<string, string>;
 }
 
-/** 宠物状态（与桌面端 petStore 同构） */
-export interface PetState {
-  hunger: number; // 饱足感 0-100，100 为饱
-  mood: number; // 心情 0-100
-  energy: number; // 精力 0-100
-  affection: number; // 好感度 0-100，只增不减
-}
-
-export const DEFAULT_PET_STATE: PetState = { hunger: 80, mood: 80, energy: 80, affection: 50 };
-
 export interface ChatMsg {
   /** 消息稳定 id（历史消息可能没有，渲染时回退下标） */
   id?: string;
@@ -196,7 +184,7 @@ export interface ChatMsg {
   error?: boolean;
 }
 
-/** 宠物定时任务：用户让宠物在指定时间做的事（提醒/主动搭话），到点由智能体主动发消息 */
+/** 定时任务：用户让智能体在指定时间做的事（提醒/主动搭话），到点由智能体主动发消息 */
 export interface PetTask {
   id: string;
   /** 归属智能体档案（每个智能体自己的任务） */
@@ -221,12 +209,10 @@ export interface PetTask {
 
 /** 聊天人设：来自平台智能体 JSON（installedAgentConfig）或默认 */
 export interface AgentConfig {
-  /** 智能体唯一 ID（安装时生成，用于隔离消息与绑定形象） */
+  /** 智能体唯一 ID（安装时生成，用于隔离消息） */
   id: string;
   name?: string;
   systemPrompt?: string;
-  /** 绑定的宠物形象 ID（一个智能体必须且只能绑定一个宠物形象） */
-  petAssetId?: string;
   [key: string]: unknown;
 }
 
@@ -237,53 +223,14 @@ export interface PlatformUser {
   role?: string;
 }
 
-/** 宠物资源形态（与桌面端 PetFormat 一致） */
-export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
-
-/** 宠物本体类型（服务端由宠物包校验派生，不是用户填写） */
-export type PetBodyKind = 'body-model' | 'body-animation' | 'body-still';
-
-/** 商店资源条目（pet-packs / agents 列表通用） */
+/** 商店资源条目（agents 列表通用） */
 export interface AssetItem {
   id: string;
   name: string;
-  /** 智能体：配置文件地址（宠物包已改用 packUrl） */
+  /** 智能体：配置文件地址 */
   fileUrl?: string;
-  /** 宠物包 zip 地址（新契约：宠物只以包分发） */
-  packUrl?: string;
-  /** 包体 sha256 / 体积 / 服务端校验快照（含本体入口 manifest.entry） */
-  packSha256?: string;
-  packBytes?: number | null;
-  bodyKinds?: PetBodyKind[];
-  manifest?: { entry?: { path?: string; role?: string } | null; [key: string]: unknown } | null;
   format?: string;
   downloads?: number;
   description?: string | null;
   [key: string]: unknown;
-}
-
-const PET_IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
-
-/** 宠物包内**本体入口**（服务端校验快照 manifest.entry）：相对包根的路径 + 派生角色 */
-export function petEntryOf(item: AssetItem): { path: string; role: string } | null {
-  const entry = item.manifest?.entry;
-  if (!entry || typeof entry.path !== 'string' || !entry.path) return null;
-  return { path: entry.path, role: typeof entry.role === 'string' ? entry.role : '' };
-}
-
-/**
- * 宠物包 → 移动端渲染形态。新契约里服务端**不再返回 format**，改由包内本体入口推断：
- *  - Live2D / 3D 模型入口 → 走 WebView overlay；
- *  - `body-animation` 且入口是栅格图（帧序列的一帧）→ 按帧序列播放（沿用 'pack'）；
- *  - 其余（含 body-still）→ 单图。
- * 注：入口是 **webm 视频**（kind=video 的本体）时移动端无法渲染，会落到单图分支并提示加载失败——
- * 移动端当前不播放透明视频动作，这是刻意的能力边界而不是静默失败。
- */
-export function petFormatOfPack(item: AssetItem): PetFormat {
-  const entry = petEntryOf(item);
-  const p = entry?.path ?? '';
-  if (/\.(model3|live2d(-lite)?)\.json$/i.test(p)) return 'live2d';
-  if (/\.(glb|gltf|vrm|fbx|obj)$/i.test(p)) return 'model3d';
-  if (entry?.role === 'body-animation' && PET_IMAGE_RE.test(p)) return 'pack';
-  return 'image';
 }

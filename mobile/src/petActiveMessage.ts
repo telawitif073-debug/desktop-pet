@@ -1,19 +1,10 @@
 /**
  * 「智能体主动开口」消息生成（定时任务到点 / 自主主动搭话共用）：
- * 按智能体人设 + 实时时间 + 语境（到点正事 / 纯闲聊 / 宠物状态提示）调用该档案的 LLM，
+ * 按智能体人设 + 实时时间 + 语境（到点正事 / 纯闲聊）调用该档案的 LLM，
  * 生成一句自然的主动开场。非流式、60s 超时；失败由调用方降级（任务）或跳过（自主搭话）。
  */
 import type { LlmProfile } from './types';
 import { buildProactivePrompt } from './petCapabilities';
-
-/** 宠物状态 → 主动搭话提示（饥饿/心情/精力偏低时围绕状态自然开口） */
-export function proactiveStateHint(state: { hunger: number; mood: number; energy: number }): string {
-  const hints: string[] = [];
-  if (state.hunger < 30) hints.push('你现在很饿，自然地提一句想让主人喂你');
-  if (state.energy < 30) hints.push('你现在有点困/累，自然地说想休息');
-  if (state.mood < 30) hints.push('你现在心情低落，自然地想找主人陪你玩');
-  return hints.join('；');
-}
 
 export interface ActiveMessageContext {
   /** 到点要说的正事（提醒内容或搭话话题）；为空表示纯闲聊 */
@@ -22,8 +13,6 @@ export interface ActiveMessageContext {
   rawText?: string;
   /** 任务类别：reminder=到点提醒 ta 做某事；active_chat=到点按话题搭话 */
   kind?: 'reminder' | 'active_chat';
-  /** 宠物状态提示（自主搭话用），可为空 */
-  stateHint?: string;
 }
 
 /** 生成主动消息正文（失败抛错，由调用方决定降级/跳过） */
@@ -39,7 +28,6 @@ export async function generateActiveMessage(profile: LlmProfile, ctx: ActiveMess
   } else {
     lines.push('【这是你主动来找用户搭话的时刻：没有特别的事，就是想 ta 了，自然地说点关心/日常/打趣的短句】');
   }
-  if (ctx.stateHint) lines.push(`【你现在的状态（可自然融入，别生硬罗列）：${ctx.stateHint}】`);
   // 该智能体自带「主动发起对话」能力时，把能力要求（含它自己的时段约束）一并合成进提示词
   if (profile.capabilities?.enabled?.includes('proactive')) {
     lines.push(buildProactivePrompt(profile.capabilities.spec));

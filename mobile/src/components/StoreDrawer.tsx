@@ -1,6 +1,6 @@
 /**
  * DeepSeek 式侧边抽屉（替代原商店 Tab）：左上汉堡按钮或聊天页全屏右滑打开，抽屉内左滑返回；
- * 内容 = 资源商店（宠物/智能体搜索、安装），最下层左侧用户头像 → 用户设置，右侧 … → 用户设置。
+ * 内容 = 资源商店（智能体/音色搜索、安装），最下层左侧用户头像 → 用户设置，右侧 … → 用户设置。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -8,8 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as platform from '../api/platform';
 import { scheduleUpload } from '../api/sync';
 import { useAppStore } from '../store/appStore';
-import { unzipPetPack } from '../pet/petFiles';
-import { petEntryOf, petFormatOfPack, type AssetItem, type InstalledVoice } from '../types';
+import { type AssetItem, type InstalledVoice } from '../types';
 import { cloudVoiceReady, previewInstalled, stopAllVoice } from '../voiceEngine';
 import { VOICE_GUIDE } from './voiceGuide';
 import PublishVoiceModal from './PublishVoiceModal';
@@ -28,12 +27,6 @@ interface DetailAsset extends AssetItem {
   dependencies?: string[];
   configSchema?: Record<string, unknown> | null;
   author?: { id?: string; username?: string } | null;
-}
-
-/** 宠物形态文案：新契约不再返回 format，改由包内本体入口（manifest.entry）派生 */
-function petFormatLabel(item: AssetItem): string {
-  const f = petFormatOfPack(item);
-  return f === 'image' ? '静态形象' : f === 'pack' ? '帧动画' : f === 'live2d' ? 'Live2D' : '3D 模型';
 }
 
 function agentTypeLabel(type?: string): string {
@@ -80,7 +73,7 @@ export default function StoreDrawer({
   onOpenAdmin: () => void;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<'pet' | 'agent' | 'voice'>('pet');
+  const [tab, setTab] = useState<'agent' | 'voice'>('agent');
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<AssetItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -89,7 +82,7 @@ export default function StoreDrawer({
   const [detail, setDetail] = useState<DetailAsset | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
-  // ── 音色板块独立数据（voices 接口结构与 pets/agents 不同，单独一套 state） ──
+  // ── 音色板块独立数据（voices 接口结构与 agents 不同，单独一套 state） ──
   const [voiceItems, setVoiceItems] = useState<platform.VoiceAssetItem[]>([]);
   const [voiceDetail, setVoiceDetail] = useState<platform.VoiceAssetItem | null>(null);
   const [previewingId, setPreviewingId] = useState('');
@@ -113,8 +106,6 @@ export default function StoreDrawer({
       ),
     [llmProfilesForPick, apiPickTargetId],
   );
-  const currentPetId = useAppStore((s) => s.petAsset?.id);
-  const downloadedPets = useAppStore((s) => s.downloadedPets);
   const downloadedVoices = useAppStore((s) => s.downloadedVoices);
   const activeCloudVoiceId = useAppStore((s) => s.activeCloudVoiceId);
   const token = useAppStore((s) => s.token);
@@ -148,7 +139,7 @@ export default function StoreDrawer({
         const res = await platform.listVoices(search.trim() ? { search: search.trim() } : undefined);
         setVoiceItems(res.items);
       } else {
-        const res = await platform.listAssets(tab, search.trim() || undefined);
+        const res = await platform.listAssets(search.trim() || undefined);
         setItems(res.items);
       }
     } catch {
@@ -180,7 +171,7 @@ export default function StoreDrawer({
           setDetailLoading(false);
           return;
         }
-        const d = (await platform.getAssetDetail(tab, item.id)) as DetailAsset;
+        const d = (await platform.getAssetDetail(item.id)) as DetailAsset;
         setDetail(d);
         // 智能体：额外拉取配置 JSON（fileUrl 即配置包），用于展示提示词/依赖/JSON
         if (tab === 'agent' && d.fileUrl) {
@@ -218,83 +209,52 @@ export default function StoreDrawer({
   const install = async (item: AssetItem): Promise<void> => {
     setBusyId(item.id);
     try {
-      if (tab === 'pet') {
-        const detail = await platform.getAssetDetail('pet', item.id);
-        const packUrl = detail.packUrl ?? '';
-        if (!packUrl) throw new Error('该宠物包缺少 zip 地址，无法安装');
-        await platform.downloadAsset('pet', item.id);
-        const format = petFormatOfPack(detail);
-        const entry = petEntryOf(detail);
-        // 解压到本机（离线可用）；解压失败仍入库，渲染时会再补一次、失败才提示
-        let localPath: string | undefined;
-        try {
-          const dir = await unzipPetPack(detail.id, packUrl);
-          localPath = entry?.path ? `${dir}/${entry.path}` : undefined;
-        } catch {
-          localPath = undefined;
-        }
-        const ref = { id: detail.id, name: detail.name, format, packUrl, entryPath: entry?.path, localPath };
-        const store = useAppStore.getState();
-        const list = store.downloadedPets.filter((p) => p.id !== ref.id);
-        // 下载仅入库，不切换当前宠物：宠物跟随当前智能体绑定（严格绑定），可到「智能体管理」中绑定
-        store.patch({ downloadedPets: [...list, ref] });
-        scheduleUpload('config');
-        Alert.alert('已下载', `${detail.name} 已下载，可在「智能体管理 → 编辑 → 绑定宠物形象」中绑定给智能体使用`);
-      } else {
-        const detail = await platform.getAssetDetail('agent', item.id);
-        await platform.downloadAsset('agent', item.id);
-        const res = await fetch(platform.assetUrl(detail.fileUrl ?? ''));
-        const config = (await res.json().catch(() => ({}))) as { name?: string; systemPrompt?: string };
-        const agentName = config.name ?? detail.name;
-        const agentPrompt = String(config.systemPrompt ?? '').trim();
-        const store = useAppStore.getState();
-        // LlmProfile = 智能体：先创建（人设+绑定当前宠物形象，API 留空），再让用户绑定对话 API
-        const newId = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-        // 严格绑定：仅当「当前宠物已在本地下载」时才绑定形象并直接激活；否则只创建，提示先去下载形象
-        const bindPet = store.petAsset ? store.downloadedPets.find((p) => p.id === store.petAsset?.id) ?? null : null;
-        // 已有可用对话 API（key/接口/模型齐全）的档案（不含刚创建的）
-        const candidates = store.llmProfiles.filter(
-          (p) => p.id !== newId && (p.apiKey ?? '').trim() && (p.baseUrl ?? '').trim() && (p.model ?? '').trim(),
+      const detail = await platform.getAssetDetail(item.id);
+      await platform.downloadAsset(item.id);
+      const res = await fetch(platform.assetUrl(detail.fileUrl ?? ''));
+      const config = (await res.json().catch(() => ({}))) as { name?: string; systemPrompt?: string };
+      const agentName = config.name ?? detail.name;
+      const agentPrompt = String(config.systemPrompt ?? '').trim();
+      const store = useAppStore.getState();
+      // LlmProfile = 智能体：先创建（人设，API 留空），再让用户绑定对话 API
+      const newId = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      // 已有可用对话 API（key/接口/模型齐全）的档案（不含刚创建的）
+      const candidates = store.llmProfiles.filter(
+        (p) => p.id !== newId && (p.apiKey ?? '').trim() && (p.baseUrl ?? '').trim() && (p.model ?? '').trim(),
+      );
+      const newProfile = {
+        id: newId,
+        name: agentName,
+        apiKey: '',
+        baseUrl: '',
+        model: '',
+        systemPrompt: agentPrompt,
+      };
+      store.patch({
+        llmProfiles: [...store.llmProfiles, newProfile],
+        llmActiveProfileId: newId,
+      });
+      scheduleUpload('config');
+      if (candidates.length === 1) {
+        // 只有一个可用 API：不询问，自动绑定
+        const src = candidates[0];
+        applyApiToProfile(newId, src);
+        Alert.alert('已安装', `${agentName} 已创建为新智能体，已自动使用「${src.name}」的 API 配置`, [{ text: '好的' }]);
+      } else if (candidates.length > 1) {
+        // 多个可用 API：询问用户绑定哪个
+        setApiPickTargetId(newId);
+        setApiPickVisible(true);
+        Alert.alert(
+          '已安装',
+          `${agentName} 已创建为新智能体，请选择对话时使用的 API（暂不选择也可以在智能体管理中稍后配置）`,
+          [{ text: '选择 API', onPress: () => setApiPickVisible(false) }],
         );
-        const newProfile = {
-          id: newId,
-          name: agentName,
-          apiKey: '',
-          baseUrl: '',
-          model: '',
-          systemPrompt: agentPrompt,
-          petAssetId: bindPet?.id,
-        };
-        store.patch({
-          llmProfiles: [...store.llmProfiles, newProfile],
-          ...(bindPet ? { llmActiveProfileId: newId } : {}),
-        });
-        scheduleUpload('config');
-        // 严格绑定：无已下载形象可绑定时，智能体只创建不激活
-        const unboundNote = bindPet
-          ? ''
-          : '\n该智能体暂未激活：还没有已下载的宠物形象可绑定，请先在商店下载宠物形象，再到「智能体管理 → 编辑」中绑定后使用';
-        if (candidates.length === 1) {
-          // 只有一个可用 API：不询问，自动绑定
-          const src = candidates[0];
-          applyApiToProfile(newId, src);
-          Alert.alert('已安装', `${agentName} 已创建为新智能体，已自动使用「${src.name}」的 API 配置，并绑定当前宠物形象${unboundNote}`, [{ text: '好的' }]);
-        } else if (candidates.length > 1) {
-          // 多个可用 API：询问用户绑定哪个
-          setApiPickTargetId(newId);
-          setApiPickVisible(true);
-          Alert.alert(
-            '已安装',
-            `${agentName} 已创建为新智能体，请选择对话时使用的 API（暂不选择也可以在智能体管理中稍后配置）${unboundNote}`,
-            [{ text: '选择 API', onPress: () => setApiPickVisible(false) }],
-          );
-        } else {
-          // 没有可用 API：提示去配置
-          Alert.alert(
-            '已安装',
-            `${agentName} 已创建为新智能体（人设已应用），但没有可用的对话 API，请到智能体管理中填写 API Key、接口地址和模型后才能聊天${unboundNote}`,
-          );
-        }
+      } else {
+        // 没有可用 API：提示去配置
+        Alert.alert(
+          '已安装',
+          `${agentName} 已创建为新智能体（人设已应用），但没有可用的对话 API，请到智能体管理中填写 API Key、接口地址和模型后才能聊天`,
+        );
       }
     } catch (e) {
       Alert.alert('安装失败', e instanceof Error ? e.message : String(e));
@@ -392,7 +352,7 @@ export default function StoreDrawer({
         );
         return;
       }
-      Alert.alert('音色已安装', `「${iv.name}」已保存到本机，是否立即设为宠物的朗读声音？`, [
+      Alert.alert('音色已安装', `「${iv.name}」已保存到本机，是否立即设为朗读声音？`, [
         { text: '立即启用', onPress: () => activateVoice(iv.id) },
         { text: '试听', onPress: () => void previewVoice(v) },
         { text: '稍后' },
@@ -405,10 +365,7 @@ export default function StoreDrawer({
   };
 
   const detailItem = selected;
-  const detailIsCurrent = tab === 'pet' && !!detailItem && currentPetId === detailItem.id;
-  // 已下载判断：只要已下载到本机就视为「已安装」，不再显示可安装（当前形象单独标识）
-  const detailIsDownloaded = tab === 'pet' && !!detailItem && downloadedPets.some((p) => p.id === detailItem.id);
-  // 详情大图：宠物只展示卡片预览图（preview_url）——本体在包内，没有可直链的单图
+  // 详情大图：展示卡片预览图（preview_url）
   const detailImgSource = (() => {
     if (!detail || imgError) return null;
     const url = detail.previewUrl || null;
@@ -543,7 +500,7 @@ export default function StoreDrawer({
                 )}
                 <View style={styles.detailBadgeRow}>
                   <View style={styles.detailBadge}>
-                    <Text style={styles.detailBadgeText}>{tab === 'pet' ? petFormatLabel(detail) : agentTypeLabel(detail.type)}</Text>
+                    <Text style={styles.detailBadgeText}>{agentTypeLabel(detail.type)}</Text>
                   </View>
                   {typeof detail.version === 'string' && <Text style={styles.detailVersion}>v{detail.version}</Text>}
                 </View>
@@ -607,12 +564,12 @@ export default function StoreDrawer({
                   </>
                 )}
                 <Pressable
-                  style={[styles.installBig, (detailIsCurrent || detailIsDownloaded) && styles.installDisabled]}
-                  disabled={!!busyId || detailIsCurrent || detailIsDownloaded}
+                  style={[styles.installBig, busyId === detail.id && styles.installDisabled]}
+                  disabled={!!busyId}
                   onPress={() => void install(detail as DetailAsset)}
                 >
                   <Text style={styles.installBigText}>
-                    {detailIsCurrent ? '已安装 · 当前形象' : detailIsDownloaded ? '已下载' : busyId === detail.id ? '安装中…' : '安装'}
+                    {busyId === detail.id ? '安装中…' : '安装'}
                   </Text>
                 </Pressable>
               </ScrollView>
@@ -624,7 +581,7 @@ export default function StoreDrawer({
               <Text style={styles.searchIcon}>⌕</Text>
               <TextInput
                 style={styles.search}
-                placeholder={tab === 'voice' ? '搜索音色…' : '搜索宠物 / 智能体…'}
+                placeholder={tab === 'voice' ? '搜索音色…' : '搜索智能体…'}
                 placeholderTextColor="#B2B2B2"
                 value={search}
                 onChangeText={setSearch}
@@ -634,10 +591,10 @@ export default function StoreDrawer({
             </View>
 
             <View style={styles.tabs}>
-              {(['pet', 'agent', 'voice'] as const).map((t) => (
+              {(['agent', 'voice'] as const).map((t) => (
                 <Pressable key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
                   <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-                    {t === 'pet' ? '宠物' : t === 'agent' ? '智能体' : '音色'}
+                    {t === 'agent' ? '智能体' : '音色'}
                   </Text>
                 </Pressable>
               ))}
@@ -710,15 +667,9 @@ export default function StoreDrawer({
                 keyExtractor={(item) => item.id}
                 ListEmptyComponent={<Text style={styles.empty}>暂无资源</Text>}
                 renderItem={({ item }) => {
-                  const isCurrent = tab === 'pet' && currentPetId === item.id;
-                  // 已下载到本机的宠物不再显示「安装」（删除本机形象后才恢复可安装）
-                  const isDownloaded = tab === 'pet' && downloadedPets.some((p) => p.id === item.id);
-                  const btnDisabled = !!busyId || isCurrent || isDownloaded;
-                  const btnText = isCurrent ? '当前' : isDownloaded ? '已下载' : busyId === item.id ? '…' : '安装';
-                  const meta =
-                    tab === 'agent'
-                      ? `智能体${typeof item.downloads === 'number' ? ` · ${item.downloads} 次下载` : ''}`
-                      : `${petFormatLabel(item)}${typeof item.downloads === 'number' ? ` · ${item.downloads} 次下载` : ''}`;
+                  const btnDisabled = !!busyId;
+                  const btnText = busyId === item.id ? '…' : '安装';
+                  const meta = `智能体${typeof item.downloads === 'number' ? ` · ${item.downloads} 次下载` : ''}`;
                   return (
                     <View style={styles.item}>
                       <Pressable style={{ flex: 1 }} onPress={() => void openDetail(item)}>
