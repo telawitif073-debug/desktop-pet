@@ -19,8 +19,8 @@ export class User {
   /**
    * 密码哈希：**绝不能出现在任何响应里**。
    * `select: false` 让所有查询默认不带出该列——包括 `leftJoinAndSelect('x.author', 'author')`
-   * 这类关系加载（它们不会经过 `UsersService.sanitize`，曾经把该列泄露到 /agents、/pet-packs
-   * 等公开接口）。只有显式 `.addSelect('user.passwordHash')` 才取得到，目前仅登录校验需要。
+   * 这类关系加载（它们不会经过 `UsersService.sanitize`，曾经把该列泄露到公开列表接口）。
+   * 只有显式 `.addSelect('user.passwordHash')` 才取得到，目前仅登录校验需要。
    */
   @Column({ name: 'password_hash', type: 'varchar', length: 255, select: false })
   passwordHash: string;

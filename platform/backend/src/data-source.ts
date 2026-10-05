@@ -8,8 +8,7 @@ import { DataSource, type DataSourceOptions } from 'typeorm';
  * ===========================================================================
  * 为什么需要这个文件：
  * 过去 `app.module.ts` 里写死了 `synchronize: true`——开发期方便，但意味着
- * **删掉一个实体就会自动 DROP 对应表**。宠物功能域重建（见
- * `.trae/documents/pet-domain-rebuild.md` Phase 4）必须删实体，因此必须先把
+ * **删掉一个实体就会自动 DROP 对应表**。任何删实体/删表的重构都必须先把
  * 表结构变更收敛到**显式 migration**，否则删代码等于静默删数据。
  *
  * 约定：

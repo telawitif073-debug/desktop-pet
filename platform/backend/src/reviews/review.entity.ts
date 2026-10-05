@@ -10,15 +10,10 @@ import {
 import { User } from '../users/user.entity';
 
 /**
- * 评价针对的独立资源类型。
- *  - `agent` → agent_assets，`voice` → voice_assets，`pet` → **pet_packs（宠物包）**；
- *  - `action` 为历史保留值（动作已并入宠物包内的 pet/actions.json，不再有独立资产表）。
- *
- * 注：`'pet'` 语义没变（载体从「单个文件」变成「包」），因此枚举值沿用旧名而非新造
- * `pet_pack`——跨端与历史数据的 `asset_type` 口径保持不变；
- * 在 migration 1791036000000 中被剔除后，由 1791041000000 回补。
+ * 评价针对的独立资源类型：`agent` → agent_assets，`voice` → voice_assets。
+ * （历史值 `action` / `pet` 随宠物系统整体下线，已由 migration 1791100000000 从枚举中移除。）
  */
-export type AssetType = 'agent' | 'action' | 'voice' | 'pet';
+export type AssetType = 'agent' | 'voice';
 
 @Entity('reviews')
 @Index(['assetType', 'assetId'])
@@ -33,8 +28,7 @@ export class Review {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  // 'action' 为历史保留值；'pet' 指向 pet_packs（宠物包），由 migration 1791041000000 回补
-  @Column({ name: 'asset_type', type: 'enum', enum: ['agent', 'action', 'voice', 'pet'] })
+  @Column({ name: 'asset_type', type: 'enum', enum: ['agent', 'voice'] })
   assetType: AssetType;
 
   @Column({ name: 'asset_id', type: 'uuid' })

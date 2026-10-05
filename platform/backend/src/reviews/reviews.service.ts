@@ -5,7 +5,6 @@ import { Review, AssetType } from './review.entity';
 import { DownloadRecord } from './download-record.entity';
 import { AgentAsset } from '../agents/agent-asset.entity';
 import { VoiceAsset } from '../voices/voice-asset.entity';
-import { PetPack } from '../pet-packs/pet-pack.entity';
 
 @Injectable()
 export class ReviewsService {
@@ -18,8 +17,6 @@ export class ReviewsService {
     private readonly agentsRepo: Repository<AgentAsset>,
     @InjectRepository(VoiceAsset)
     private readonly voicesRepo: Repository<VoiceAsset>,
-    @InjectRepository(PetPack)
-    private readonly petPacksRepo: Repository<PetPack>,
   ) {}
 
   listForAsset(assetType: AssetType, assetId: string) {
@@ -81,16 +78,13 @@ export class ReviewsService {
 
     const agentIds = [...latest.values()].filter((r) => r.assetType === 'agent').map((r) => r.assetId);
     const voiceIds = [...latest.values()].filter((r) => r.assetType === 'voice').map((r) => r.assetId);
-    const petIds = [...latest.values()].filter((r) => r.assetType === 'pet').map((r) => r.assetId);
-    const [agents, voices, pets] = await Promise.all([
+    const [agents, voices] = await Promise.all([
       agentIds.length ? this.agentsRepo.find({ where: { id: In(agentIds) } }) : Promise.resolve([]),
       voiceIds.length ? this.voicesRepo.find({ where: { id: In(voiceIds) } }) : Promise.resolve([]),
-      petIds.length ? this.petPacksRepo.find({ where: { id: In(petIds) } }) : Promise.resolve([]),
     ]);
-    const assetMap = new Map<string, AgentAsset | VoiceAsset | PetPack>();
+    const assetMap = new Map<string, AgentAsset | VoiceAsset>();
     agents.forEach((asset) => assetMap.set(`agent:${asset.id}`, asset));
     voices.forEach((asset) => assetMap.set(`voice:${asset.id}`, asset));
-    pets.forEach((asset) => assetMap.set(`pet:${asset.id}`, asset));
 
     return [...latest.entries()]
       .map(([key, record]) => ({
@@ -126,12 +120,6 @@ export class ReviewsService {
       }
       return;
     }
-    if (assetType === 'pet') {
-      if (!(await this.petPacksRepo.findOne({ where: { id: assetId } }))) {
-        throw new NotFoundException('宠物包不存在');
-      }
-      return;
-    }
     if (!(await this.agentsRepo.findOne({ where: { id: assetId } }))) {
       throw new NotFoundException('智能体资源不存在');
     }
@@ -148,8 +136,6 @@ export class ReviewsService {
         : 0;
     if (assetType === 'voice') {
       await this.voicesRepo.update({ id: assetId }, { rating });
-    } else if (assetType === 'pet') {
-      await this.petPacksRepo.update({ id: assetId }, { rating });
     } else {
       await this.agentsRepo.update({ id: assetId }, { rating });
     }

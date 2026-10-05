@@ -16,7 +16,7 @@ import { User } from '../users/user.entity';
 import { AssetType } from './review.entity';
 
 class CreateReviewDto {
-  @IsIn(['pet', 'agent'])
+  @IsIn(['agent'])
   assetType: AssetType;
 
   @IsUUID()
@@ -73,8 +73,8 @@ export class ReviewsController {
     @Param('assetType') assetType: AssetType,
     @Param('assetId') assetId: string,
   ) {
-    if (assetType !== 'agent' && assetType !== 'voice' && assetType !== 'pet') {
-      throw new BadRequestException('资源类型必须是 agent / voice / pet');
+    if (assetType !== 'agent' && assetType !== 'voice') {
+      throw new BadRequestException('资源类型必须是 agent / voice');
     }
     return this.reviewsService.deleteDownload(assetType, assetId, user.id);
   }

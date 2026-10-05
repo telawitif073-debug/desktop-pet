@@ -14,7 +14,6 @@ import { MultiChatModule } from './multi-chat/multi-chat.module';
 import { CrashReportModule } from './crash/crash-report.module';
 import { ToolsModule } from './tools/tools.module';
 import { VoicesModule } from './voices/voices.module';
-import { PetPacksModule } from './pet-packs/pet-packs.module';
 
 @Module({
   imports: [
@@ -24,8 +23,7 @@ import { PetPacksModule } from './pet-packs/pet-packs.module';
     //   · synchronize 已永久关闭 —— 删实体不再等于 DROP TABLE；
     //     任何表结构变更都必须写成 src/migrations/ 下的显式 migration。
     //   · migrationsRun: true —— 启动时自动执行未落库的 migration。
-    // 迁移命令见 package.json 的 migration:* 脚本；宠物功能域重建（Phase 4）删表前
-    // 必须先 pg_dump 备份，详见 .trae/documents/pet-domain-rebuild.md。
+    // 迁移命令见 package.json 的 migration:* 脚本；删表类破坏性迁移前必须先 pg_dump 备份。
     TypeOrmModule.forRoot({ ...dataSourceOptions }),
     UsersModule,
     AuthModule,
@@ -39,7 +37,6 @@ import { PetPacksModule } from './pet-packs/pet-packs.module';
     CrashReportModule,
     ToolsModule,
     VoicesModule,
-    PetPacksModule,
   ],
 })
 export class AppModule {}
