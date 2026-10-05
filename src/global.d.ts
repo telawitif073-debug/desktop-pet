@@ -40,8 +40,6 @@ export interface LlmProfile {
   baseUrl: string;
   model: string;
   systemPrompt?: string;
-  /** 绑定的宠物形象 ID（一个智能体必须且只能绑定一个宠物形象） */
-  petAssetId?: string;
   /** 头像（emoji 或文字，不填默认取 name 首字符） */
   avatar?: string;
   intro?: string;
@@ -143,21 +141,6 @@ export interface TtsCloudConfig {
   model: string;
 }
 
-/** 宠物定时任务（按档案隔离） */
-export interface PetTask {
-  id: string;
-  profileId: string;
-  kind: 'reminder' | 'active_chat';
-  rawText: string;
-  content: string;
-  timeLabel: string;
-  due: number;
-  repeat: 'none' | 'daily' | 'weekly';
-  status: 'pending' | 'paused' | 'done' | 'canceled';
-  createdAt: number;
-  firedAt?: number;
-}
-
 /** 会话历史消息（按档案隔离存储） */
 export interface StoredChatMessage {
   role: 'user' | 'assistant';
@@ -165,43 +148,9 @@ export interface StoredChatMessage {
   reasoning?: string;
 }
 
-/** 云端语音识别接口配置（镜像 src/main/config.ts VoiceAsrApiConfig） */
-export interface VoiceAsrApiConfig {
-  /** transcribe=OpenAI 兼容转写接口；chat=多模态聊天模型转写 */
-  mode: 'transcribe' | 'chat';
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  /** 语言提示（仅 transcribe 生效，默认 zh） */
-  language?: string;
-}
-
 export interface AppConfig {
-  petSystemEnabled: boolean;
-  randomMoveEnabled: boolean;
   agentType: string;
   userProfile: UserProfile;
-  petState: {
-    hunger: number;
-    mood: number;
-    energy: number;
-    affection: number;
-  };
-  petWindow: {
-    width: number;
-    height: number;
-    opacity: number;
-    /** 是否置顶显示，默认 true */
-    alwaysOnTop?: boolean;
-  };
-  petFeatures: {
-    feedEnabled: boolean;
-    restEnabled: boolean;
-    playEnabled: boolean;
-    affectionEnabled: boolean;
-  };
-  petActions: PetAction[];
-  petActionBindings?: { feed?: string; rest?: string; play?: string };
   platform: {
     baseUrl: string;
     frontendUrl: string;
@@ -209,17 +158,9 @@ export interface AppConfig {
     refreshToken: string;
     user: { id: string; username: string; email: string; role: 'user' | 'admin' } | null;
   };
-  petAssetPath?: string;
-  petAssetName?: string;
-  /** 当前安装宠物资源 id（platform 动作挂靠归属） */
-  petAssetId?: string;
-  /** 宠物形态：单图(含GIF)/多图包/Live2D/3D模型 */
-  petAssetFormat?: 'image' | 'pack' | 'live2d' | 'model3d';
-  /** 当前使用的内置演示宠物 id（离线可用）；与 petAsset* 互斥 */
-  builtinPet?: string;
   /** 智能体主动对话配置 */
   agentProactive?: { enabled: boolean; intervalMinutes: number };
-  /** 宠物语音朗读配置（Edge TTS 免费 Neural 音色优先，系统 Web Speech 兜底） */
+  /** 语音朗读配置（Edge TTS 免费 Neural 音色优先，系统 Web Speech 兜底） */
   speech?: {
     enabled: boolean;
     /** 音色：'' 或 'edge:ShortName'（Edge 神经音色）| 'sys:voiceURI'（系统声音）；空 = Edge 默认晓晓 */
@@ -251,31 +192,8 @@ export interface AppConfig {
   showThinking?: boolean;
   /** 思考语言：auto=跟随模型 zh/en=提示模型用对应语言思考 */
   thinkingLang?: 'auto' | 'zh' | 'en';
-  /** 聊天是否联动宠物心情 */
-  moodFromChat?: boolean;
-  /** 宠物定时任务（按档案隔离） */
-  petTasks?: PetTask[];
   /** 清空对话前是否弹确认：ask=每次询问（默认） never=直接清空 */
   chatClearConfirm?: 'ask' | 'never';
-  /** 感知能力开关（隐私敏感，默认全关） */
-  petSenses?: { screen: boolean; mic: boolean; camera: boolean };
-  /** 宠物名字（语音唤醒词） */
-  petName?: string;
-  /** 唤醒后对话模式：once=每次对话后需重新叫名字（默认） continuous=连续对话 */
-  voiceWakeMode?: 'once' | 'continuous';
-  /** 语音唤醒模型包来源（本地 zip 路径或下载 URL），由用户在聊天设置中配置导入 */
-  voiceModelSource?: string;
-  /** 宠物「听懂说话」来源：本地模型包 / 在线接口 / 智能体自带（镜像 VoiceAsrConfig） */
-  voiceAsr?: {
-    source?: 'local' | 'api' | 'agent';
-    api?: VoiceAsrApiConfig;
-    /** 智能体自带识别时替换成自己的 Key（可选） */
-    agentApiKey?: string;
-  };
-  /** 宠物自我形象描述（更换形象/智能体时多模态 LLM 识别生成，注入对话 system prompt） */
-  petSelfDescription?: string;
-  /** 上次形象识别的指纹（资产标识+agentId），变化时才重新识别 */
-  selfImageFingerprint?: string;
   agentConfigPath?: string;
   installedAgentId?: string;
   installedAgentConfig?: unknown;
@@ -284,15 +202,15 @@ export interface AppConfig {
 /** 平台账号用户（镜像 AppConfig.platform.user） */
 export type AccountUser = AppConfig['platform']['user'];
 
-/** 平台账号状态（宠工坊「上传/发布」据此显示登录卡） */
+/** 平台账号状态（创作中心「上传/发布」据此显示登录卡） */
 export interface PlatformAuthState {
   loggedIn: boolean;
   user: AccountUser;
   baseUrl: string;
 }
 
-/** 宠工坊工作区 id（主进程按入口指定落地页；动作已并入宠物资源） */
-export type StudioWorkspaceTab = 'pets' | 'agents' | 'voices';
+/** 创作中心工作区 id */
+export type StudioWorkspaceTab = 'agents' | 'voices';
 
 /** 待上传文件：渲染端读成字节随 IPC 传给主进程（结构化克隆，不经文件系统） */
 export interface PublishFilePayload {
@@ -301,28 +219,14 @@ export interface PublishFilePayload {
   bytes: Uint8Array;
 }
 
-/** 随宠物包发布的动作（主进程会注入到包内：帧图/视频写 pet/actions/<动作名>/，元数据汇总为 pet/actions.json） */
-export interface PublishPackAction {
-  name: string;
-  interaction?: 'none' | 'feed' | 'rest' | 'play';
-  /** frames=帧图序列（file 为 zip）；clip=模型内置动画（无文件）；video=透明 webm */
-  kind: 'frames' | 'clip' | 'video';
-  /** kind='clip' 时的模型动画名；缺省取动作名 */
-  clipName?: string;
-  /** kind='frames' 的帧图 zip；kind='video' 的 webm */
-  file?: PublishFilePayload;
-}
-
-/** 发布载荷（宠物 → POST /pet-packs，智能体 → POST /agents，音色 → POST /voices） */
+/** 发布载荷（智能体 → POST /agents，音色 → POST /voices） */
 export interface PublishPayload {
-  type: 'pet' | 'agent' | 'voice';
+  type: 'agent' | 'voice';
   /** 纯文本字段（tags/configSchema/dependencies 等由渲染端序列化） */
   fields: Record<string, string>;
-  /** 宠物包 zip（宠物必填） */
+  /** 资源文件（智能体配置 JSON 等） */
   file?: PublishFilePayload;
   preview?: PublishFilePayload;
-  /** 随宠物包发布的动作（可选） */
-  actions?: PublishPackAction[];
 }
 
 /** 发布成功返回的资源摘要 */
@@ -348,57 +252,6 @@ export interface ChatMessage {
   error?: boolean;
 }
 
-/** 宠物动作（渲染端镜像 src/main/config.ts 的 PetAction） */
-export interface PetAction {
-  id: string;
-  name: string;
-  /** frames=帧序列 / clip=模型内置动画 / video=视频文件（透明 webm） */
-  kind: 'frames' | 'clip' | 'video';
-  source: 'ai' | 'manual' | 'platform';
-  frameFiles?: string[];
-  frameRate?: number;
-  /** kind=clip 时的模型内置动画名称 */
-  clipName?: string;
-  /** kind=video 时的视频文件绝对路径（webm） */
-  videoFile?: string;
-  /** 所属宠物资源 id（platform 来源动作，随宠物安装/清除） */
-  petAssetId?: string;
-  /** 所属内置演示宠物 id（内置演示宠物安装产生的动作，用于精确识别/清理） */
-  builtinPetId?: string;
-  /** 互动绑定（feed/rest/play） */
-  interaction?: 'none' | 'feed' | 'rest' | 'play';
-  createdAt: number;
-}
-
-/** 内置演示宠物摘要（渲染端镜像 src/main/builtinPets.ts 的 BuiltinPetSummary） */
-export interface BuiltinPetSummary {
-  id: string;
-  name: string;
-  description: string;
-  author: string;
-  license: string;
-  actionCount: number;
-  frameCount: number;
-  /** 当前是否正在使用 */
-  active: boolean;
-}
-
-/** 上游美术资源库条目（渲染端镜像 src/main/petLibrary.ts 的 PetLibrarySummary） */
-export interface PetLibrarySummary {
-  /** 相对资源库根的路径，library.read/apply/addAction 都用它 */
-  file: string;
-  sha256?: string;
-  bytes?: number;
-  /** raster=已归一化 PNG（可设为形象/动作）；svg=矢量素材（仅预览） */
-  format?: string;
-  repo: string;
-  repoUrl: string;
-  license: string;
-  originalPath: string;
-  /** 磁盘上确实存在（索引与实际文件不一致时为 false） */
-  available: boolean;
-}
-
 declare global {
   interface Window {
     electronAPI: {
@@ -413,49 +266,22 @@ declare global {
         }>;
       };
 
-      // Sense（感知能力，商店设置中开启后可用）
-      sense: {
-        /** 截取屏幕画面（需开启「查看桌面」） */
-        captureScreen: () => Promise<{ success: boolean; dataUrl?: string; error?: string }>;
-        /** 摄像头定时帧上送（持续感知） */
-        cameraFrame: (dataUrl: string) => Promise<{ success: boolean; error?: string }>;
-      };
-
-      // sherpa-onnx 离线语音识别（语音唤醒）：模型由用户在聊天设置导入，平台不内置
-      sherpa: {
-        getModel: () => Promise<{ ok: boolean; path?: string }>;
-        importModel: (source: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
-      };
-
-      // 云端语音识别（在线来源）：渲染端只传音频，接口配置与 Key 留在主进程
-      asr: {
-        transcribe: (payload: { wavBase64: string }) =>
-          Promise<{ ok: boolean; text?: string; error?: string }>;
-      };
-
-      // 宠物自我形象识别（更换形象/智能体后识别自己并记住）
-      self: {
-        recognize: (dataUrl: string) =>
-          Promise<{ ok: boolean; skipped?: boolean; description?: string; error?: string }>;
-      };
-
       config: {
         get: () => Promise<AppConfig>;
         set: (partial: Partial<AppConfig>) => Promise<AppConfig>;
       };
 
       platform: {
-        search: (type: 'pet' | 'agent', query: string, page?: number) => Promise<unknown>;
-        getDetail: (type: 'pet' | 'agent', id: string) => Promise<unknown>;
-        download: (type: 'pet' | 'agent', id: string) => Promise<unknown>;
-        install: (type: 'pet' | 'agent', id: string) => Promise<unknown>;
-        uninstall: (type: 'pet' | 'agent', id: string) => Promise<{ success: boolean }>;
-        getInstalledPet: () => Promise<{ path: string; dataUrl: string | null } | null>;
+        search: (type: 'agent' | 'voice', query: string, page?: number) => Promise<unknown>;
+        getDetail: (type: 'agent' | 'voice', id: string) => Promise<unknown>;
+        download: (type: 'agent' | 'voice', id: string) => Promise<unknown>;
+        install: (type: 'agent' | 'voice', id: string) => Promise<unknown>;
+        uninstall: (type: 'agent' | 'voice', id: string) => Promise<{ success: boolean }>;
         getInstalledAgent: () => Promise<unknown>;
         login: (identifier: string, password: string) => Promise<unknown>;
         logout: () => Promise<{ success: boolean }>;
         openStore: () => Promise<{ success: boolean }>;
-        /** 发布资源（宠工坊「上传/发布」工作区） */
+        /** 发布资源（创作中心「上传/发布」工作区） */
         upload: (payload: PublishPayload) => Promise<{ success: boolean; asset?: PublishedAsset; error?: string }>;
         /** 平台账号状态 */
         authStatus: () => Promise<PlatformAuthState>;
@@ -470,7 +296,7 @@ declare global {
         clearAuth: () => Promise<{ loggedIn: boolean }>;
       };
 
-      /** 宠工坊：内嵌在资源中心窗口内容区（不再单独开窗） */
+      /** 创作中心：内嵌在资源中心窗口内容区（不再单独开窗） */
       workshop: {
         /** 资源中心页面测量内容区后上报；visible=false 摘掉视图 */
         embed: (payload: {
@@ -487,52 +313,6 @@ declare global {
           path?: string;
           error?: string;
         }>;
-      };
-
-      pet: {
-        stateUpdate: (state: {
-          hunger: number;
-          mood: number;
-          energy: number;
-          affection: number;
-        }) => Promise<{ success: boolean }>;
-        wanderStart: (opts: {
-          dx: number;
-          durationMs: number;
-        }) => Promise<{ ok: boolean; reason?: string }>;
-        onWanderState: (callback: (moving: boolean) => void) => (() => void);
-        onZoomChanged: (callback: (side: number) => void) => (() => void);
-      };
-
-      actions: {
-        addFrames: (
-          name: string,
-          files: Array<{ filename: string; data: Uint8Array }>
-        ) => Promise<{ success: boolean; action?: PetAction; error?: string }>;
-        remove: (id: string) => Promise<{ success: boolean; error?: string }>;
-        /** 播放动作（转交宠物窗渲染） */
-        play: (id: string) => Promise<{ success: boolean }>;
-      };
-
-      /** 内置演示宠物（离线可用，随包分发） */
-      builtin: {
-        list: () => Promise<{ success: boolean; pets: BuiltinPetSummary[]; error?: string }>;
-        apply: (id: string) => Promise<{ success: boolean; error?: string; actionIds?: string[] }>;
-        reset: () => Promise<{ success: boolean; error?: string }>;
-      };
-
-      /** 上游美术资源库（GitHub「pet」项目导入的静态素材）：设为形象 / 加为动作 */
-      library: {
-        list: () => Promise<{ success: boolean; assets: PetLibrarySummary[]; error?: string }>;
-        read: (file: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>;
-        apply: (
-          file: string,
-          name?: string
-        ) => Promise<{ success: boolean; path?: string; error?: string }>;
-        addAction: (
-          file: string,
-          name?: string
-        ) => Promise<{ success: boolean; action?: PetAction; error?: string }>;
       };
 
       tts: {
@@ -556,35 +336,15 @@ declare global {
         testGptsovits: (baseUrl: string) => Promise<{ online: boolean; message: string }>;
       };
 
-      window: {
-        toggleChat: (open: boolean) => Promise<{ success: boolean; isChatOpen: boolean }>;
-        toggleActions: (open: boolean) => Promise<{ success: boolean }>;
-        isChatOpen: () => Promise<boolean>;
-        setIgnoreMouseEvents: (ignore: boolean) => void;
-        beginDrag: () => void;
-        dragMove: (delta: { dx: number; dy: number }) => void;
-        endDrag: () => void;
-        zoomPet: (direction: number) => Promise<{ success: boolean; width?: number; height?: number }>;
-        showContextMenu: () => void;
-      };
-
       onChatChunk: (callback: (chunk: string) => void) => (() => void);
       /** 思考过程增量（reasoning_content/reasoning；与正文分流） */
       onChatReasoning: (callback: (chunk: string) => void) => (() => void);
-      /** 宠工坊窗口切换工作区（入口指定落地页） */
+      /** 智能体主动对话消息（主进程定时投递） */
+      onAgentMessage: (callback: (message: string) => void) => (() => void);
+      /** 创作中心窗口切换工作区（入口指定落地页） */
       onStudioWorkspace: (callback: (tab: StudioWorkspaceTab) => void) => (() => void);
       /** 配置广播：其他窗口改动配置后同步刷新本窗口 */
       onConfigChanged: (callback: (config: AppConfig) => void) => (() => void);
-      onPetSettingsChanged: (callback: (settings: AppConfig['petWindow']) => void) => (() => void);
-      onPetFeaturesChanged: (callback: (features: AppConfig['petFeatures']) => void) => (() => void);
-      onPetAssetChanged: (callback: () => void) => (() => void);
-      onPetContextAction: (callback: (action: string) => void) => (() => void);
-      onPetActionsChanged: (callback: () => void) => (() => void);
-      onPlayAction: (callback: (actionId: string) => void) => (() => void);
-      onToggleActions: (callback: () => void) => (() => void);
-      onAgentMessage: (callback: (message: string) => void) => (() => void);
-      /** 智能体变更通知：宠物重新「看一眼」自己（导出画布并请求形象识别） */
-      onSelfieRequest: (callback: () => void) => (() => void);
     };
   }
 }

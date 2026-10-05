@@ -13,59 +13,20 @@ import { thinkingLangSystemPrompt, type ChatMessage } from './llmService';
 
 const MAX_HISTORY = 20;
 
-export interface PetStateSnapshot {
-  hunger: number;
-  mood: number;
-  energy: number;
-  affection: number;
-}
-
-function getTimeGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 6) return '深夜了';
-  if (hour < 11) return '早上好';
-  if (hour < 14) return '中午好';
-  if (hour < 18) return '下午好';
-  if (hour < 22) return '晚上好';
-  return '夜深了';
-}
-
-function describePetState(state: PetStateSnapshot): string {
-  const parts: string[] = [];
-  if (state.hunger < 30) parts.push('现在有点饿了');
-  else if (state.hunger > 80) parts.push('吃得很饱');
-
-  if (state.mood < 30) parts.push('心情不太好');
-  else if (state.mood > 80) parts.push('心情很好');
-
-  if (state.energy < 30) parts.push('有点累了想休息');
-  else if (state.energy > 80) parts.push('精力充沛');
-
-  if (state.affection > 80) parts.push('和你很亲近');
-  else if (state.affection < 20) parts.push('还不太熟悉你');
-
-  return parts.length > 0 ? `我${parts.join('，')}。` : '我现在状态不错。';
-}
-
-function buildSystemPrompt(
-  config: AppConfig,
-  petState: PetStateSnapshot
-): string {
+function buildSystemPrompt(config: AppConfig): string {
   // 生效 LLM 配置来自用户配置的激活档案（无默认 API）
   const userConfig = getLLMConfig();
-  const userName = config.userProfile.name || '主人';
+  const userName = config.userProfile.name || '用户';
 
-  const basePrompt = `你是一个可爱的桌面宠物，正在陪伴用户${userName}。
-${getTimeGreeting()}！你现在的状态：${describePetState(petState)}
+  const basePrompt = `你是一个智能助手，正在为用户${userName}提供帮助。
 
 精准时间：今天是${new Date().getFullYear()}年${new Date().getMonth() + 1}月${new Date().getDate()}日 ${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date().getDay()]} ${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}（这是确切的当前时间，涉及日期、星期、时刻、提醒的问题以此为准，不要编造）
 
 你的性格特点：
-- 活泼可爱，说话简洁有趣，偶尔撒娇
-- 关心主人的情绪和健康
+- 说话简洁有趣，友好自然
+- 关心用户的情绪和需求
 - 回复简短自然，像聊天一样，一般不超过两三句话
-- 用中文回复
-- 偶尔提到自己的状态（饿、开心、累等），自然融入对话`;
+- 用中文回复`;
 
   const customPrompt = userConfig.systemPrompt?.trim();
   const installedAgentConfig = config.installedAgentConfig;
@@ -88,13 +49,11 @@ ${getTimeGreeting()}！你现在的状态：${describePetState(petState)}
 export class ConversationManager {
   private history: StoredChatMessage[] = [];
   private config: AppConfig;
-  private petState: PetStateSnapshot;
   /** 内存历史当前归属的档案 id（写回 profileMessages 时用于定位，'' = 无可用档案） */
   private activeId: string;
 
-  constructor(config: AppConfig, petState: PetStateSnapshot, legacyHistoryPath?: string) {
+  constructor(config: AppConfig, legacyHistoryPath?: string) {
     this.config = config;
-    this.petState = petState;
     this.activeId = resolveActiveProfileId(config);
     this.migrateLegacyHistory(legacyHistoryPath);
     this.reload();
@@ -148,12 +107,8 @@ export class ConversationManager {
     }
   }
 
-  updatePetState(state: PetStateSnapshot): void {
-    this.petState = state;
-  }
-
   getSystemPrompt(): string {
-    return buildSystemPrompt(this.config, this.petState);
+    return buildSystemPrompt(this.config);
   }
 
   buildMessages(userMessage?: string): ChatMessage[] {

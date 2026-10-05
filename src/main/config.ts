@@ -1,9 +1,6 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import { validatePetActionModel, type PetActionModel } from '../pet'; // 宠物主体功能模块（统一入口）
-// 动作配额的本体（渲染端也要用，故放在 shared；见下方再导出）
-import { ACTIONS_OWNER_USER, PET_ACTIONS_MAX_USER, actionOwnerKey, actionQuotaLimit } from '../shared/actionQuota';
 
 export interface LLMConfig {
   provider: string;
@@ -20,7 +17,7 @@ export interface LLMConfig {
 }
 
 /** 多 API 配置档案：聊天设置中可保存多个 API 并一键切换生效。
- *  LlmProfile = 智能体（与手机端 mobile/src/types.ts 同构）：档案自带人设、绑定形象与专属音色，
+ *  LlmProfile = 智能体（与手机端 mobile/src/types.ts 同构）：档案自带人设、绑定专属音色，
  *  对话与定时任务都按档案隔离。 */
 export interface LlmProfile {
   id: string;
@@ -31,8 +28,6 @@ export interface LlmProfile {
   model: string;
   /** 档案级系统提示词；空 = 沿用默认 llm 的提示词 */
   systemPrompt?: string;
-  /** 绑定的宠物形象 ID（一个智能体必须且只能绑定一个宠物形象） */
-  petAssetId?: string;
   // ── 智能体扩展字段（与手机端一致；均可选，旧 6 字段档案自动升级）──
   /** 头像（emoji 或文字，不填默认取 name 首字符） */
   avatar?: string;
@@ -192,31 +187,6 @@ export interface TtsCloudConfig {
   model: string;
 }
 
-// ── 宠物定时任务（对齐 mobile/src/types.ts，运行时见 T8）───────────────────
-
-/** 宠物定时任务：用户让宠物在指定时间做的事（提醒/主动搭话），到点由智能体主动发消息 */
-export interface PetTask {
-  id: string;
-  /** 归属智能体档案（每个智能体自己的任务） */
-  profileId: string;
-  /** reminder=提醒类；active_chat=主动搭话类 */
-  kind: 'reminder' | 'active_chat';
-  /** 用户原话（整句） */
-  rawText: string;
-  /** 任务内容（剥离时间短语后的原句） */
-  content: string;
-  /** 创建时的时间展示（今天 15:30 / 每天 08:00） */
-  timeLabel: string;
-  /** 触发时间戳（ms） */
-  due: number;
-  /** 一次性 / 每天 / 每周 */
-  repeat: 'none' | 'daily' | 'weekly';
-  status: 'pending' | 'paused' | 'done' | 'canceled';
-  createdAt: number;
-  /** 最近一次触发时间（防重复触发） */
-  firedAt?: number;
-}
-
 /** 云 TTS 服务配置默认值（engine=openai） */
 export const DEFAULT_TTS_CLOUD_CONFIG: TtsCloudConfig = {
   engine: 'openai',
@@ -253,103 +223,14 @@ export interface PlatformConfig {
   user: { id: string; username: string; email: string; role: 'user' | 'admin' } | null;
 }
 
-/** 宠物窗口设置（大小 / 透明度），可在资源库"设置"页调整 */
-export interface PetWindowConfig {
-  width: number;
-  height: number;
-  opacity: number;
-  /** 是否置顶显示（窗口保持在其他应用之上），默认 true */
-  alwaysOnTop?: boolean;
-}
-
-/** 宠物互动功能开关（喂食/休息/玩耍/好感度），可在资源库"设置"页调整；
- * 关闭后隐藏对应按钮与进度条，并冻结对应数值的衰减 */
-export interface PetFeaturesConfig {
-  feedEnabled: boolean;
-  restEnabled: boolean;
-  playEnabled: boolean;
-  affectionEnabled: boolean;
-}
-
-/** 宠物资源形态：image=单张图片（含 GIF），pack=多图帧序列包，live2d=Live2D 模型包，model3d=3D 模型（glb/gltf） */
-export type PetFormat = 'image' | 'pack' | 'live2d' | 'model3d';
-
-/** 宠物动作：kind=frames 为帧序列（手动上传/宠物资源包附带），
- * kind=clip 为 Live2D/3D 模型内置动画 clip（仅模型宠物可用），
- * kind=video 为视频动作（透明 webm，由渲染端直接播放，不转帧序列）。
- * petAssetId 标记动作属于哪个宠物资源（动作随宠物，不可跨宠物使用） */
-export interface PetAction {
-  id: string;
-  name: string;
-  kind: 'frames' | 'clip' | 'video';
-  source: 'ai' | 'manual' | 'platform';
-  frameFiles?: string[];
-  frameRate?: number;
-  /** kind=clip 时的模型内置动画名称 */
-  clipName?: string;
-  /** kind=video 时的视频文件绝对路径（webm） */
-  videoFile?: string;
-  /** 所属宠物资源 id（platform 来源动作） */
-  petAssetId?: string;
-  /** 所属内置演示宠物 id（source=manual 但由内置演示宠物安装产生，用于精确识别/清理） */
-  builtinPetId?: string;
-  /** 互动绑定（feed/rest/play），安装时写入 petActionBindings */
-  interaction?: 'none' | 'feed' | 'rest' | 'play';
-  createdAt: number;
-}
-
-/**
- * 动作配额：**按归属分别计数**，用户自建动作与宠物自带动作互不挤占。
- * 常量本体与纯函数在 `src/shared/actionQuota.ts`（渲染端也要用，不能 import 本文件）。
- */
-export {
-  ACTIONS_OWNER_USER,
-  PET_ACTIONS_MAX_USER,
-  PET_ACTIONS_MAX_PER_PET,
-  actionOwnerKey,
-  actionQuotaLimit,
-  actionOwnerLabel,
-} from '../shared/actionQuota';
-
-/** @deprecated 语义已拆分，请用 `PET_ACTIONS_MAX_USER`（用户自建动作）或
- *  `PET_ACTIONS_MAX_PER_PET`（单只宠物自带动作）。保留仅为兼容历史引用。 */
-export const PET_ACTIONS_MAX = PET_ACTIONS_MAX_USER;
-
-/**
- * 动作配额校验（按归属分别计数）。`incoming` 只需给出归属字段。
- * 抛错文案区分「我的动作」与「该宠物动作」，便于用户判断该删谁。
- */
-export function assertActionQuota(
-  existing: ReadonlyArray<PetAction>,
-  incoming: Pick<PetAction, 'builtinPetId' | 'petAssetId'>,
-): void {
-  const owner = actionOwnerKey(incoming);
-  const isUser = owner === ACTIONS_OWNER_USER;
-  const limit = actionQuotaLimit(owner);
-  const used = existing.filter((a) => actionOwnerKey(a) === owner).length;
-  if (used >= limit) {
-    const who = isUser ? '我的动作' : '该宠物动作';
-    throw new Error(
-      `${who}数量已达上限（${limit} 个），请先删除部分${isUser ? '自定义' : '该宠物的'}动作`,
-    );
-  }
-}
-
-/** 互动功能绑定的动作 id：喂食/休息/玩耍触发时优先播放绑定的资源库动作，未绑定回退同名动作 */
-export interface PetActionBindings {
-  feed?: string;
-  rest?: string;
-  play?: string;
-}
-
-/** 智能体主动对话配置：定时以气泡发起聊天（仅唤醒时段 8-22 点），状态低值时提醒 */
+/** 智能体主动对话配置：定时以消息发起聊天（仅唤醒时段 8-22 点） */
 export interface AgentProactiveConfig {
   enabled: boolean;
   /** 发起间隔（分钟），下限 10 分钟 */
   intervalMinutes: number;
 }
 
-/** 宠物语音朗读配置（Edge TTS 免费 Neural 音色优先，系统 Web Speech 兜底） */
+/** 语音朗读配置（Edge TTS 免费 Neural 音色优先，系统 Web Speech 兜底） */
 export interface SpeechSettings {
   /** 总开关：关闭后回复不朗读 */
   enabled: boolean;
@@ -367,65 +248,13 @@ export interface SpeechSettings {
   volume: number;
 }
 
-/** 语音配置默认值见渲染端 renderer/speech.ts DEFAULT_SPEECH（主进程仅持久化类型） */
-
-/** 云端语音识别接口配置（OpenAI 兼容）：转写接口或多模态聊天模型均可 */
-export interface VoiceAsrApiConfig {
-  /** transcribe=OpenAI 兼容 /audio/transcriptions 转写接口；chat=多模态聊天模型转写（input_audio） */
-  mode: 'transcribe' | 'chat';
-  /** 接口根地址，如 https://api.openai.com/v1 */
-  baseUrl: string;
-  apiKey: string;
-  /** transcribe: whisper-1 等；chat: gpt-4o-audio 等支持音频输入的模型 */
-  model: string;
-  /** 语言提示（仅 transcribe 生效，默认 zh） */
-  language?: string;
-}
-
-/** 宠物「听懂说话」的来源配置：本地模型包 / 用户自配在线接口 / 已安装智能体自带（可选携带） */
-export interface VoiceAsrConfig {
-  /** local=本地 sherpa 模型包（默认，离线） api=用户自配在线接口 agent=智能体自带 */
-  source?: 'local' | 'api' | 'agent';
-  /** source=api 时的接口配置 */
-  api?: VoiceAsrApiConfig;
-  /** source=agent 时替换智能体自带密钥（可选；智能体自带密钥用完/不可用时填自己的） */
-  agentApiKey?: string;
-}
-
 export interface AppConfig {
-  petSystemEnabled: boolean;
-  randomMoveEnabled: boolean;
   agentType: string;
   userProfile: UserProfile;
-  petState: {
-    hunger: number;
-    mood: number;
-    energy: number;
-    affection: number;
-  };
-  petWindow: PetWindowConfig;
-  petFeatures: PetFeaturesConfig;
-  petActions: PetAction[];
-  petActionBindings?: PetActionBindings;
   platform: PlatformConfig;
-  petAssetPath?: string;
-  /** 当前安装宠物的资源名称（如"橘猫桌面形象"） */
-  petAssetName?: string;
-  /** 当前安装宠物的资源 id（动作随宠物挂靠） */
-  petAssetId?: string;
-  /** 当前安装宠物的资源形态（image/pack/live2d/model3d），渲染端据此选择渲染方式 */
-  petAssetFormat?: PetFormat;
-  /** 当前使用的内置演示宠物 id（离线/未登录可用）；与 petAsset* 互斥，形象随包分发 */
-  builtinPet?: string;
-  /**
-   * 宠物动作配置（schemaVersion 2，标准见 src/shared/petActionModel.ts）。
-   * 缺省时运行时由 petActions 现场迁移生成（规则一致）；写入本字段即成为显式声明的动作体系：
-   * 池划分（待机/互动/点击/拖拽/移动/随机分类/事件档位）、权重、逐动作参数都以此为准。
-   */
-  petActionModel?: PetActionModel;
   /** 智能体主动对话配置 */
   agentProactive?: AgentProactiveConfig;
-  /** 宠物语音朗读配置（渲染端 Web Speech API） */
+  /** 语音朗读配置（渲染端 Web Speech API） */
   speech?: SpeechSettings;
   /** 多 API 配置档案：聊天 API 全部由用户在客户端配置（平台不提供），列表内各档案同级、选中即生效 */
   llmProfiles?: LlmProfile[];
@@ -439,62 +268,24 @@ export interface AppConfig {
   activeCloudVoiceId?: string;
   /** 云 TTS 服务凭证（全局共享；云同步时 apiKey 由服务端加密落库） */
   ttsCloudConfig?: TtsCloudConfig;
-  /** 是否显示思考过程（DeepSeek 风格思考卡，运行时见 T5） */
+  /** 是否显示思考过程（DeepSeek 风格思考卡） */
   showThinking?: boolean;
   /** 思考语言：auto=跟随模型 zh/en=提示模型用对应语言思考 */
   thinkingLang?: 'auto' | 'zh' | 'en';
-  /** 聊天是否联动宠物心情（运行时见 T5） */
-  moodFromChat?: boolean;
-  /** 宠物定时任务（按档案隔离；随 config 云同步，运行时见 T8） */
-  petTasks?: PetTask[];
   /** 清空对话前是否弹确认：ask=每次询问（默认） never=直接清空（用户选过"以后不再询问"，设置中可改回） */
   chatClearConfirm?: 'ask' | 'never';
-  /** 感知能力开关（隐私敏感，默认全关）：screen=查看桌面（截屏附图） mic=麦克风语音输入 camera=摄像头拍照 */
-  petSenses?: { screen: boolean; mic: boolean; camera: boolean };
-  /** 宠物名字（语音唤醒词，听到名字回应并聆听需求） */
-  petName?: string;
-  /** 唤醒后对话模式：once=每次对话后需重新叫名字（默认） continuous=连续对话，叫一次名字后可持续说，超时自动结束 */
-  voiceWakeMode?: 'once' | 'continuous';
-  /** 语音唤醒模型包来源（本地 zip 路径或下载 URL），由用户在聊天设置中配置导入 */
-  voiceModelSource?: string;
-  /** 宠物「听懂说话」来源：本地模型包 / 在线接口 / 智能体自带（详见 VoiceAsrConfig） */
-  voiceAsr?: VoiceAsrConfig;
-  /** 宠物自我形象描述（更换形象/智能体时多模态 LLM 识别生成，注入对话 system prompt） */
-  petSelfDescription?: string;
-  /** 上次形象识别的指纹（资产标识+agentId），变化时才重新识别 */
-  selfImageFingerprint?: string;
   agentConfigPath?: string;
   installedAgentId?: string;
-  /** 已安装智能体：人设（name/systemPrompt）+ 可选自带语音识别（asr）；聊天 LLM 参数仍一律由用户配置（平台不提供 API） */
+  /** 已安装智能体：人设（name/systemPrompt）；聊天 LLM 参数仍一律由用户配置（平台不提供 API） */
   installedAgentConfig?: unknown;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
-  petSystemEnabled: true,
-  randomMoveEnabled: false,
   agentType: 'default',
   userProfile: {
     name: '',
     preferences: {},
   },
-  petState: {
-    hunger: 80,
-    mood: 80,
-    energy: 80,
-    affection: 50,
-  },
-  petWindow: {
-    width: 300,
-    height: 300,
-    opacity: 1,
-  },
-  petFeatures: {
-    feedEnabled: true,
-    restEnabled: true,
-    playEnabled: true,
-    affectionEnabled: true,
-  },
-  petActions: [],
   platform: {
     baseUrl: 'http://localhost:3001/api',
     frontendUrl: 'http://localhost:5174',
@@ -515,8 +306,6 @@ const DEFAULT_CONFIG: AppConfig = {
   ttsCloudConfig: { ...DEFAULT_TTS_CLOUD_CONFIG },
   showThinking: false,
   thinkingLang: 'auto',
-  moodFromChat: true,
-  petTasks: [],
 };
 
 let cachedConfig: AppConfig | null = null;
@@ -526,7 +315,7 @@ function getConfigPath(): string {
 }
 
 /** 档案归一化（旧 6 字段档案向新形态升级，幂等）：剔除非法条目、字符串字段补空串、
- *  enabled 缺省视为启用、petAssetId 缺省为空（未绑定，由 UI 引导绑定）。
+ *  enabled 缺省视为启用。
  *  返回 changed=true 表示发生过结构升级，启动时一次性回写磁盘。 */
 function normalizeProfiles(value: unknown): { profiles: LlmProfile[]; changed: boolean } {
   if (!Array.isArray(value)) return { profiles: [], changed: Array.isArray(value) === false && value != null };
@@ -545,15 +334,11 @@ function normalizeProfiles(value: unknown): { profiles: LlmProfile[]; changed: b
     const apiKey = typeof p.apiKey === 'string' ? p.apiKey : '';
     const baseUrl = typeof p.baseUrl === 'string' ? p.baseUrl : '';
     const model = typeof p.model === 'string' ? p.model : '';
-    const petAssetId = typeof p.petAssetId === 'string' ? p.petAssetId : '';
     const enabled = p.enabled !== false;
-    if (
-      apiKey !== p.apiKey || baseUrl !== p.baseUrl || model !== p.model ||
-      petAssetId !== p.petAssetId || enabled !== p.enabled
-    ) {
+    if (apiKey !== p.apiKey || baseUrl !== p.baseUrl || model !== p.model || enabled !== p.enabled) {
       changed = true;
     }
-    profiles.push({ ...p, apiKey, baseUrl, model, petAssetId, enabled });
+    profiles.push({ ...p, apiKey, baseUrl, model, enabled });
   }
   return { profiles, changed };
 }
@@ -619,30 +404,6 @@ function normalizeTtsCloudConfig(value: unknown): TtsCloudConfig {
   };
 }
 
-/** 动作数组归一化：清洗透传进来的非法 builtinPetId（其余字段维持既有透传行为） */
-export function normalizePetActions(value: unknown): PetAction[] {
-  if (!Array.isArray(value)) return [];
-  return (value as PetAction[]).map((item) => {
-    if (!item || typeof item !== 'object') return item;
-    if (item.builtinPetId === undefined || typeof item.builtinPetId === 'string') return item;
-    const next = { ...item };
-    delete next.builtinPetId;
-    return next;
-  });
-}
-
-/** 定时任务归一化（必需字段缺失的条目直接丢弃） */
-function normalizePetTasks(value: unknown): PetTask[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (t): t is PetTask =>
-      !!t && typeof t === 'object' &&
-      typeof (t as PetTask).id === 'string' &&
-      typeof (t as PetTask).profileId === 'string' &&
-      typeof (t as PetTask).due === 'number',
-  );
-}
-
 export function loadConfig(): AppConfig {
   if (cachedConfig) return cachedConfig;
 
@@ -655,23 +416,6 @@ export function loadConfig(): AppConfig {
       const loaded: AppConfig = {
         ...DEFAULT_CONFIG,
         ...parsed,
-        petWindow: { ...DEFAULT_CONFIG.petWindow, ...(parsed.petWindow || {}) },
-        petFeatures: { ...DEFAULT_CONFIG.petFeatures, ...(parsed.petFeatures || {}) },
-        petActions: normalizePetActions(parsed.petActions),
-        builtinPet: typeof parsed.builtinPet === 'string' && parsed.builtinPet ? parsed.builtinPet : undefined,
-        // 标准动作模型（schemaVersion 2）：**校验失败即丢弃并告警**，绝不把坏配置带进运行期
-        // （丢弃后运行时按 petActions 现场迁移，行为等价于旧配置）
-        ...(() => {
-          const model = (parsed as { petActionModel?: unknown }).petActionModel;
-          if (model === undefined) return {};
-          const result = validatePetActionModel(model);
-          if (result.ok) return { petActionModel: model as PetActionModel };
-          console.error(`[config] petActionModel 校验失败，已忽略该字段并回退到按动作列表迁移：\n- ${result.errors.join('\n- ')}`);
-          return {};
-        })(),
-        petActionBindings: parsed.petActionBindings && typeof parsed.petActionBindings === 'object'
-          ? (parsed.petActionBindings as PetActionBindings)
-          : {},
         platform: { ...DEFAULT_CONFIG.platform, ...(parsed.platform || {}) },
         agentProactive: {
           enabled: parsed.agentProactive?.enabled ?? DEFAULT_CONFIG.agentProactive!.enabled,
@@ -685,8 +429,6 @@ export function loadConfig(): AppConfig {
         ttsCloudConfig: normalizeTtsCloudConfig(parsed.ttsCloudConfig),
         showThinking: parsed.showThinking === true,
         thinkingLang: parsed.thinkingLang === 'zh' || parsed.thinkingLang === 'en' ? parsed.thinkingLang : 'auto',
-        moodFromChat: parsed.moodFromChat !== false,
-        petTasks: normalizePetTasks(parsed.petTasks),
       };
       if (loaded.platform.frontendUrl === 'http://localhost:5173') {
         loaded.platform.frontendUrl = DEFAULT_CONFIG.platform.frontendUrl;
@@ -711,25 +453,11 @@ export function saveConfig(config: Partial<AppConfig>): AppConfig {
     ...current,
     ...config,
     userProfile: { ...current.userProfile, ...(config.userProfile || {}) },
-    petState: { ...current.petState, ...(config.petState || {}) },
-    petWindow: { ...current.petWindow, ...(config.petWindow || {}) },
-    petFeatures: { ...current.petFeatures, ...(config.petFeatures || {}) },
-    petActions: Array.isArray(config.petActions) ? config.petActions : current.petActions,
-    petActionBindings: config.petActionBindings !== undefined
-      ? (config.petActionBindings || {})
-      : current.petActionBindings,
     platform: { ...current.platform, ...(config.platform || {}) },
     agentProactive: {
       enabled: config.agentProactive?.enabled ?? current.agentProactive?.enabled ?? true,
       intervalMinutes: config.agentProactive?.intervalMinutes ?? current.agentProactive?.intervalMinutes ?? 30,
     },
-    petSenses: {
-      screen: config.petSenses?.screen ?? current.petSenses?.screen ?? false,
-      mic: config.petSenses?.mic ?? current.petSenses?.mic ?? false,
-      camera: config.petSenses?.camera ?? current.petSenses?.camera ?? false,
-    },
-    petName: (config.petName ?? current.petName ?? '小宠').slice(0, 12),
-    voiceWakeMode: config.voiceWakeMode ?? current.voiceWakeMode ?? 'once',
     // 档案与多档消息：整体替换语义（写入方必须给全量字典，删除档案消息才能生效）
     llmProfiles: config.llmProfiles !== undefined
       ? normalizeProfiles(config.llmProfiles).profiles
@@ -749,8 +477,6 @@ export function saveConfig(config: Partial<AppConfig>): AppConfig {
       : current.ttsCloudConfig,
     showThinking: config.showThinking ?? current.showThinking ?? false,
     thinkingLang: config.thinkingLang ?? current.thinkingLang ?? 'auto',
-    moodFromChat: config.moodFromChat ?? current.moodFromChat ?? true,
-    petTasks: config.petTasks !== undefined ? normalizePetTasks(config.petTasks) : current.petTasks ?? [],
   };
   const configPath = getConfigPath();
   try {
@@ -766,7 +492,7 @@ export function saveConfig(config: Partial<AppConfig>): AppConfig {
 }
 
 /** 未配置 API 时的兜底系统提示词（保持基本人格，聊天会因缺少 Key 而提示配置） */
-const FALLBACK_SYSTEM_PROMPT = '你是一个可爱的桌面宠物，用简短、俏皮的语气回复主人。';
+const FALLBACK_SYSTEM_PROMPT = '你是一个乐于助人的智能助手，用简短、友好的语气回复用户。';
 
 /** 档案是否启用（旧档无该字段 = 启用） */
 export function isProfileEnabled(profile: LlmProfile): boolean {

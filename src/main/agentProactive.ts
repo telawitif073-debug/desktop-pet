@@ -1,6 +1,5 @@
 import type { AppConfig } from './config';
 import type { ChatMessage } from './llmService';
-import { VITAL_ALERT_THRESHOLD } from '../pet'; // 宠物主体功能模块（统一入口）：低值提醒阈值
 
 const MIN_INTERVAL_MINUTES = 10;
 /** 用户最近发言窗口：窗口内发言视为正在聊天，跳过本轮主动发起 */
@@ -14,20 +13,18 @@ export interface AgentProactiveOptions {
   isConfigured: () => boolean;
   /** 用户 2 分钟内是否发过消息 */
   isUserActive: () => boolean;
-  getState: () => { hunger: number; mood: number; energy: number; affection: number };
   getSystemPrompt: () => string;
   getRecentHistory: (n: number) => ChatMessage[];
-  /** 调用 LLM 生成主动消息（可包含动作标记） */
+  /** 调用 LLM 生成主动消息 */
   generate: (messages: ChatMessage[]) => Promise<string>;
-  /** 投递消息：剥离动作标记、写入聊天历史、气泡推送（main.ts 侧实现） */
+  /** 投递消息：写入聊天历史并通知渲染端（main.ts 侧实现） */
   deliver: (text: string) => void;
 }
 
 /**
  * 智能体主动发起对话定时器：按 intervalMinutes 周期触发（每轮重新读配置，开关/间隔实时生效）。
  * 触发条件：开关开启 + LLM 已配置 + 唤醒时段 + 距上次发起 ≥10 分钟 + 用户 2 分钟内未发言。
- * 状态低值（饱食/心情/精力 <30）时围绕对应话题提醒，否则结合最近 2 条历史自然开场。
- * 返回停止函数。
+ * 结合最近 2 条历史自然开场。返回停止函数。
  */
 export function startAgentProactive(o: AgentProactiveOptions): () => void {
   let timer: NodeJS.Timeout | null = null;
@@ -42,20 +39,12 @@ export function startAgentProactive(o: AgentProactiveOptions): () => void {
   };
 
   const fire = async () => {
-    const state = o.getState();
-    const hints: string[] = [];
-    if (state.hunger < VITAL_ALERT_THRESHOLD) hints.push('宠物很饿，自然地提醒主人喂食');
-    if (state.energy < VITAL_ALERT_THRESHOLD) hints.push('宠物很累，建议让宠物休息');
-    if (state.mood < VITAL_ALERT_THRESHOLD) hints.push('宠物心情低落，说句话请求主人陪它玩耍');
-    const context = hints.length
-      ? `请围绕以下状态主动开启话题：${hints.join('；')}。`
-      : '请结合当前时间与最近聊天内容自然地主动开启话题。';
     const messages: ChatMessage[] = [
       {
         role: 'system',
         content:
-          `${o.getSystemPrompt()}\n\n[主动对话]${context}` +
-          '只说一两句简短自然的话，像宠物自己想说话了，不要提及定时器或程序。',
+          `${o.getSystemPrompt()}\n\n[主动对话]请结合当前时间与最近聊天内容自然地主动开启话题，` +
+          '只说一两句简短自然的话，不要提及定时器或程序。',
       },
       ...o.getRecentHistory(2),
     ];

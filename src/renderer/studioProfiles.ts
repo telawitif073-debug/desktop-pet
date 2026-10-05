@@ -9,7 +9,7 @@ import { newProfileId } from './agentPort';
 /** 尚无任何档案时聊天记录挂靠的保留键（须与主进程 config.ts 的 UNBOUND_PROFILE_ID 一致） */
 export const UNBOUND_PROFILE_ID = '__unbound__';
 
-/** 新建档案：空 Key/模型（避免把上一个 API 内容带进来），默认启用、未绑定形象 */
+/** 新建档案：空 Key/模型（避免把上一个 API 内容带进来），默认启用 */
 export function createProfile(profiles: LlmProfile[], now = Date.now()): LlmProfile {
   return {
     id: newProfileId(now),
@@ -18,7 +18,6 @@ export function createProfile(profiles: LlmProfile[], now = Date.now()): LlmProf
     baseUrl: '',
     model: '',
     systemPrompt: '',
-    petAssetId: '',
     enabled: true,
   };
 }
@@ -93,23 +92,10 @@ export function inheritUnboundMessages(
   return { messages: current, inherited: unbound.length };
 }
 
-/** 切换激活前的严格绑定校验：返回拦截原因（null = 允许） */
-export function activationBlockReason(
-  profile: LlmProfile,
-  state: { activeId: string; installedPetId?: string; hasInstalledPet: boolean },
-): string | null {
-  if (profile.id === state.activeId) return '该智能体已是当前对话对象';
+/** 切换激活前的校验：返回拦截原因（null = 允许） */
+export function activationBlockReason(profile: LlmProfile, activeId: string): string | null {
+  if (profile.id === activeId) return '该智能体已是当前对话对象';
   if (profile.enabled === false) return '该智能体已停用：请先启用再切换';
-  const bound = (profile.petAssetId ?? '').trim();
-  // 未绑定形象：跟随本机当前形象（含内置默认形象），直接放行——
-  // 桌面为单形象模型，若在此拦截会让「刚装好还没下形象」的用户无法切换任何智能体
-  if (!bound) return null;
-  if (!state.hasInstalledPet) {
-    return '该智能体绑定的形象不在本机：请先在资源商店安装该形象（右键宠物 → 打开商店 → 宠物）';
-  }
-  if (bound !== (state.installedPetId ?? '').trim()) {
-    return '该智能体绑定的形象不是本机当前形象：请先在商店安装它，或在编辑器中改绑当前形象';
-  }
   return null;
 }
 

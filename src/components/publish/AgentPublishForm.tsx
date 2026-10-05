@@ -7,7 +7,7 @@ import type { LlmProfile, PublishFilePayload, PublishPayload } from '../../globa
  * 「发布智能体」：智能体发布（原通用发布表单的智能体部分）。
  * - 结构化配置：自动生成配置 JSON 作为资源文件，可用本机智能体预填（不含 API Key）
  * - 上传 JSON：直接提交现成配置文件
- * 宠物与音色的发布分别在各自主页（添加宠物资源 / 发布音色）。
+ * 音色的发布在「发布音色」页。
  */
 interface AgentConfig {
   name: string;
@@ -15,7 +15,6 @@ interface AgentConfig {
   temperature: number;
   model?: string;
   baseUrl?: string;
-  asr?: { mode: 'transcribe' | 'chat'; baseUrl: string; apiKey: string; model: string; language?: string };
 }
 
 const AgentPublishForm = ({
@@ -34,12 +33,6 @@ const AgentPublishForm = ({
   const [temperature, setTemperature] = useState('0.8');
   const [model, setModel] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
-  const [asrEnabled, setAsrEnabled] = useState(false);
-  const [asrMode, setAsrMode] = useState<'transcribe' | 'chat'>('transcribe');
-  const [asrBaseUrl, setAsrBaseUrl] = useState('');
-  const [asrApiKey, setAsrApiKey] = useState('');
-  const [asrModel, setAsrModel] = useState('');
-  const [asrLanguage, setAsrLanguage] = useState('zh');
   const [dependencies, setDependencies] = useState('');
   const [file, setFile] = useState<PublishFilePayload | null>(null);
   const [rawConfig, setRawConfig] = useState<Record<string, unknown> | null>(null);
@@ -51,17 +44,6 @@ const AgentPublishForm = ({
     temperature: Number(temperature) || 0,
     ...(model.trim() ? { model: model.trim() } : {}),
     ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
-    ...(asrEnabled && asrBaseUrl.trim() && asrModel.trim()
-      ? {
-          asr: {
-            mode: asrMode,
-            baseUrl: asrBaseUrl.trim(),
-            apiKey: asrApiKey.trim(),
-            model: asrModel.trim(),
-            ...(asrMode === 'transcribe' && asrLanguage.trim() ? { language: asrLanguage.trim() } : {}),
-          },
-        }
-      : {}),
   });
 
   const prefillFromProfile = (profile: LlmProfile) => {
@@ -136,7 +118,7 @@ const AgentPublishForm = ({
     <PublishLayout
       pub={pub}
       title="发布智能体"
-      description="把智能体（人设 + 参数 + 可选自带语音识别）提交到资源中心；审核通过后所有客户端都能搜索、下载并安装。"
+      description="把智能体（人设 + 参数）提交到资源中心；审核通过后所有客户端都能搜索、下载并安装。"
       submitLabel="提交审核"
       submitHint="审核通过后资源会出现在资源中心的智能体列表；系统提示词立即生效，温度/模型/接口地址会覆盖安装者的手动配置。"
       onSubmit={() => void submit()}
@@ -202,35 +184,6 @@ const AgentPublishForm = ({
           <label style={labelStyle}>指定接口地址（可选）</label>
           <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="例如：https://api.deepseek.com/v1" style={inputStyle} />
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.text, cursor: 'pointer', marginBottom: 8 }}>
-            <input type="checkbox" checked={asrEnabled} onChange={(event) => setAsrEnabled(event.target.checked)} />
-            让这个智能体自带语音识别（安装者无需再导入语音模型）
-          </label>
-          {asrEnabled && (
-            <div style={{ padding: 10, border: `1px solid ${C.border}`, borderRadius: 6, background: C.panel, marginBottom: 10 }}>
-              <ChoiceRow
-                label="识别方式"
-                value={asrMode}
-                options={[
-                  { value: 'transcribe' as const, label: '语音转写（whisper-1）' },
-                  { value: 'chat' as const, label: '能听音频的聊天模型' },
-                ]}
-                onChange={setAsrMode}
-              />
-              <label style={labelStyle}>识别接口地址</label>
-              <input value={asrBaseUrl} onChange={(event) => setAsrBaseUrl(event.target.value)} placeholder="例如：https://api.openai.com/v1" style={inputStyle} />
-              <label style={labelStyle}>识别 API Key（随资源下发，安装者可替换）</label>
-              <input value={asrApiKey} onChange={(event) => setAsrApiKey(event.target.value)} placeholder="sk-..." style={inputStyle} />
-              <label style={labelStyle}>识别模型名</label>
-              <input value={asrModel} onChange={(event) => setAsrModel(event.target.value)} placeholder={asrMode === 'chat' ? 'gpt-4o-audio' : 'whisper-1'} style={inputStyle} />
-              {asrMode === 'transcribe' && (
-                <>
-                  <label style={labelStyle}>语言（可选，默认中文）</label>
-                  <input value={asrLanguage} onChange={(event) => setAsrLanguage(event.target.value)} placeholder="zh" style={inputStyle} />
-                </>
-              )}
-            </div>
-          )}
           <div style={{ fontSize: 11, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
             提交时会自动生成配置 JSON 作为资源文件，无需手动上传。
           </div>
@@ -242,7 +195,7 @@ const AgentPublishForm = ({
             accept=".json,application/json"
             value={file}
             onChange={(next) => void handleRawFile(next)}
-            hint="顶层需为对象，可包含 name / systemPrompt / temperature / model / baseUrl / asr"
+            hint="顶层需为对象，可包含 name / systemPrompt / temperature / model / baseUrl"
           />
           {rawError && <div style={{ fontSize: 11, color: C.danger, marginBottom: 8, lineHeight: 1.7 }}>{rawError}</div>}
           {rawConfig && (
@@ -264,14 +217,7 @@ const AgentPublishForm = ({
               border: `1px solid ${C.border}`, borderRadius: 6, padding: 10, whiteSpace: 'pre-wrap',
             }}
           >
-            {JSON.stringify(
-              {
-                ...structuredConfig(),
-                ...(asrEnabled ? { asr: { mode: asrMode, baseUrl: asrBaseUrl.trim(), model: asrModel.trim() } } : {}),
-              },
-              null,
-              2,
-            )}
+            {JSON.stringify(structuredConfig(), null, 2)}
           </pre>
         </details>
       )}

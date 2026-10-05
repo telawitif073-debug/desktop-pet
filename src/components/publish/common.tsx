@@ -4,7 +4,7 @@ import { toPayloadFile } from '../../renderer/publishFiles';
 import type { PlatformAuthState, PublishFilePayload, PublishPayload } from '../../global.d';
 
 /**
- * 三类发布（宠物资源 / 智能体 / 音色）共用的发布底座：
+ * 两类发布（智能体 / 音色）共用的发布底座：
  * - usePublish()：平台登录态、提交、结果与错误口径统一（都走主进程 platform:upload）
  * - PublishLayout：左侧表单 + 右侧「账号卡 + 提交卡」的统一版式
  * - FileField / ChoiceRow：共用表单控件

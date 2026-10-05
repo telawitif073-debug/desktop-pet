@@ -2,7 +2,7 @@
  * 智能体档案「导入 / 导出 / 人设卡 / 多智能体编排」纯逻辑
  * （逐字移植自 mobile/src/agentPort.ts，剥离 RN 依赖，改为渲染端本地类型）。
  *
- * 口径：导出剥离 apiKey/id/petAssetId/boundVoiceId 等本机偏好与多智能体凭证值；
+ * 口径：导出剥离 apiKey/id/boundVoiceId 等本机偏好与多智能体凭证值；
  * 导入支持 JSON / YAML 子集 / 人设卡（agent_name / persona）/ 代码块包裹与前后说明文字，
  * 同名合并（保留本地 id/Key/绑定/启停与对话），新名称新增为独立智能体。
  */
@@ -14,7 +14,7 @@ import type {
   LlmProfile,
   MultiAgentDependency,
 } from '../global.d';
-import { detectCapabilities, type CapabilityDetection } from './petCapabilities';
+import { detectCapabilities, type CapabilityDetection } from './agentCapabilities';
 
 /** 新建档案 id（与 studioProfiles.createProfile 共用同一形态：p_<时间36>_<随机>） */
 export function newProfileId(now = Date.now()): string {
@@ -31,7 +31,7 @@ export interface AgentExportFile {
   profiles: NormalizedAgent[];
 }
 
-/** 一条可导入的智能体配置（不含 id/petAssetId，apiKey 可为空） */
+/** 一条可导入的智能体配置（不含 id，apiKey 可为空） */
 export interface NormalizedAgent {
   name: string;
   baseUrl: string;
@@ -45,7 +45,7 @@ export interface NormalizedAgent {
   greeting: string;
   exampleQuestions: string[];
   apiKey: string;
-  /** 从该条 JSON 检测到的自带能力（导入时询问用户是否添加，见 petCapabilities.ts） */
+  /** 从该条 JSON 检测到的自带能力（导入时询问用户是否添加，见 agentCapabilities.ts） */
   detection?: CapabilityDetection;
   enabled: boolean;
 }
@@ -72,7 +72,7 @@ export interface CapabilityOffer {
   reasons: string[];
 }
 
-/** 导出：剥离 apiKey / id / petAssetId / 凭证值，保留可移植的文本与展示字段 */
+/** 导出：剥离 apiKey / id / boundVoiceId / 凭证值，保留可移植的文本与展示字段 */
 export function exportAgentJson(profiles: LlmProfile[]): string {
   const safe: NormalizedAgent[] = profiles.map((p) => {
     const base = {
@@ -665,7 +665,7 @@ function inferDependency(key: string): Pick<MultiAgentDependency, 'type' | 'prot
 export function buildDependencyList(value: unknown, keyHint: string): MultiAgentDependency[] {
   const keys = new Set<string>();
   collectPlaceholderKeys(value, keys);
-  // 也收集位于配置 key 中的占位符（如 name: ${PET_NAME}）
+  // 也收集位于配置 key 中的占位符（如 name: ${USER_NAME}）
   collectPlaceholderKeys(keyHint, keys);
   const deps: MultiAgentDependency[] = [];
   let idx = 0;

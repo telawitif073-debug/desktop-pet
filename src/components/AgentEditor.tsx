@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import type { AgentCapabilityKind, AgentCapabilitySpec, InstalledVoice, LlmProfile } from '../global.d';
-import { capabilityDesc, capabilityLabel, detectCapabilities } from '../renderer/petCapabilities';
+import { capabilityDesc, capabilityLabel, detectCapabilities } from '../renderer/agentCapabilities';
 import { isPersonaCard, parseConfigText, personaCardToAgent } from '../renderer/agentPort';
 import { composeAgentPrompt } from '../shared/agentPrompt';
 
 /**
  * 智能体全字段编辑器（创作中心右栏，T4）：
- * 手机端 ProfileManager 的全部字段 + 能力与规格 + 绑定形象/专属音色 + 单条导入 + 实时预览。
+ * 手机端 ProfileManager 的全部字段 + 能力与规格 + 专属音色 + 单条导入 + 实时预览。
  * 表单状态由父级用 key={profile.id} 强制重建，切换智能体即重新初始化（不做跨档残留）。
  */
 
@@ -82,13 +82,11 @@ function ChipRow({
 
 const AgentEditor = ({
   profile,
-  petAsset,
   voices,
   onSave,
   onNotify,
 }: {
   profile: LlmProfile;
-  petAsset: { id?: string; name?: string } | null;
   voices: InstalledVoice[];
   onSave: (patch: Partial<LlmProfile>) => Promise<void>;
   onNotify: (message: string) => void;
@@ -108,7 +106,6 @@ const AgentEditor = ({
   const [tagDraft, setTagDraft] = useState('');
   const [role, setRole] = useState(profile.role ?? '');
   const [style, setStyle] = useState(profile.style ?? '');
-  const [bindPetId, setBindPetId] = useState(profile.petAssetId ?? '');
   const [bindVoiceId, setBindVoiceId] = useState(profile.boundVoiceId ?? '');
   const [caps, setCaps] = useState<AgentCapabilityKind[]>(profile.capabilities?.enabled ?? []);
   const [capSpec, setCapSpec] = useState<AgentCapabilitySpec>(profile.capabilities?.spec ?? {});
@@ -150,7 +147,6 @@ const AgentEditor = ({
       domainTags: tags,
       role: role.trim(),
       style: style.trim(),
-      petAssetId: bindPetId,
       boundVoiceId: bindVoiceId,
       capabilities:
         caps.length || Object.keys(capSpec).length
@@ -385,16 +381,6 @@ const AgentEditor = ({
 
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1 }}>
-          <label style={labelStyle}>绑定宠物形象</label>
-          <select value={bindPetId} onChange={(e) => setBindPetId(e.target.value)} style={inputStyle}>
-            <option value="">跟随本机当前形象{petAsset?.name ? `（${petAsset.name}）` : ''}</option>
-            {petAsset?.id && <option value={petAsset.id}>{petAsset.name || petAsset.id}（本机已安装）</option>}
-            {bindPetId && bindPetId !== petAsset?.id && (
-              <option value={bindPetId}>{bindPetId}（不在本机，切到该形象需先安装）</option>
-            )}
-          </select>
-        </div>
-        <div style={{ flex: 1 }}>
           <label style={labelStyle}>朗读音色</label>
           <select value={bindVoiceId} onChange={(e) => setBindVoiceId(e.target.value)} style={inputStyle}>
             <option value="">跟随全局音色</option>
@@ -493,7 +479,7 @@ const AgentEditor = ({
             wordBreak: 'break-word',
           }}
         >
-          {preview || '(未填写系统提示词：将沿用默认宠物人格)'}
+          {preview || '(未填写系统提示词：将沿用默认人格)'}
         </pre>
         {form.greeting.trim() && (
           <div style={{ marginTop: 8, padding: 8, background: C.panelAlt, borderRadius: 4, fontSize: 11 }}>

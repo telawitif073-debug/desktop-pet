@@ -1,25 +1,12 @@
 import axios, { isAxiosError } from 'axios';
 import AdmZip from 'adm-zip';
-import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { app } from 'electron';
-import { loadConfig, saveConfig, type AppConfig, type PetFormat } from './config';
-import { addFramesAction, addClipAction, addVideoAction, clearPlatformActions } from './petActions';
-import { readBuiltinCover } from './builtinPets';
-import { pickPetAppearance } from './petPack';
-import {
-  ACTION_PAYLOAD_DIR,
-  ACTION_PAYLOAD_MANIFEST,
-  actionPayloadDirName,
-  migrateActionModel,
-  validatePetActionModel,
-  type PetActionModel,
-} from '../pet';
-import { buildPetPackForPublish } from './petPackPublish';
+import { loadConfig, saveConfig, type AppConfig, type InstalledVoice, type VoiceConfig } from './config';
 
-export type PlatformAssetType = 'pet' | 'agent' | 'voice';
+export type PlatformAssetType = 'agent' | 'voice';
 
 /** 渲染端经 IPC 传来的待上传文件（结构化克隆：原始文件名 + 字节） */
 export interface UploadFilePayload {
@@ -29,32 +16,15 @@ export interface UploadFilePayload {
   bytes: Uint8Array;
 }
 
-/**
- * 随宠物包一起发布的动作（发布时由主进程注入到包内：
- * 帧图/视频写入 `pet/actions/<动作名>/`，元数据汇总成 `pet/actions.json`）。
- */
-export interface PublishPackAction {
-  name: string;
-  interaction?: 'none' | 'feed' | 'rest' | 'play';
-  /** frames=帧图序列（file 为 zip）；clip=模型内置动画（无文件）；video=透明 webm */
-  kind: 'frames' | 'clip' | 'video';
-  /** kind='clip' 时的模型动画名；缺省取动作名 */
-  clipName?: string;
-  /** kind='frames' 的帧图 zip；kind='video' 的 webm */
-  file?: UploadFilePayload;
-}
-
-/** 宠工坊各页发布的载荷（宠物 → POST /pet-packs，智能体 → POST /agents，音色 → POST /voices） */
+/** 工作台各页发布的载荷（智能体 → POST /agents，音色 → POST /voices） */
 export interface PublishPayload {
   type: PlatformAssetType;
   /** 纯文本字段（name/description/category/tags(JSON)/version/configSchema/dependencies 等） */
   fields: Record<string, string>;
-  /** 宠物包 zip（宠物必填）；智能体结构化配置由渲染端生成 JSON 后放入 */
+  /** 资源文件（智能体配置 JSON 等） */
   file?: UploadFilePayload;
-  /** 宠物封面图（可选；不参与本体判定） */
+  /** 封面图（可选） */
   preview?: UploadFilePayload;
-  /** 随宠物包发布的动作（可选） */
-  actions?: PublishPackAction[];
 }
 
 export interface PlatformAuthState {
@@ -105,12 +75,6 @@ interface AssetResponse {
   status: string;
   /** 智能体：配置文件地址 */
   fileUrl?: string;
-  /** 宠物包（POST /pet-packs）：zip 地址 / 完整性 sha256 / 体积 */
-  packUrl?: string;
-  packSha256?: string;
-  packBytes?: number | null;
-  /** 宠物合格本体类型（由服务端校验派生，不是作者填写） */
-  bodyKinds?: string[];
   /** 兼容旧字段（新契约不再返回） */
   format?: unknown;
   [key: string]: unknown;
@@ -119,25 +83,22 @@ interface AssetResponse {
 interface DownloadResponse {
   url: string;
   downloads: number;
-  /** 宠物包下载附带（安装前做完整性校验） */
-  sha256?: string;
-  bytes?: number | null;
   version?: string;
 }
 
-/** 本地安装目录名：沿用 `pets`/`agents`，避免已安装宠物的识别与卸载断链 */
+/** 本地安装目录名（智能体 / 音色资源字节） */
 function assetPath(type: PlatformAssetType): string {
-  return type === 'pet' ? 'pets' : 'agents';
+  return type === 'agent' ? 'agents' : 'voices';
 }
 
-/** 平台接口资源路径：宠物已由「单文件 /pets」改为「宠物包 /pet-packs」 */
+/** 平台接口资源路径 */
 function apiPath(type: PlatformAssetType): string {
-  return type === 'pet' ? 'pet-packs' : type === 'agent' ? 'agents' : 'voices';
+  return type === 'agent' ? 'agents' : 'voices';
 }
 
 function assertAssetType(type: string): asserts type is PlatformAssetType {
-  if (type !== 'pet' && type !== 'agent') {
-    throw new Error('资源类型必须是 pet 或 agent');
+  if (type !== 'agent' && type !== 'voice') {
+    throw new Error('资源类型必须是 agent 或 voice');
   }
 }
 
@@ -158,17 +119,6 @@ function findFirstFile(directory: string, predicate: (filePath: string) => boole
   return null;
 }
 
-/** 递归收集目录下全部文件（含子目录），用于动作包解压后的帧图扫描 */
-function listFiles(directory: string): string[] {
-  const result: string[] = [];
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) result.push(...listFiles(entryPath));
-    else result.push(entryPath);
-  }
-  return result;
-}
-
 function isZipFile(filePath: string, contentType?: string): boolean {
   if (contentType?.includes('zip')) return true;
   const header = Buffer.alloc(2);
@@ -179,22 +129,6 @@ function isZipFile(filePath: string, contentType?: string): boolean {
     fs.closeSync(file);
   }
   return header[0] === 0x50 && header[1] === 0x4b;
-}
-
-const IMAGE_EXTS = /\.(png|jpe?g|gif|webp)$/i;
-
-/** 文件 sha256（十六进制小写），用于宠物包完整性校验 */
-function sha256OfFile(filePath: string): string {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
-}
-
-/** 在 base 目录内安全解析相对路径（拒绝绝对路径与越界 `..`）；非法返回 null */
-function safeResolve(base: string, relative: string): string | null {
-  if (typeof relative !== 'string' || !relative.trim() || path.isAbsolute(relative)) return null;
-  const resolved = path.resolve(base, relative);
-  const inside = path.relative(base, resolved);
-  if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) return null;
-  return resolved;
 }
 
 export class PlatformClient {
@@ -253,7 +187,7 @@ export class PlatformClient {
     return { success: true };
   }
 
-  // ── 鉴权状态（宠工坊「上传/发布」与平台 Web 窗口共用同一份令牌）──
+  // ── 鉴权状态（工作台「上传/发布」与平台 Web 窗口共用同一份令牌）──
 
   getAuthState(): PlatformAuthState {
     const platform = this.config.platform;
@@ -277,7 +211,7 @@ export class PlatformClient {
     return this.getAuthState();
   }
 
-  // ── 发布资源（宠工坊「上传/发布」工作区 → 平台 POST /pets | /agents）──
+  // ── 发布资源（工作台「上传/发布」工作区 → 平台 POST /agents | /voices）──
 
   /** 上传文件 → multipart 段（MIME 以后缀映射为准，需与后端白名单严格匹配） */
   private toBlobPart(file: UploadFilePayload): Blob {
@@ -286,16 +220,9 @@ export class PlatformClient {
     return new Blob([Buffer.from(file.bytes)], { type: mime });
   }
 
-  /**
-   * 提交资源到平台（等待管理员审核）。
-   * - **宠物**：必须是一个 zip 宠物包（POST /pet-packs）。先本地解包跑 `evaluatePetPack`
-   *   （提前失败，避免白传），再按需把附带动作注入包内
-   *   （帧图/视频 → `pet/actions/<动作名>/`，元数据 → `pet/actions.json`），重新打包上传；
-   * - 智能体 / 音色：沿用单文件 multipart。
-   */
+  /** 提交资源到平台（等待管理员审核）：智能体 / 音色走单文件 multipart */
   async publish(payload: PublishPayload) {
-    if (payload.type === 'pet') return this.publishPetPack(payload);
-
+    assertAssetType(payload.type);
     const form = new FormData();
     if (payload.file) form.append('file', this.toBlobPart(payload.file), payload.file.name);
     if (payload.preview) form.append('preview', this.toBlobPart(payload.preview), payload.preview.name);
@@ -320,39 +247,20 @@ export class PlatformClient {
     }
   }
 
-  /**
-   * 宠物包发布：本地组装（解包 → 预校验 → 注入动作 → 重打包，见 petPackPublish.ts）后 POST /pet-packs。
-   * 本地预校验失败即抛错，**不发起上传**（避免白传几十 MB）。
-   */
-  private async publishPetPack(payload: PublishPayload) {
-    const packFile = payload.file;
-    if (!packFile) throw new Error('请选择宠物包文件（.zip）');
-    if (!/\.zip$/i.test(packFile.name)) throw new Error('宠物包必须是 .zip 压缩包');
-    const packed = buildPetPackForPublish(Buffer.from(packFile.bytes), payload.actions ?? []);
-
-    const form = new FormData();
-    form.append('pack', new Blob([packed], { type: 'application/zip' }), packFile.name);
-    if (payload.preview) form.append('preview', this.toBlobPart(payload.preview), payload.preview.name);
-    for (const [key, value] of Object.entries(payload.fields)) {
-      if (value !== undefined && value !== null && value !== '') form.append(key, value);
-    }
-    return this.postForm('/pet-packs', form);
-  }
-
   // --- 用户数据云同步（/api/sync/*，LLM Key 由服务端 AES 加密落库） ---
   /** kind 用下划线（客户端内部标识），服务端路由用连字符（REST 惯例） */
-  private syncPath(kind: 'config' | 'pet_state' | 'chat_history'): string {
-    return `/sync/${kind === 'pet_state' ? 'pet-state' : kind === 'chat_history' ? 'chat-history' : 'config'}`;
+  private syncPath(kind: 'config' | 'chat_history'): string {
+    return `/sync/${kind === 'chat_history' ? 'chat-history' : 'config'}`;
   }
 
-  async syncGet(kind: 'config' | 'pet_state' | 'chat_history') {
+  async syncGet(kind: 'config' | 'chat_history') {
     const response = await axios.get(apiUrl(this.config.platform.baseUrl, this.syncPath(kind)), {
       headers: this.headers,
     });
     return response.data as { data: unknown; updatedAt: string | null };
   }
 
-  async syncPut(kind: 'config' | 'pet_state' | 'chat_history', data: unknown) {
+  async syncPut(kind: 'config' | 'chat_history', data: unknown) {
     const response = await axios.put(
       apiUrl(this.config.platform.baseUrl, this.syncPath(kind)),
       { data },
@@ -374,93 +282,11 @@ export class PlatformClient {
       responseType: 'arraybuffer',
       headers: this.headers,
     });
-    const extension = path.extname(new URL(fileUrl).pathname) || (type === 'agent' ? '.json' : '.asset');
+    const extension = path.extname(new URL(fileUrl).pathname) || '.json';
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-pet-platform-'));
     const tempPath = path.join(tempDir, `${id}${extension}`);
     fs.writeFileSync(tempPath, Buffer.from(file.data));
     return { tempPath, detail, downloads: download.data.downloads };
-  }
-
-  /**
-   * 从**已解包的宠物包内**安装动作（动作随宠物；旧的 `/pets/:id/actions` 独立接口已下线）：
-   * 读 `pet/actions.json` → 迁移/校验 → 按 kind 落盘注册：
-   *  - frames：`pet/actions/<动作名>/frame_*.png` 拷进 `userData/pet-actions/<id>/`；
-   *  - video ：`pet/actions/<动作名>/clip.webm` 直接注册；
-   *  - clip  ：模型内置动画，按名字登记（无文件）。
-   * 单个动作失败不阻断安装，但**必须回报失败清单**——过去只 console.error，
-   * 动作静默缩水时用户完全看不见。
-   */
-  private installPackActions(
-    installDir: string,
-    petId: string,
-  ): { installed: number; failures: Array<{ name: string; reason: string }> } {
-    const manifestPath = path.join(installDir, ...ACTION_PAYLOAD_MANIFEST.split('/'));
-    if (!fs.existsSync(manifestPath)) return { installed: 0, failures: [] };
-
-    let model: PetActionModel;
-    try {
-      const migrated = migrateActionModel(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
-      const check = validatePetActionModel(migrated);
-      if (!check.ok) {
-        return { installed: 0, failures: [{ name: ACTION_PAYLOAD_MANIFEST, reason: `动作清单非法：${check.errors.join('；')}` }] };
-      }
-      model = migrated as PetActionModel;
-    } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e);
-      return { installed: 0, failures: [{ name: ACTION_PAYLOAD_MANIFEST, reason: `解析失败：${reason}` }] };
-    }
-
-    let installed = 0;
-    const failures: Array<{ name: string; reason: string }> = [];
-    const register = (name: string, run: () => void): void => {
-      try {
-        run();
-        installed += 1;
-      } catch (e) {
-        const reason = e instanceof Error ? e.message : String(e);
-        failures.push({ name, reason });
-        console.error(`Failed to install pack action "${name}": ${reason}`);
-      }
-    };
-
-    for (const [ref, spec] of Object.entries(model.actions ?? {})) {
-      const interaction = spec.interaction ?? 'none';
-      if (spec.kind === 'video') {
-        const rel = spec.videoFile;
-        register(ref, () => {
-          if (!rel) throw new Error('video 动作缺少 videoFile');
-          const file = safeResolve(installDir, rel);
-          if (!file || !fs.existsSync(file)) throw new Error(`缺少视频文件：${rel}`);
-          addVideoAction(ref, { filename: path.basename(file), data: fs.readFileSync(file) }, { petAssetId: petId, interaction });
-        });
-      } else if (spec.kind === 'clip') {
-        register(ref, () => addClipAction(ref, ref, { petAssetId: petId, interaction }));
-      } else {
-        register(ref, () => {
-          const dirName = actionPayloadDirName(ref);
-          const dir = path.join(installDir, ACTION_PAYLOAD_DIR, dirName);
-          const frames = fs.existsSync(dir)
-            ? listFiles(dir)
-                .filter((p) => IMAGE_EXTS.test(p))
-                .sort((a, b) => path.basename(a).localeCompare(path.basename(b), undefined, { numeric: true }))
-            : [];
-          if (!frames.length) throw new Error(`缺少帧图目录 ${ACTION_PAYLOAD_DIR}/${dirName}/`);
-          addFramesAction(
-            ref,
-            frames.map((p) => ({ filename: path.basename(p), data: fs.readFileSync(p) })),
-            // 载荷来自已校验的宠物包（该目录刻意不参与本体判定），跳过「是否宠物本体」的启发式
-            { petAssetId: petId, interaction, frameRate: spec.frameRate, skipBodyCheck: true },
-          );
-        });
-      }
-    }
-
-    // 模型内置动画（Live2D/3D）：清单里只留名字，按名字登记
-    for (const clip of model.modelClips ?? []) {
-      if (model.actions && model.actions[clip]) continue;
-      register(clip, () => addClipAction(clip, clip, { petAssetId: petId }));
-    }
-    return { installed, failures };
   }
 
   async install(type: PlatformAssetType, id: string) {
@@ -471,85 +297,74 @@ export class PlatformClient {
     fs.rmSync(installDir, { recursive: true, force: true });
     fs.mkdirSync(installDir, { recursive: true });
 
-    // 宠物包：先做完整性校验（不信任传输链路），再解包
-    if (type === 'pet') {
-      const expected = downloaded.detail.packSha256;
-      if (typeof expected === 'string' && expected) {
-        const actual = sha256OfFile(downloaded.tempPath);
-        if (actual.toLowerCase() !== expected.toLowerCase()) {
-          throw new Error('宠物包完整性校验失败（sha256 与服务端不一致），已中止安装');
-        }
-      }
-    }
-
-    const contentType = undefined;
-    if (isZipFile(downloaded.tempPath, contentType)) {
+    if (isZipFile(downloaded.tempPath)) {
       new AdmZip(downloaded.tempPath).extractAllTo(installDir, true);
     } else {
       fs.copyFileSync(downloaded.tempPath, path.join(installDir, path.basename(downloaded.tempPath)));
-    }
-
-    if (type === 'pet') {
-      // 动作随宠物：换宠物时先清除旧宠物的资源库动作与互动绑定
-      clearPlatformActions();
-
-      // 入口文件：按「宠物本体资源分类标准」（src/pet/resource.ts）挑本体入口。
-      // 过去是「main.* → 任意图片 → 目录里第一个文件」的 glob 兜底，会把图标/背景/截图/
-      // 表情包当成宠物本体装进来；现在若没有「够格的本体」则**显式报错，绝不回落**。
-      // 形态一律本地推断（body_kinds 只用于商店筛选，不作为安装依据）。
-      const pick = pickPetAppearance(installDir);
-      if (!pick.ok || !pick.path) {
-        const rejected = pick.evaluation.rejected
-          .slice(0, 5)
-          .map((r) => `${r.path}（${r.role}：${r.evidence[0]}）`)
-          .join('；');
-        throw new Error(
-          `宠物资源包校验未通过：${pick.errors.join('；')}` + (rejected ? `｜被拒资源：${rejected}` : ''),
-        );
-      }
-      const installedPath = pick.path;
-
-      // 动作来自包内 pet/actions.json（动作随宠物，随安装一次性落地）
-      const { installed: actionsCount, failures: actionsFailed } = this.installPackActions(installDir, id);
-
-      saveConfig({
-        petAssetPath: installedPath,
-        petAssetName: downloaded.detail.name,
-        petAssetId: id,
-        petAssetFormat: pick.format,
-        // 平台宠物与内置演示宠物互斥：装平台资源即让出内置形象
-        builtinPet: undefined,
-      });
-
-      fs.rmSync(path.dirname(downloaded.tempPath), { recursive: true, force: true });
-      return {
-        success: true, type, id, path: installedPath, actionsCount,
-        // 有动作没装上时一并回报（过去被静默吞掉，用户只会觉得"动作少了一堆"）
-        ...(actionsFailed.length ? { actionsFailed } : {}),
-      };
     }
 
     let installedPath = findFirstFile(installDir, (filePath) => /\.json$/i.test(filePath));
     if (!installedPath) installedPath = findFirstFile(installDir, () => true);
     if (!installedPath) throw new Error('资源文件为空，无法安装');
 
-    let agentConfig: unknown = null;
-    if (installedPath.endsWith('.json')) {
-      try {
-        agentConfig = JSON.parse(fs.readFileSync(installedPath, 'utf8'));
-      } catch {
-        agentConfig = null;
+    if (type === 'agent') {
+      let agentConfig: unknown = null;
+      if (installedPath.endsWith('.json')) {
+        try {
+          agentConfig = JSON.parse(fs.readFileSync(installedPath, 'utf8'));
+        } catch {
+          agentConfig = null;
+        }
       }
+      saveConfig({
+        agentType: downloaded.detail.type === 'string' ? downloaded.detail.type : 'installed',
+        agentConfigPath: installedPath,
+        installedAgentId: id,
+        installedAgentConfig: agentConfig,
+      });
+    } else {
+      // 音色：把资源内的配置登记进本机音色库
+      const config = this.readVoiceConfig(installedPath, downloaded.detail);
+      const voices = (this.config.downloadedVoices ?? []).filter((v) => v.id !== id);
+      const installed: InstalledVoice = {
+        id,
+        name: typeof downloaded.detail.name === 'string' && downloaded.detail.name ? downloaded.detail.name : id,
+        config,
+        installedAt: Date.now(),
+        fromStore: true,
+      };
+      saveConfig({ downloadedVoices: [...voices, installed] });
     }
-    saveConfig({
-      agentType: downloaded.detail.type === 'string' ? downloaded.detail.type : 'installed',
-      agentConfigPath: installedPath,
-      installedAgentId: id,
-      installedAgentConfig: agentConfig,
-    });
 
     fs.rmSync(path.dirname(downloaded.tempPath), { recursive: true, force: true });
     return { success: true, type, id, path: installedPath };
+  }
+
+  /** 从安装包内读取音色配置（configSchema 对象，或配置文件本身） */
+  private readVoiceConfig(installedPath: string, detail: AssetResponse): VoiceConfig {
+    let raw: unknown = null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(installedPath, 'utf8'));
+      raw = (parsed as { config?: unknown })?.config ?? (parsed as { configSchema?: unknown })?.configSchema ?? parsed;
+    } catch {
+      raw = (detail as { config?: unknown }).config ?? null;
+    }
+    const cfg = (raw && typeof raw === 'object' ? raw : {}) as Partial<VoiceConfig>;
+    const engine: VoiceConfig['engine'] =
+      cfg.engine === 'gptsovits' ? 'gptsovits' : cfg.engine === 'system' ? 'system' : 'cloud';
+    return {
+      engine,
+      voiceId: typeof cfg.voiceId === 'string' ? cfg.voiceId : '',
+      voiceName: typeof cfg.voiceName === 'string' ? cfg.voiceName : undefined,
+      baseUrl: typeof cfg.baseUrl === 'string' ? cfg.baseUrl : undefined,
+      model: typeof cfg.model === 'string' ? cfg.model : undefined,
+      instructions: typeof cfg.instructions === 'string' ? cfg.instructions : undefined,
+      sampleText: typeof cfg.sampleText === 'string' ? cfg.sampleText : undefined,
+      refAudioPath: typeof cfg.refAudioPath === 'string' ? cfg.refAudioPath : undefined,
+      promptText: typeof cfg.promptText === 'string' ? cfg.promptText : undefined,
+      promptLang: typeof cfg.promptLang === 'string' ? cfg.promptLang : undefined,
+      textLang: typeof cfg.textLang === 'string' ? cfg.textLang : undefined,
+    };
   }
 
   async uninstall(type: PlatformAssetType, id: string) {
@@ -557,55 +372,22 @@ export class PlatformClient {
     const installDir = path.join(app.getPath('userData'), assetPath(type), id);
     fs.rmSync(installDir, { recursive: true, force: true });
 
-    // 卸载宠物：清理该宠物的资源库动作（动作随宠物，不可跨宠物使用）
-    if (type === 'pet') {
-      clearPlatformActions(id);
-      const current = this.config.petAssetPath;
-      if (current && path.dirname(path.resolve(current)).toLowerCase() === installDir.toLowerCase()) {
+    if (type === 'agent') {
+      if (this.config.installedAgentId === id) {
         saveConfig({
-          petAssetPath: undefined,
-          petAssetName: undefined,
-          petAssetId: undefined,
-          petAssetFormat: undefined,
+          agentType: 'default',
+          agentConfigPath: undefined,
+          installedAgentId: undefined,
+          installedAgentConfig: undefined,
         });
       }
-    } else if (this.config.installedAgentId === id) {
+    } else {
       saveConfig({
-        agentType: 'default',
-        agentConfigPath: undefined,
-        installedAgentId: undefined,
-        installedAgentConfig: undefined,
+        downloadedVoices: (this.config.downloadedVoices ?? []).filter((v) => v.id !== id),
+        ...(this.config.activeCloudVoiceId === id ? { activeCloudVoiceId: '' } : {}),
       });
     }
     return { success: true };
-  }
-
-  getInstalledPet() {
-    const installedPath = this.config.petAssetPath;
-    const mimeTypes: Record<string, string> = {
-      '.gif': 'image/gif',
-      '.jpeg': 'image/jpeg',
-      '.jpg': 'image/jpeg',
-      '.png': 'image/png',
-      '.webp': 'image/webp',
-    };
-    if (installedPath && fs.existsSync(installedPath)) {
-      const mimeType = mimeTypes[path.extname(installedPath).toLowerCase()];
-      if (!mimeType) {
-        // 模型类宠物（live2d/model3d）：无位图入口，仅返回路径供渲染端走模型渲染分支
-        return { path: installedPath, dataUrl: null };
-      }
-      return {
-        path: installedPath,
-        dataUrl: `data:${mimeType};base64,${fs.readFileSync(installedPath).toString('base64')}`,
-      };
-    }
-    // 未安装平台宠物（或本地文件已丢失）：回落到内置演示宠物（离线可用）
-    if (this.config.builtinPet) {
-      const cover = readBuiltinCover(this.config.builtinPet);
-      if (cover) return { path: cover.path, dataUrl: cover.dataUrl || null };
-    }
-    return null;
   }
 
   getInstalledAgent() {

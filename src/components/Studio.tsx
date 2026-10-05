@@ -2,9 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import type { AgentCapabilityKind, LlmProfile } from '../global.d';
 import AgentEditor from './AgentEditor';
-import PetResources from './PetResources';
 import AgentPublishForm from './publish/AgentPublishForm';
-import PetPublishForm from './publish/PetPublishForm';
 import VoicePublishForm from './publish/VoicePublishForm';
 import {
   exportAgentJson,
@@ -13,7 +11,7 @@ import {
   type CapabilityOffer,
   type ImportOutcome,
 } from '../renderer/agentPort';
-import { capabilityDesc, capabilityLabel } from '../renderer/petCapabilities';
+import { capabilityDesc, capabilityLabel } from '../renderer/agentCapabilities';
 import {
   activationBlockReason,
   createProfile,
@@ -28,27 +26,25 @@ import {
 } from '../renderer/studioProfiles';
 
 /**
- * 宠工坊（资源中心窗口内嵌的内容页，hash 路由 #/workshop/embedded）：三个工作区 宠物资源 / 智能体 / 音色。
- * - 宠物资源：本机宠物形象 + 动作管理（原「动作」页全部内容） + 互动绑定 + 「添加宠物资源」发布
+ * 创作中心（资源中心窗口内嵌的内容页，hash 路由 #/workshop/embedded）：两个工作区 智能体 / 音色。
  * - 智能体：列表（搜索/卡片/启停/激活标记/复制/删除/切换/批量导入/导出）+ 编辑器 + 「发布智能体」
  * - 音色：本机音色库 + 「发布音色」（OpenAI 兼容 / GPT-SoVITS / 粘贴 JSON）
  * - 右上「资源中心」：打开平台 Web 窗口（浏览/安装、我的资源与审核状态、管理后台）；内嵌时该入口隐藏
- * 三处发布共用同一套发布底座（登录态 / 提交 / 结果口径），数据统一走主进程 platform:upload。
+ * 两处发布共用同一套发布底座（登录态 / 提交 / 结果口径），数据统一走主进程 platform:upload。
  * 所有写操作走 config:set（saveConfig）→ 持久化并触发防抖云同步。
  */
 
-type Workspace = 'pets' | 'agents' | 'voices';
+type Workspace = 'agents' | 'voices';
 
 const WORKSPACES: Array<{ id: Workspace; label: string; hint: string }> = [
-  { id: 'pets', label: '宠物资源', hint: '宠物形象、动作与互动绑定，并可添加宠物资源' },
   { id: 'agents', label: '智能体', hint: '智能体列表、编辑器与发布' },
   { id: 'voices', label: '音色', hint: '音色库与发布音色' },
 ];
 
-/** 历史入口（动作已并入宠物资源、上传/发布已分散到各页）→ 现行工作区 */
+/** 历史入口（动作/发布等）→ 现行工作区 */
 const LEGACY_WORKSPACE: Record<string, Workspace> = {
-  actions: 'pets',
-  publish: 'pets',
+  actions: 'agents',
+  publish: 'agents',
 };
 
 const C = {
@@ -96,7 +92,7 @@ function smallBtn(danger = false): React.CSSProperties {
  */
 const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; embedded?: boolean }) => {
   const { config, loadConfig, saveConfig } = useChatStore();
-  const [workspace, setWorkspace] = useState<Workspace>('pets');
+  const [workspace, setWorkspace] = useState<Workspace>('agents');
   /** 智能体工作区右栏：编辑器 / 发布表单（发布入口就在本页，无需另开界面） */
   const [agentPane, setAgentPane] = useState<'editor' | 'publish'>('editor');
   const [query, setQuery] = useState('');
@@ -117,18 +113,18 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
     void loadConfig();
   }, [loadConfig]);
 
-  // 配置广播：宠物窗等其他窗口改动配置后同步刷新，避免旧副本把新改动覆盖掉
+  // 配置广播：其他窗口改动配置后同步刷新，避免旧副本把新改动覆盖掉
   useEffect(() => {
     const cleanup = window.electronAPI?.onConfigChanged((next) => useChatStore.setState({ config: next }));
     return () => cleanup?.();
   }, []);
 
-  // 入口指定落地工作区（资源中心导航「宠工坊」/个人中心「上传新资源」）：
-  // 历史 tab（actions / publish）统一落到「宠物资源」页
+  // 入口指定落地工作区（资源中心导航「创作中心」/个人中心「上传新资源」）：
+  // 历史 tab（actions / publish）统一落到「智能体」页
   useEffect(() => {
     const cleanup = window.electronAPI?.onStudioWorkspace((tab) => {
       const target = LEGACY_WORKSPACE[tab] ?? tab;
-      if (target === 'pets' || target === 'agents' || target === 'voices') setWorkspace(target);
+      if (target === 'agents' || target === 'voices') setWorkspace(target);
       if (target === 'agents') setAgentPane('editor');
     });
     return () => cleanup?.();
@@ -211,16 +207,11 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
     showNotice(enabled ? `已启用「${profile.name}」` : `已停用「${profile.name}」`);
   };
 
-  /** 切换激活：严格绑定校验（形象缺失/已停用/已是当前项都会被拦截并给出指引） */
+  /** 切换激活：停用/已是当前项会被拦截并给出指引 */
   const activate = async (profile: LlmProfile) => {
     setBusy(true);
     try {
-      const installed = await window.electronAPI?.platform.getInstalledPet();
-      const reason = activationBlockReason(profile, {
-        activeId,
-        installedPetId: config?.petAssetId,
-        hasInstalledPet: !!installed,
-      });
+      const reason = activationBlockReason(profile, activeId);
       if (reason) {
         showNotice(reason);
         return;
@@ -381,14 +372,6 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
         )}
       </header>
 
-      {/* 宠物资源：左「本机宠物资源（形象 + 动作 + 互动绑定）」+ 右「添加宠物资源」发布 */}
-      {workspace === 'pets' && (
-        <main style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <PetResources onNotify={showNotice} />
-          <PetPublishForm onNotify={showNotice} />
-        </main>
-      )}
-
       {/* 音色：左「本机音色库」+ 右「发布音色」 */}
       {workspace === 'voices' && (
         <main style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -404,7 +387,7 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
             <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.8, marginBottom: 8 }}>
               已安装到本机的音色可在这里查看；平台音色商店的浏览 / 试听 / 安装在
               <span style={{ color: C.text }}> T9 </span>
-              接入，本机自建音色、云 TTS 服务配置与全局音色选择已在「聊天设置 → 宠物语音朗读 → 音色库管理」可用。
+              接入，本机自建音色、云 TTS 服务配置与全局音色选择已在「聊天设置 → 语音朗读 → 音色库管理」可用。
             </div>
             {installedVoices.length === 0 ? (
               <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.8 }}>
@@ -511,7 +494,7 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
             <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px 12px' }}>
               {profiles.length === 0 && (
                 <div style={{ padding: '18px 12px', border: `1px dashed ${C.border}`, borderRadius: 6, color: C.sub, fontSize: 12, lineHeight: 1.7 }}>
-                  还没有智能体。点「新增」创建第一个：每个智能体可绑定专属形象、人设与音色，对话记录互相隔离。
+                  还没有智能体。点「新增」创建第一个：每个智能体可绑定人设与专属音色，对话记录互相隔离。
                 </div>
               )}
               {profiles.length > 0 && visible.length === 0 && (
@@ -568,7 +551,6 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
                         <div style={{ fontSize: 11, color: C.sub, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {profile.model || '未填模型'}
                           {messages ? ` · ${messages} 条对话` : ''}
-                          {profile.petAssetId ? ` · 形象已绑定` : ' · 未绑定形象'}
                         </div>
                       </div>
                       <label
@@ -620,7 +602,7 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
                         <button
                           type="button"
                           disabled={busy}
-                          title="切换为该智能体（校验形象绑定）"
+                          title="切换为该智能体"
                           onClick={() => void activate(profile)}
                           style={{ ...smallBtn(), ...(isActive ? { opacity: 0.5, cursor: 'default' } : {}) }}
                         >
@@ -648,13 +630,12 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
                 <div style={{ color: C.sub, fontSize: 12, lineHeight: 1.9 }}>
                   从左侧选择一个智能体进行编辑，或点「新增」创建；也可以点「发布智能体」把本机配置提交到资源中心。
                   <br />
-                  每个智能体 = 一套 API + 人设 + 绑定形象 + 专属音色，对话按智能体隔离。
+                  每个智能体 = 一套 API + 人设 + 专属音色，对话按智能体隔离。
                 </div>
               ) : (
                 <AgentEditor
                   key={selected.id}
                   profile={selected}
-                  petAsset={config?.petAssetId ? { id: config.petAssetId, name: config.petAssetName } : null}
                   voices={installedVoices}
                   onSave={(patch) => saveEditorPatch(selected.id, patch)}
                   onNotify={showNotice}

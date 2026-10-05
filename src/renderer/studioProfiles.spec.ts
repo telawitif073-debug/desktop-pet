@@ -30,26 +30,24 @@ describe('studioProfiles 列表操作（T3）', () => {
     expect(UNBOUND_PROFILE_ID).toBe('__unbound__');
   });
 
-  it('createProfile：空白 Key/模型、默认启用、未绑定形象，同毫秒创建也不会重 id', () => {
+  it('createProfile：空白 Key/模型、默认启用，同毫秒创建也不会重 id', () => {
     const a = createProfile([], 1000);
     const b = createProfile([a], 1000);
     expect(a.apiKey).toBe('');
     expect(a.model).toBe('');
-    expect(a.petAssetId).toBe('');
     expect(a.enabled).toBe(true);
     expect(a.name).toBe('智能体 1');
     expect(b.name).toBe('智能体 2');
     expect(a.id).not.toBe(b.id);
   });
 
-  it('duplicateProfile：名称加副本、保留 Key/人设/绑定/专属音色，仅换新 id', () => {
-    const source = profile({ petAssetId: 'pet-1', boundVoiceId: 'local-1', systemPrompt: '人设' });
+  it('duplicateProfile：名称加副本、保留 Key/人设/专属音色，仅换新 id', () => {
+    const source = profile({ boundVoiceId: 'local-1', systemPrompt: '人设' });
     const copy = duplicateProfile(source, [source], 2000);
     expect(copy.id).not.toBe(source.id);
     expect(copy.name).toBe('医疗助手 副本');
     expect(copy.apiKey).toBe('sk-a');
     expect(copy.systemPrompt).toBe('人设');
-    expect(copy.petAssetId).toBe('pet-1');
     expect(copy.boundVoiceId).toBe('local-1');
   });
 
@@ -127,37 +125,16 @@ describe('studioProfiles 首个档案继承未绑定历史（T2 交接项）', (
 });
 
 describe('studioProfiles 切换与启停校验（T3）', () => {
-  const state = { activeId: 'p1', installedPetId: 'pet-1', hasInstalledPet: true };
-
   it('已是当前对话对象 → 拦截', () => {
-    expect(activationBlockReason(profile({ id: 'p1' }), state)).toContain('已是当前对话对象');
+    expect(activationBlockReason(profile({ id: 'p1' }), 'p1')).toContain('已是当前对话对象');
   });
 
   it('已停用 → 拦截，提示先启用', () => {
-    expect(activationBlockReason(profile({ id: 'p2', enabled: false }), state)).toContain('已停用');
+    expect(activationBlockReason(profile({ id: 'p2', enabled: false }), 'p1')).toContain('已停用');
   });
 
-  it('未绑定形象的档案跟随本机当前形象 → 放行（即使本机未安装商店形象）', () => {
-    expect(activationBlockReason(profile({ id: 'p2' }), { ...state, hasInstalledPet: false })).toBeNull();
-    expect(
-      activationBlockReason(profile({ id: 'p2', petAssetId: '' }), { ...state, hasInstalledPet: false }),
-    ).toBeNull();
-  });
-
-  it('绑定了形象但本机未安装 → 拦截并引导去商店', () => {
-    expect(
-      activationBlockReason(profile({ id: 'p2', petAssetId: 'pet-1' }), { ...state, hasInstalledPet: false }),
-    ).toContain('资源商店');
-  });
-
-  it('绑定的形象不是本机当前形象 → 拦截并给出两条出路', () => {
-    const reason = activationBlockReason(profile({ id: 'p2', petAssetId: 'pet-other' }), state);
-    expect(reason).toContain('不是本机当前形象');
-    expect(reason).toContain('改绑当前形象');
-  });
-
-  it('绑定形象与本机一致 → 允许', () => {
-    expect(activationBlockReason(profile({ id: 'p2', petAssetId: 'pet-1' }), state)).toBeNull();
+  it('未停用且非当前项 → 允许', () => {
+    expect(activationBlockReason(profile({ id: 'p2' }), 'p1')).toBeNull();
   });
 
   it('toggleBlockReason：可启用；停用激活项被拦截；停用非激活项放行', () => {

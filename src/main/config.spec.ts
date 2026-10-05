@@ -48,7 +48,7 @@ describe('getLLMConfig 档案驱动（API 全部由用户配置，无默认 API�
     expect(cfg.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
     expect(cfg.model).toBe('glm-4-flash');
     // profileB 无 systemPrompt：使用兜底人格提示词
-    expect(cfg.systemPrompt).toContain('桌面宠物');
+    expect(cfg.systemPrompt).toContain('智能助手');
   });
 
   it('llmActiveProfileId 未设置或失效时回落第一个档案', () => {
@@ -156,7 +156,7 @@ describe('旧档迁移与音色配置归一化（T2）', () => {
     model: 'old-model',
   };
 
-  it('旧 6 字段档案升级：补 enabled=true / petAssetId 空串，并回写磁盘（幂等）', () => {
+  it('旧 6 字段档案升级：补 enabled=true，并回写磁盘（幂等）', () => {
     const diskPath = path.join(userDataDir, 'config.json');
     fs.writeFileSync(
       diskPath,
@@ -167,14 +167,12 @@ describe('旧档迁移与音色配置归一化（T2）', () => {
     const profiles = configModule.loadConfig().llmProfiles ?? [];
     expect(profiles).toHaveLength(1);
     expect(profiles[0].enabled).toBe(true);
-    expect(profiles[0].petAssetId).toBe('');
     expect(profiles[0].apiKey).toBe('legacy-key'); // 原有字段不丢
     expect(profiles[0].name).toBe('旧档案');
 
     // 升级结果已回写磁盘
     const onDisk = JSON.parse(fs.readFileSync(diskPath, 'utf-8'));
     expect(onDisk.llmProfiles[0].enabled).toBe(true);
-    expect(onDisk.llmProfiles[0].petAssetId).toBe('');
 
     // 幂等：再次加载不产生新的结构变化
     expect((configModule.saveConfig({}).llmProfiles ?? [])[0].enabled).toBe(true);
@@ -182,7 +180,7 @@ describe('旧档迁移与音色配置归一化（T2）', () => {
 
   it('旧配置缺少新增字段时补默认值（profileMessages/音色/开关）', () => {
     const diskPath = path.join(userDataDir, 'config.json');
-    fs.writeFileSync(diskPath, JSON.stringify({ petWindow: { width: 280, height: 280, opacity: 1 } }), 'utf-8');
+    fs.writeFileSync(diskPath, JSON.stringify({ agentType: 'legacy' }), 'utf-8');
 
     const cfg = configModule.loadConfig();
     expect(cfg.profileMessages).toEqual({});
@@ -191,9 +189,6 @@ describe('旧档迁移与音色配置归一化（T2）', () => {
     expect(cfg.ttsCloudConfig).toEqual({ engine: 'openai', baseUrl: '', apiKey: '', model: '' });
     expect(cfg.showThinking).toBe(false);
     expect(cfg.thinkingLang).toBe('auto');
-    expect(cfg.moodFromChat).toBe(true);
-    expect(cfg.petTasks).toEqual([]);
-    expect(cfg.petWindow.width).toBe(280); // 旧配置不丢
   });
 
   it('音色库归一化：剔除非法条目、补默认值；云 TTS 凭证引擎缺省 openai', () => {

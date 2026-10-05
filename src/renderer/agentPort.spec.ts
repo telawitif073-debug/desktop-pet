@@ -14,7 +14,7 @@ import {
   safeRaw,
   yamlParseLite,
 } from './agentPort';
-import { capabilityDesc, capabilityLabel, detectCapabilities } from './petCapabilities';
+import { capabilityDesc, capabilityLabel, detectCapabilities } from './agentCapabilities';
 import type { LlmProfile } from '../global.d';
 
 function profile(over: Partial<LlmProfile> = {}): LlmProfile {
@@ -29,12 +29,11 @@ function profile(over: Partial<LlmProfile> = {}): LlmProfile {
 }
 
 describe('agentPort 导出剥离（T4）', () => {
-  it('导出不含 apiKey/id/petAssetId/boundVoiceId 等本机偏好', () => {
+  it('导出不含 apiKey/id/boundVoiceId 等本机偏好', () => {
     const json = exportAgentJson([
-      profile({ petAssetId: 'pet-1', boundVoiceId: 'local-1', avatar: '🐱', domainTags: ['医疗'] }),
+      profile({ boundVoiceId: 'local-1', avatar: '🐱', domainTags: ['医疗'] }),
     ]);
     expect(json).not.toContain('sk-secret');
-    expect(json).not.toContain('pet-1');
     expect(json).not.toContain('local-1');
     expect(json).not.toContain('"id"');
     const file = JSON.parse(json);
@@ -190,7 +189,7 @@ describe('agentPort 导入解析（T4）', () => {
   });
 });
 
-describe('petCapabilities 能力检测（T4）', () => {
+describe('agentCapabilities 能力检测（T4）', () => {
   it('结构化键命中：定时/主动/联网三类', () => {
     const det = detectCapabilities({
       capabilities: { natural_language_to_cron: true, proactive_chat: true, web_search: true },
@@ -255,10 +254,9 @@ describe('agentPort 合并导入（T4）', () => {
     enabled: true,
   };
 
-  it('同名更新：保留本地 id/Key/绑定形象/专属音色/启停与已启用能力，仅刷新声明字段', () => {
+  it('同名更新：保留本地 id/Key/专属音色/启停与已启用能力，仅刷新声明字段', () => {
     const current = [
       profile({
-        petAssetId: 'pet-1',
         boundVoiceId: 'local-1',
         enabled: false,
         avatar: '🐱',
@@ -274,7 +272,6 @@ describe('agentPort 合并导入（T4）', () => {
     const merged = outcome.list[0];
     expect(merged.id).toBe('p1'); // 保留本地 id
     expect(merged.apiKey).toBe('sk-secret'); // 保留本地 Key
-    expect(merged.petAssetId).toBe('pet-1');
     expect(merged.boundVoiceId).toBe('local-1');
     expect(merged.enabled).toBe(false); // 启停仍以本地为准
     expect(merged.avatar).toBe('🐱'); // 导入为空 → 保留本地

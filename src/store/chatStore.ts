@@ -1,9 +1,6 @@
 import { create } from 'zustand';
 import type { ChatMessage, AppConfig, ChatResult } from '../global.d';
 import { speak, speakContextFromConfig } from '../renderer/speech';
-import { resolveSenseImages, PERMISSION_HINTS } from '../renderer/senseIntent';
-import { moodDeltaFromText } from '../renderer/moodLink';
-import { usePetStore } from './petStore';
 
 interface ChatStore {
   messages: ChatMessage[];
@@ -43,6 +40,15 @@ function generateId(): string {
 }
 
 export const useChatStore = create<ChatStore>((set, get) => {
+  // 智能体主动对话：主进程定时投递消息，追加到会话并朗读
+  window.electronAPI?.onAgentMessage?.((text: string) => {
+    if (!text?.trim()) return;
+    set((state) => ({
+      messages: [...state.messages, { id: generateId(), role: 'assistant', content: text }],
+    }));
+    speak(text, speakContextFromConfig(get().config));
+  });
+
   /** 监听流式增量：正文（chat:chunk）与思考过程（chat:reasoning）分流累积 */
   const ensureChunkListeners = () => {
     if (chunkCleanup) return;
@@ -163,15 +169,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
 
       const config = get().config;
-      // 宠物状态系统开启时：有效回复好感 +1；「聊天影响心情」开启时再按情绪词 ±8
-      if (config?.petSystemEnabled !== false) {
-        usePetStore.getState().addAffection(1);
-        if (config?.moodFromChat !== false) {
-          const delta = moodDeltaFromText(finalText);
-          if (delta) usePetStore.getState().adjustMood(delta);
-        }
-      }
-      // 宠物语音：回复完成后朗读（配置在设置面板，enabled=false 时静默）
+      // 语音朗读：回复完成后朗读（配置在设置面板，enabled=false 时静默）
       if (finalText.trim()) speak(finalText, speakContextFromConfig(config));
     } catch (err) {
       patchMessage(messageId, {
@@ -199,17 +197,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     sendMessage: async (text: string, images?: string[]) => {
       if ((!text.trim() && !images?.length) || get().isLoading) return;
-      // 感知意图：「看桌面/拍我」类请求自动抓图随消息发送；权限未开显示引导提示（本地气泡，不入历史）
-      const sense = await resolveSenseImages(text, get().config?.petSenses);
-      if (sense.hint) {
-        set({ messages: [...get().messages, { id: generateId(), role: 'assistant', content: PERMISSION_HINTS[sense.hint] }] });
-        return;
-      }
-      if (sense.error) {
-        set({ messages: [...get().messages, { id: generateId(), role: 'assistant', content: `没成功看到：${sense.error}` }] });
-        return;
-      }
-      const allImages = [...(images ?? []), ...sense.images];
+      const allImages = images ?? [];
 
       const userMsg: ChatMessage = {
         id: generateId(),

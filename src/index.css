@@ -31,14 +31,6 @@ button {
   font-family: inherit;
 }
 
-/* 宠物画布定位：在 pet-stage 内绝对定位左缘对齐；气泡预留带激活时通过 --bubble-extra
-   整体下移（stage 自身向上长高、底边贴窗底 ⇒ 宠物屏幕位置不变），顶部腾出气泡带 */
-#pet-stage > canvas {
-  position: absolute;
-  left: 0;
-  top: var(--bubble-extra, 0px);
-}
-
 /* ── 聊天面板：Markdown / 思考卡 / 等待指示（T5 对话体验，口径对齐手机端）──────── */
 
 .bubble-theirs {

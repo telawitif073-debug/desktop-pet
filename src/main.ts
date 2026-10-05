@@ -1,84 +1,35 @@
-import { app, BrowserWindow, WebContentsView, screen, ipcMain, Menu, dialog, protocol, net, desktopCapturer, session, type DesktopCapturerSource } from 'electron';
-import { pathToFileURL } from 'url';
+import { app, BrowserWindow, WebContentsView, ipcMain, Menu, dialog } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import { loadConfig, saveConfig, getLLMConfig, DEFAULT_TTS_CLOUD_CONFIG, type AppConfig, type VoiceConfig, type VoiceAsrApiConfig } from './main/config';
+import { loadConfig, saveConfig, getLLMConfig, DEFAULT_TTS_CLOUD_CONFIG, type AppConfig, type VoiceConfig } from './main/config';
 import {
   AbortedError,
   StreamInterruptError,
   createLLMService,
   type ChatMessage,
 } from './main/llmService';
-import {
-  ConversationManager,
-  type PetStateSnapshot,
-} from './main/conversationManager';
+import { ConversationManager } from './main/conversationManager';
 import { platformClient, type PlatformAssetType, type PublishPayload } from './main/platformClient';
 import { ensurePlatformServices } from './main/platformRunner';
 import { pullAfterLogin, scheduleUpload, flushAllOnQuit, bindChatStore } from './main/cloudSync';
 import { edgeSpeak } from './main/tts';
 import { synthVoice, testGptsovitsEngine } from './main/ttsCloud';
 import { startAgentProactive } from './main/agentProactive';
-import { addFramesAction, removeAction } from './main/petActions';
-import { applyBuiltinPet, listBuiltinPets, resetBuiltinPet } from './main/builtinPets';
-import { PETACTION_MEDIA_TYPES, serveLocalMediaRange } from './main/localMedia';
-import {
-  addLibraryAssetAsAction,
-  applyLibraryAsset,
-  listLibraryAssets,
-  readLibraryAsset,
-} from './main/petLibrary';
-import { isWandering, startWander, stopWander } from './main/wander';
-import { clampPetWindow } from './main/windowGeometry';
-// 宠物主体功能模块（统一入口）：四维体征默认值与阈值口径
-import { DEFAULT_VITALS } from './pet';
-import AdmZip from 'adm-zip';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
-// petaction:// 协议：渲染端（http origin）加载本地动作帧图/语音识别模型的自定义通道
-// （必须在 app ready 前注册；handle 在 whenReady 中挂载。corsEnabled：speech-asr 的
-// wasm 运行时经 fetch 加载模型属跨源请求，需允许 CORS 并在响应中带 ACAO 头）
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'petaction', privileges: { standard: false, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
-]);
+/** 对话窗口 / 工作室窗口的默认尺寸 */
+const CHAT_WINDOW_SIZE = { width: 360, height: 620 };
+const STUDIO_WINDOW_SIZE = { width: 1100, height: 720 };
 
-// 面板内容布局尺寸（渲染层使用；窗口本身不随之 resize）
-const CHAT_WINDOW_SIZE = { width: 650, height: 450 };
-const MARGIN = 20;
-const PET_SIZE_MIN = 200;
-const PET_SIZE_MAX = 600;
-// 气泡预留带：智能体气泡显示在宠物头顶 90px 带内（渲染层 stage 上扩，非窗口 resize）
-const BUBBLE_RESERVE = 90;
-// 宠物态透明窗物理尺寸终生恒定：宽=面板宽（650），高=视觉上限+气泡带（690）。
-// 根因：Windows 透明窗（transparent+frame:false）运行时 resize 后渲染表面会停止同步
-// （Electron 官方声明透明窗不可 resize；实测仅会话内首次 resize 同步，之后永久冻结）。
-// 故缩放/面板开合/气泡/漫步/拖拽一律不改变窗口尺寸：面板态内容贴窗底（顶部 240 透明），
-// 宠物态视觉矩形水平居中、底边对齐（头顶恒有 90px 气泡带）；全部形态切换只发生在渲染层。
-const PET_WIN_WIDTH = CHAT_WINDOW_SIZE.width;
-const PET_WIN_HEIGHT = PET_SIZE_MAX + BUBBLE_RESERVE;
-
-function getPetWindowSize() {
-  const { width, height } = loadConfig().petWindow;
-  const clamp = (value: number) => Math.min(PET_SIZE_MAX, Math.max(PET_SIZE_MIN, Math.round(value)));
-  return { width: clamp(width), height: clamp(height) };
-}
-
-function getPetOpacity() {
-  const opacity = loadConfig().petWindow.opacity;
-  return Math.min(1, Math.max(0.1, Number.isFinite(opacity) ? opacity : 1));
-}
-
-let mainWindow: BrowserWindow | null = null;
+let chatWindow: BrowserWindow | null = null;
+let studioWindow: BrowserWindow | null = null;
 let storeWindow: BrowserWindow | null = null;
-/** 宠工坊：内嵌在资源中心窗口内容区的子视图（同一份桌面渲染包 #/workshop/embedded），不再单独开窗 */
+/** 内嵌在资源中心窗口内容区的子视图（同一份桌面渲染包 #/workshop/embedded） */
 let workshopView: WebContentsView | null = null;
-/** 待投放的内嵌工作区（资源中心导航指定，如 /workshop?tab=publish） */
-let workshopTab: StudioWorkspaceTab | undefined;
-let isChatOpen = false;
-// 四维初始值取自宠物主体功能模块（DEFAULT_VITALS），避免默认值在多处各写一遍
-let currentPetState: PetStateSnapshot = { ...DEFAULT_VITALS };
+/** 待投放的内嵌工作区（资源中心导航指定，如 agents/voices） */
+let workshopTab: string | undefined;
 
 const llmService = createLLMService(getLLMConfig);
 
@@ -86,423 +37,83 @@ const config = loadConfig();
 // 第三参 = 旧版单档案聊天记录文件：构造时自动迁移进 config.profileMessages[激活档案] 并删除旧文件
 const conversationManager = new ConversationManager(
   config,
-  currentPetState,
   path.join(app.getPath('userData'), 'chat-history.json')
 );
 bindChatStore(conversationManager);
 
-function getInitialWindowPosition() {
-  // 窗口终生不重排，首次创建落主显示器右下角（多屏几何由 windowGeometry 在拖拽/漫步时处理）
-  const workArea = screen.getPrimaryDisplay().workArea;
-  return {
-    x: workArea.x + workArea.width - PET_WIN_WIDTH - MARGIN,
-    y: workArea.y + workArea.height - PET_WIN_HEIGHT - MARGIN,
-  };
+/** 渲染端入口页（dev 用 Vite server，打包后用构建产物） */
+function rendererUrl(hash = ''): { kind: 'url'; url: string } | { kind: 'file'; file: string; hash: string } {
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    return { kind: 'url', url: `${MAIN_WINDOW_VITE_DEV_SERVER_URL}${hash}` };
+  }
+  return { kind: 'file', file: path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`), hash };
 }
 
-const PET_ZOOM_STEP = 20;
+// ── 窗口创建 ──────────────────────────────────────────────────────────────
 
-/** Ctrl+滚轮缩放宠物：窗口物理尺寸恒定，只持久化视觉 side 并广播 pet:zoom-changed，
- *  由渲染端平滑 renderer.resize + CSS 布局（水平居中、底边对齐，不重建 PIXI/three）。
- *  仅宠物模式可用。 */
-function zoomPetWindow(direction: 1 | -1): { success: boolean; width?: number; height?: number } {
-  if (!mainWindow || mainWindow.isDestroyed()) return { success: false };
-  if (isChatOpen || isActionsOpen) return { success: false };
-  const cur = getPetWindowSize();
-  const side = Math.min(PET_SIZE_MAX, Math.max(PET_SIZE_MIN, cur.width + direction * PET_ZOOM_STEP));
-  if (side === cur.width) return { success: false };
-  saveConfig({ petWindow: { ...loadConfig().petWindow, width: side, height: side } });
-  mainWindow.webContents.send('pet:zoom-changed', side);
-  return { success: true, width: side, height: side };
-}
-
-const createWindow = () => {
-  const pos = getInitialWindowPosition();
-
-  // 窗口物理尺寸终生恒定 650x690；视觉布局全部由渲染层完成
-  mainWindow = new BrowserWindow({
-    width: PET_WIN_WIDTH,
-    height: PET_WIN_HEIGHT,
-    minWidth: PET_WIN_WIDTH,
-    maxWidth: PET_WIN_WIDTH,
-    minHeight: PET_WIN_HEIGHT,
-    maxHeight: PET_WIN_HEIGHT,
-    x: pos.x,
-    y: pos.y,
-    transparent: true,
-    frame: false,
-    resizable: false,
-    // 宠物窗口置顶可配置（设置页开关），默认置顶
-    alwaysOnTop: loadConfig().petWindow?.alwaysOnTop !== false,
-    skipTaskbar: true,
-    hasShadow: false,
+/** 对话窗口：承载聊天 UI 与设置面板（普通窗口，非透明） */
+function openChatWindow(): BrowserWindow {
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.focus();
+    return chatWindow;
+  }
+  chatWindow = new BrowserWindow({
+    width: CHAT_WINDOW_SIZE.width,
+    height: CHAT_WINDOW_SIZE.height,
+    minWidth: 340,
+    minHeight: 420,
+    title: '对话',
+    backgroundColor: '#1e1e1e',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   });
-
-  mainWindow.on('will-resize', (event) => event.preventDefault());
-  mainWindow.setOpacity(getPetOpacity());
-  // 整页默认点击穿透（仅宠物本体与按钮可交互，渲染端按命中结果动态开关）
-  mainWindow.setIgnoreMouseEvents(true, { forward: true });
-
-  // 渲染端 console 转发到主进程 stdout（语音识别等渲染端链路诊断用）
-  mainWindow.webContents.on('console-message', (...args: unknown[]) => {
-    const params = args[1] as { message?: string } | number;
-    const msg = typeof params === 'object' && params ? params.message : String(args[2] ?? '');
-    if (msg) console.log(`[renderer] ${msg}`);
+  chatWindow.on('closed', () => {
+    chatWindow = null;
   });
-
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    mainWindow.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
-    );
-  }
-};
-
-// --- IPC Handlers ---
-
-/** 注入到系统提示的动作名上限：动作可能很多（单宠上限 128），全量注入会撑爆提示词 */
-const ACTION_PROMPT_LIMIT = 30;
-
-/** 在系统提示后注入可用动作列表：智能体可通过回复末尾的 [动作:名称] 标记控制宠物播放动画。
- *  按「绑定的互动动作全量 + 其余取最近创建的 N 个」截断，避免动作多时提示词线性膨胀。 */
-function withActionPrompt(messages: ChatMessage[]): void {
-  const config = loadConfig();
-  const actions = config.petActions;
-  if (!actions.length) return;
-  const sys = messages.find((m) => m.role === 'system');
-  if (!sys) return;
-  const bindings = config.petActionBindings || {};
-  const boundIds = new Set([bindings.feed, bindings.rest, bindings.play].filter(Boolean) as string[]);
-  const bound = actions.filter((a) => boundIds.has(a.id));
-  const others = actions
-    .filter((a) => !boundIds.has(a.id))
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, Math.max(0, ACTION_PROMPT_LIMIT - bound.length));
-  const names = [...bound, ...others].map((a) => a.name);
-  const tail =
-    names.length < actions.length
-      ? `（动作较多，只列出常用的 ${names.length} 个；未列出的名字请勿使用）`
-      : '';
-  sys.content +=
-    `\n\n你可以控制桌面宠物的动画播放：在回复的最末尾追加 [动作:动作名] 标记即可触发对应动作（标记会被剥离，不会显示给用户）。` +
-    `动作名必须严格从以下列表中选择：${names.join('、')}${tail}。` +
-    `仅当动作与对话内容自然相关时才附带，每条回复最多一个，不需要时不要添加。`;
+  // 网页 title 不覆盖窗口标题：窗口/Taskbar 保持「对话」
+  chatWindow.on('page-title-updated', (event) => event.preventDefault());
+  const target = rendererUrl();
+  if (target.kind === 'url') void chatWindow.loadURL(target.url);
+  else void chatWindow.loadFile(target.file);
+  return chatWindow;
 }
 
-/** 注入宠物自我形象描述：更换形象/智能体时识别生成并记住，让宠物在对话中「知道自己长什么样」 */
-function withSelfDescription(messages: ChatMessage[]): void {
-  const desc = loadConfig().petSelfDescription;
-  if (!desc) return;
-  const sys = messages.find((m) => m.role === 'system');
-  if (!sys) return;
-  sys.content += `\n\n你的桌面宠物形象描述（回答外观/形象相关话题时以此为准）：${desc}`;
-}
-
-/** 解析回复末尾的 [动作:名称] 标记：剥离文本并通过 pet:play-action 触发播放，返回剥离后的文本 */
-function extractActionTag(text: string, win: BrowserWindow | null): string {
-  const m = text.match(/\s*\[动作[:：]([^\]]{1,30})\]\s*$/);
-  if (!m || m.index === undefined) return text;
-  const found = loadConfig().petActions.find((a) => a.name === m[1].trim());
-  if (found && win && !win.isDestroyed()) {
-    win.webContents.send('pet:play-action', found.id);
+/** 工作室窗口：智能体 / 音色 / 发布（#/workshop 路由） */
+function openStudioWindow(): BrowserWindow {
+  if (studioWindow && !studioWindow.isDestroyed()) {
+    studioWindow.focus();
+    return studioWindow;
   }
-  return text.slice(0, m.index).trimEnd();
-}
-
-type ChatSendResult = {
-  success: boolean;
-  text?: string;
-  /** 本次思考过程（开启 showThinking 时由模型返回；已随消息持久化） */
-  reasoning?: string;
-  error?: string;
-  /** 收到数据后被网关/网络掐断：渲染端清空占位、1.2 秒后自动重试一次（只一次） */
-  interrupted?: boolean;
-  /** 用户主动停止生成：保留已生成内容，不标错 */
-  aborted?: boolean;
-};
-
-/**
- * 一次补全（chat:send 与 chat:retry 共用）：以当前档案历史组装请求，流式推送正文与思考过程。
- * 正文继续扣留疑似动作标记（"[动" 尾部）避免闪现；思考过程逐字下发（chat:reasoning）。
- * images 仅首次发送携带（重试复用历史里的纯文本）。
- */
-async function runChatCompletion(win: BrowserWindow, images?: string[]): Promise<ChatSendResult> {
-  const messages = conversationManager.buildMessages();
-  withActionPrompt(messages);
-  withSelfDescription(messages);
-  // 附图：末条 user 消息转为多模态 content（聊天历史仍存纯文本，token 友好）
-  if (images?.length) {
-    const last = messages[messages.length - 1];
-    if (last?.role === 'user') {
-      last.content = [
-        { type: 'text', text: typeof last.content === 'string' ? last.content : '' },
-        ...images.slice(0, 4).map((url) => ({ type: 'image_url' as const, image_url: { url } })),
-      ];
-    }
-  }
-
-  let streamedTail = '';
-  let reasoningText = '';
-  const fullText = await llmService.chat({
-    messages,
-    onChunk: (chunk) => {
-      if (win.isDestroyed()) return;
-      streamedTail += chunk;
-      const idx = streamedTail.lastIndexOf('[动');
-      if (idx >= 0) {
-        const safe = streamedTail.slice(0, idx);
-        streamedTail = streamedTail.slice(idx);
-        if (safe) win.webContents.send('chat:chunk', safe);
-      } else {
-        win.webContents.send('chat:chunk', streamedTail);
-        streamedTail = '';
-      }
-    },
-    onReasoning: (chunk) => {
-      if (win.isDestroyed()) return;
-      reasoningText += chunk;
-      win.webContents.send('chat:reasoning', chunk);
+  studioWindow = new BrowserWindow({
+    width: STUDIO_WINDOW_SIZE.width,
+    height: STUDIO_WINDOW_SIZE.height,
+    minWidth: 860,
+    minHeight: 560,
+    title: '创作中心',
+    backgroundColor: '#1e1f22',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   });
-
-  const replyText = extractActionTag(fullText, win);
-  conversationManager.addAssistantMessage(replyText, reasoningText);
-  scheduleUpload('chat_history');
-  return { success: true, text: replyText, reasoning: reasoningText.trim() || undefined };
-}
-
-/** 补全失败的统一收口：中断/主动停止单独标记，供渲染端决定是否自动重试 */
-function chatFailure(err: unknown): ChatSendResult {
-  if (err instanceof AbortedError) {
-    return { success: false, error: err.message, aborted: true };
-  }
-  if (err instanceof StreamInterruptError) {
-    return { success: false, error: err.message, interrupted: true };
-  }
-  return { success: false, error: err instanceof Error ? err.message : String(err) };
-}
-
-// Chat: send a message with streaming response（images 为可选附图 dataUrl，走 OpenAI vision 多模态格式）
-ipcMain.handle('chat:send', async (event, message: string, images?: string[]) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return { success: false, error: 'No window' };
-
-  if (!llmService.isConfigured()) {
-    return {
-      success: false,
-      error: '请先在设置中配置 API Key 和模型。',
-    };
-  }
-
-  try {
-    conversationManager.addUserMessage(message);
-    lastUserMessageAt = Date.now();
-    return await runChatCompletion(win, images);
-  } catch (err) {
-    return chatFailure(err);
-  }
-});
-
-/**
- * Chat: 重试失败回复（失败气泡点击「重试」）。
- * 不重复写入用户消息：历史里该条 user 消息已在，直接重新补全（中断自动重试亦走此通道）。
- */
-ipcMain.handle('chat:retry', async (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return { success: false, error: 'No window' };
-  if (!llmService.isConfigured()) {
-    return { success: false, error: '请先在设置中配置 API Key 和模型。' };
-  }
-  const history = conversationManager.getHistory();
-  if (history[history.length - 1]?.role !== 'user') {
-    return { success: false, error: '没有可重试的问题，请重新发送消息' };
-  }
-  try {
-    return await runChatCompletion(win);
-  } catch (err) {
-    return chatFailure(err);
-  }
-});
-
-// Chat: clear conversation history
-ipcMain.handle('chat:clear', () => {
-  conversationManager.clearHistory();
-  scheduleUpload('chat_history');
-  return { success: true };
-});
-
-// Chat: get persisted history (to restore UI after app restart)
-ipcMain.handle('chat:history', () => {
-  return { success: true, history: conversationManager.getHistory() };
-});
-
-// Config: get
-ipcMain.handle('config:get', () => {
-  return loadConfig();
-});
-
-// Config: set
-ipcMain.handle('config:set', (_event, partial: Partial<AppConfig>) => {
-  const updated = saveConfig(partial);
-  conversationManager.updateConfig(updated);
-  // LLM 配置变更：防抖上传云端（手机端共享）
-  if (partial.llmProfiles || partial.llmActiveProfileId !== undefined) {
-    scheduleUpload('config');
-  }
-  // 宠物窗口设置变更：视觉尺寸由渲染层处理（窗口物理尺寸恒定），透明度/置顶实时生效
-  if (partial.petWindow && mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setOpacity(getPetOpacity());
-    // 置顶开关实时生效
-    mainWindow.setAlwaysOnTop(updated.petWindow?.alwaysOnTop !== false);
-    // 设置页滑杆：渲染端按新视觉 side 全量重建（低频操作，重建可接受）
-    mainWindow.webContents.send('pet:settings-changed', updated.petWindow);
-  }
-  // 宠物互动功能开关变更：通知渲染进程实时显隐按钮与进度条
-  if (partial.petFeatures && mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('pet:features-changed', updated.petFeatures);
-  }
-  // 感知开关变更：实时启停桌面持续感知循环（渲染端循环自行监听配置）
-  if (partial.petSenses) syncScreenSenseLoop();
-  // 多窗口一致性：宠物窗与创作中心共用同一份配置，广播给所有窗口刷新，
-  // 避免其中一个窗口持有旧副本、下次写入把另一个窗口的新改动覆盖掉（配置均为用户动作，频率低）
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('config:changed', updated);
-  }
-  return updated;
-});
-
-// Platform: resource search, details, download and installation
-ipcMain.handle('platform:search', (_event, type: PlatformAssetType, query: string, page = 1) =>
-  platformClient.search(type, query, page),
-);
-
-ipcMain.handle('platform:getDetail', (_event, type: PlatformAssetType, id: string) =>
-  platformClient.getDetail(type, id),
-);
-
-ipcMain.handle('platform:download', (_event, type: PlatformAssetType, id: string) =>
-  platformClient.download(type, id),
-);
-
-// 安装/卸载宠物资源后通知宠物窗口重新加载（图片与可点击边界随新图重算）
-const notifyPetAssetChanged = () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('pet:asset-changed', null);
-  }
-};
-
-// 智能体变更后让宠物重新「看一眼」自己：渲染端重新导出画布并请求形象识别（指纹含 agentId，未变时主进程跳过）
-const notifySelfieRequest = () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('pet:selfie-request', null);
-  }
-};
-
-ipcMain.handle('platform:install', async (_event, type: PlatformAssetType, id: string) => {
-  const result = await platformClient.install(type, id);
-  if (type === 'pet') {
-    notifyPetAssetChanged();
-    // 宠物附带动作已随安装注册，通知动作面板刷新列表与互动绑定
-    notifyPetActionsChanged();
-    // 当前宠物引用变更：防抖上传云端（换机登录可自动恢复）
-    scheduleUpload('config');
-  } else if (type === 'agent') {
-    notifySelfieRequest();
-  }
-  return result;
-});
-
-ipcMain.handle('platform:uninstall', async (_event, type: PlatformAssetType, id: string) => {
-  const result = await platformClient.uninstall(type, id);
-  if (type === 'pet') {
-    notifyPetAssetChanged();
-    scheduleUpload('config');
-  } else if (type === 'agent') {
-    notifySelfieRequest();
-  }
-  return result;
-});
-
-ipcMain.handle('platform:getInstalledPet', () => platformClient.getInstalledPet());
-
-ipcMain.handle('platform:getInstalledAgent', () => platformClient.getInstalledAgent());
-
-// --- 宠物自我形象识别：渲染端导出当前形象画布，主进程调多模态 LLM 生成描述并记住 ---
-let selfRecognizeFailedNotifiedAt = 0;
-
-/** 形象识别指纹：资产（路径+形态）与智能体任一变化即视为形象可能变化 */
-function selfImageFingerprint(): string {
-  const cfg = loadConfig();
-  return JSON.stringify([cfg.petAssetPath ?? '', cfg.petAssetFormat ?? '', cfg.installedAgentId ?? '']);
-}
-
-ipcMain.handle('self:recognize', async (_event, dataUrl: string) => {
-  const fingerprint = selfImageFingerprint();
-  const cfg = loadConfig();
-  // 指纹未变且描述已存在：跳过（启动重载/面板重开不重复调 LLM）
-  if (cfg.selfImageFingerprint === fingerprint && cfg.petSelfDescription) {
-    return { ok: true, skipped: true };
-  }
-  if (!dataUrl?.startsWith('data:image')) return { ok: false, error: 'BAD_IMAGE' };
-  if (!llmService.isConfigured()) return { ok: false, error: 'NO_LLM' };
-  try {
-    const description = await llmService.chat({
-      messages: [
-        { role: 'system', content: '你是宠物形象描述员，只输出一段简短的外观描述，不要输出任何其他内容。' },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: '这是桌面宠物的当前形象截图。请用不超过 60 字、第三人称描述它的外观（种类/外形、主要颜色、表情与风格），忽略画面空白背景。',
-            },
-            { type: 'image_url', image_url: { url: dataUrl } },
-          ],
-        },
-      ],
-    });
-    const text = description.replace(/\s+/g, ' ').trim().slice(0, 120);
-    if (!text) throw new Error('empty description');
-    saveConfig({ petSelfDescription: text, selfImageFingerprint: fingerprint });
-    console.log(`[self] 形象识别完成: ${text}`);
-    return { ok: true, description: text };
-  } catch (err) {
-    console.log('[self] 形象识别失败:', err instanceof Error ? err.message : err);
-    // 节流气泡提醒：多为当前模型不支持视觉输入
-    if (Date.now() - selfRecognizeFailedNotifiedAt > 10 * 60 * 1000) {
-      selfRecognizeFailedNotifiedAt = Date.now();
-      deliverAgentMessage('宠物形象识别失败：当前聊天模型可能不支持看图。换用支持视觉的模型后，重新加载页面即可重试');
-    }
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-});
-
-ipcMain.handle('platform:login', async (_event, identifier: string, password: string) => {
-  const result = await platformClient.login(identifier, password);
-  // 登录成功后拉取云端数据恢复本地缺失部分（LLM 配置/当前宠物/宠物状态/聊天记录）
-  void pullAfterLogin().then((restored) => {
-    if (restored.petReinstalled) {
-      // 换机/重装场景：云端宠物已重新下载安装，通知宠物窗口与动作面板刷新
-      notifyPetAssetChanged();
-      notifyPetActionsChanged();
-    }
-    if (restored.petState) {
-      currentPetState = restored.petState;
-      conversationManager.updatePetState(restored.petState);
-    }
+  studioWindow.on('closed', () => {
+    studioWindow = null;
   });
-  return result;
-});
-
-ipcMain.handle('platform:logout', () => platformClient.logout());
+  // 网页 title 不覆盖窗口标题：窗口/Taskbar 保持「创作中心」
+  studioWindow.on('page-title-updated', (event) => event.preventDefault());
+  const target = rendererUrl('#/workshop');
+  if (target.kind === 'url') void studioWindow.loadURL(target.url);
+  else void studioWindow.loadFile(target.file, { hash: '/workshop' });
+  return studioWindow;
+}
 
 /** 商店启动提示页（拉起平台服务期间展示，避免白屏） */
 function storeStatusPage(title: string, detail: string): string {
-  const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>资源商店</title>
+  const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>资源中心</title>
 <style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#1e1f22;color:#d6d7d9;font-family:system-ui,'Microsoft YaHei',sans-serif}
 .box{text-align:center}.spin{width:36px;height:36px;margin:0 auto 18px;border:3px solid #4a5568;border-top-color:#4a9eff;border-radius:50%;animation:s .9s linear infinite}
 @keyframes s{to{transform:rotate(360deg)}}h2{font-size:17px;font-weight:600;margin:0 0 10px}p{font-size:13px;color:#8b8f96;margin:0}</style></head>
@@ -511,7 +122,7 @@ function storeStatusPage(title: string, detail: string): string {
 }
 
 // 资源中心（平台 Web 独立窗口）：浏览/安装资源、我的资源与审核状态、管理后台；
-// 发布资源已收口到宠工坊「上传/发布」工作区，这里不再有独立的上传页。
+// 发布资源已收口到创作中心「上传/发布」工作区，这里不再有独立的上传页。
 async function openStoreWindow(): Promise<{ success: boolean }> {
   if (storeWindow && !storeWindow.isDestroyed()) {
     storeWindow.focus();
@@ -530,7 +141,7 @@ async function openStoreWindow(): Promise<{ success: boolean }> {
     },
   });
   storeWindow.on('closed', () => {
-    // 内嵌宠工坊视图随宿主窗口一起销毁（否则 webContents 泄漏）
+    // 内嵌创作中心视图随宿主窗口一起销毁（否则 webContents 泄漏）
     if (workshopView && !workshopView.webContents.isDestroyed()) workshopView.webContents.close();
     workshopView = null;
     storeWindow = null;
@@ -538,7 +149,7 @@ async function openStoreWindow(): Promise<{ success: boolean }> {
   // 网页 title 不覆盖窗口标题：入口叫「资源中心」时窗口/Taskbar 也要一致
   storeWindow.on('page-title-updated', (event) => event.preventDefault());
   // 整页跳转（含刷新）时先摘掉内嵌视图：新页面的 /workshop 会重新上报显示，
-  // 避免宠工坊视图残留在其它页面上方
+  // 避免创作中心视图残留在其它页面上方
   storeWindow.webContents.on('did-navigate', () => {
     if (workshopView && storeWindow && !storeWindow.isDestroyed()) {
       storeWindow.contentView.removeChildView(workshopView);
@@ -560,7 +171,7 @@ async function openStoreWindow(): Promise<{ success: boolean }> {
 
 ipcMain.handle('platform:open-store', () => openStoreWindow());
 
-// 发布资源（宠工坊「上传/发布」工作区）：主进程用配置里的平台令牌发 multipart，令牌不出渲染进程
+// 发布资源（创作中心「上传/发布」工作区）：主进程用配置里的平台令牌发 multipart，令牌不出渲染进程
 ipcMain.handle('platform:upload', async (_event, payload: PublishPayload) => {
   try {
     const asset = await platformClient.publish(payload);
@@ -570,14 +181,14 @@ ipcMain.handle('platform:upload', async (_event, payload: PublishPayload) => {
   }
 });
 
-// 平台账号状态：宠工坊「上传/发布」据此显示登录卡或已登录信息
+// 平台账号状态：创作中心「上传/发布」据此显示登录卡或已登录信息
 ipcMain.handle('platform:auth-status', () => platformClient.getAuthState());
 ipcMain.handle('platform:auth-tokens', () => {
   const platform = loadConfig().platform;
   return { accessToken: platform.accessToken, refreshToken: platform.refreshToken };
 });
 
-/** 令牌变更后广播配置：所有窗口的配置副本同步刷新（宠物窗也持有 config.platform） */
+/** 令牌变更后广播配置：所有窗口的配置副本同步刷新 */
 function broadcastConfigChanged(): void {
   const updated = loadConfig();
   for (const win of BrowserWindow.getAllWindows()) {
@@ -600,21 +211,46 @@ ipcMain.handle('platform:auth-clear', () => {
   return { loggedIn: false };
 });
 
-/** 宠工坊工作区 id（资源中心导航 → 宠工坊 时指定落地工作区；动作已并入宠物资源） */
-type StudioWorkspaceTab = 'pets' | 'agents' | 'voices';
+// 平台资源查询 / 下载 / 安装 / 卸载（智能体、音色；商店 Web 窗口与工作台共用）
+ipcMain.handle('platform:search', (_event, type: PlatformAssetType, query: string, page = 1) =>
+  platformClient.search(type, query, page),
+);
+ipcMain.handle('platform:getDetail', (_event, type: PlatformAssetType, id: string) =>
+  platformClient.getDetail(type, id),
+);
+ipcMain.handle('platform:download', (_event, type: PlatformAssetType, id: string) =>
+  platformClient.download(type, id),
+);
+ipcMain.handle('platform:install', (_event, type: PlatformAssetType, id: string) =>
+  platformClient.install(type, id),
+);
+ipcMain.handle('platform:uninstall', (_event, type: PlatformAssetType, id: string) =>
+  platformClient.uninstall(type, id),
+);
+ipcMain.handle('platform:getInstalledAgent', () => platformClient.getInstalledAgent());
 
-/** 内嵌宠工坊的显示/隐藏请求（由资源中心页面测量内容区后上报） */
+ipcMain.handle('platform:login', async (_event, identifier: string, password: string) => {
+  const result = await platformClient.login(identifier, password);
+  // 登录成功后拉取云端数据恢复本地缺失部分（LLM 配置/智能体人设/音色/聊天记录）
+  void pullAfterLogin();
+  return result;
+});
+ipcMain.handle('platform:logout', () => platformClient.logout());
+
+// ── 内嵌创作中心视图（资源中心窗口内容区）──────────────────────────────────
+
+/** 创作中心内嵌视图的显示/隐藏请求（由资源中心页面测量内容区后上报） */
 interface WorkshopEmbedPayload {
   visible: boolean;
   /** 内容区在窗口内的位置与尺寸（DIP，页面 getBoundingClientRect 口径） */
   rect?: { x: number; y: number; width: number; height: number };
-  /** 落地工作区（如上传/发布） */
-  tab?: StudioWorkspaceTab;
+  /** 落地工作区（如 agents / voices） */
+  tab?: string;
 }
 
 /**
- * 宠工坊内嵌视图：同一份桌面渲染包以 `#/workshop/embedded` 挂到资源中心窗口的内容区，
- * 资源中心顶栏/导航常驻，宠工坊的一切操作都在这个视图里完成（不再新开窗口）。
+ * 创作中心内嵌视图：同一份桌面渲染包以 `#/workshop/embedded` 挂到资源中心窗口的内容区，
+ * 资源中心顶栏/导航常驻，创作中心的一切操作都在这个视图里完成（不再新开窗口）。
  */
 function ensureWorkshopView(): WebContentsView {
   if (workshopView && !workshopView.webContents.isDestroyed()) return workshopView;
@@ -670,7 +306,7 @@ ipcMain.handle('workshop:embed', (_event, payload: WorkshopEmbedPayload) => sync
 ipcMain.handle(
   'dialog:save-text',
   async (_event, args: { defaultFileName: string; content: string; title?: string }) => {
-    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+    const target = studioWindow && !studioWindow.isDestroyed() ? studioWindow : undefined;
     const options: Electron.SaveDialogOptions = {
       title: args.title || '导出文件',
       defaultPath: path.join(app.getPath('documents'), args.defaultFileName),
@@ -689,276 +325,143 @@ ipcMain.handle(
   },
 );
 
-// Pet state: update (sent from renderer so main can use it in system prompt)
-// Renderer decays pet state every 5s so this IPC fires constantly. Persist to
-// disk at most once per minute (debounced) and flush on quit, instead of
-// writing config.json ~17k times per day.
-const PET_STATE_SAVE_DELAY = 60 * 1000;
-let petStateSaveTimer: NodeJS.Timeout | null = null;
+// ── 配置读写 ──────────────────────────────────────────────────────────────
 
-function schedulePetStateSave() {
-  if (petStateSaveTimer) return;
-  petStateSaveTimer = setTimeout(() => {
-    petStateSaveTimer = null;
-    saveConfig({ petState: currentPetState });
-    scheduleUpload('pet_state');
-  }, PET_STATE_SAVE_DELAY);
-}
-
-function flushPendingPetStateSave() {
-  if (!petStateSaveTimer) return;
-  clearTimeout(petStateSaveTimer);
-  petStateSaveTimer = null;
-  saveConfig({ petState: currentPetState });
-  scheduleUpload('pet_state');
-}
-
-ipcMain.handle('pet:state-update', (_event, state: PetStateSnapshot) => {
-  currentPetState = state;
-  conversationManager.updatePetState(state);
-  schedulePetStateSave();
-  return { success: true };
+ipcMain.handle('config:get', () => {
+  return loadConfig();
 });
 
-// Window: toggle chat mode（固定窗模型：窗口不重排，仅切换标志 + 渲染层面板布局）
-ipcMain.handle('window:toggle-chat', (event, open: boolean) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return { success: false };
-
-  isChatOpen = open;
-  // 面板展开与漫步互斥：进行中的漫步立即停止
-  if (open && isWandering()) {
-    stopWander();
-    win.webContents.send('pet:wander-state', false);
+ipcMain.handle('config:set', (_event, partial: Partial<AppConfig>) => {
+  const updated = saveConfig(partial);
+  conversationManager.updateConfig(updated);
+  // LLM 配置变更（智能体档案 / 音色 / 云 TTS）：防抖上传云端（多端共享）
+  if (partial.llmProfiles || partial.llmActiveProfileId !== undefined || partial.downloadedVoices || partial.ttsCloudConfig) {
+    scheduleUpload('config');
   }
-  return { success: true, isChatOpen: open };
-});
-
-ipcMain.handle('window:is-chat-open', () => {
-  return isChatOpen;
-});
-
-// 动作管理面板：与聊天面板同一机制（仅渲染层布局切换，窗口尺寸不变）
-let isActionsOpen = false;
-ipcMain.handle('window:toggle-actions', (event, open: boolean) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return { success: false };
-  isActionsOpen = open;
-  // 面板展开与漫步互斥：进行中的漫步立即停止
-  if (open && isWandering()) {
-    stopWander();
-    win.webContents.send('pet:wander-state', false);
+  // 多窗口一致性：所有窗口共用同一份配置，广播让持有的旧副本刷新
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('config:changed', updated);
   }
-  return { success: true };
+  return updated;
 });
 
-// Ctrl+滚轮缩放宠物窗（direction：1=放大，-1=缩小；步进/上下限见 zoomPetWindow）
-ipcMain.handle('window:zoom-pet', (_event, direction: number) =>
-  zoomPetWindow(direction < 0 ? -1 : 1),
-);
+// ── 对话（chat:send / retry / clear / history）────────────────────────────
 
-// 渲染端按命中测试结果动态开关点击穿透（forward 保持 mousemove 可见以便持续检测）
-let ignoreToggleCount = 0;
-ipcMain.on('window:set-ignore-mouse', (_event, ignore: boolean) => {
-  ignoreToggleCount++;
-  if (ignoreToggleCount % 20 === 1) console.log(`[debug] set-ignore-mouse #${ignoreToggleCount} -> ${ignore}`);
-  const win = BrowserWindow.fromWebContents(_event.sender);
-  if (!win) return;
-  win.setIgnoreMouseEvents(ignore, { forward: true });
-});
-
-// 宠物拖拽：基线绝对映射 + setBounds 每帧写回固定窗口尺寸。
-// 根因：缩放屏上反复 setPosition 会因 DIP↔物理像素舍入使窗口外框被逐帧撑大
-// （绕过 min/max 约束），累积表现为窗口缓慢变大并向"下延伸"。
-// 位置 = 起始窗口位置 + (当前光标 - 起始光标)：坐标差异只是常量偏移，不累积；
-// 每次用 setBounds 同时写回 650x690 固定尺寸，OS 层任何撑大都会被立即纠正。
-// 边界按「可见视觉矩形」钳制（宠物态 side×side 居中底对齐；面板态 650×450 贴底），
-// 窗口的透明留白允许伸出屏缘，保证宠物本体/面板不出屏。
-let petDragging = false;
-let petDragTimer: NodeJS.Timeout | null = null;
-const petDragBase = {
-  cursor: { x: 0, y: 0 },
-  win: { x: 0, y: 0 },
-  // 宠物态拖拽期间的视觉 side 快照（边界按本体矩形而非透明留白钳制）
-  petSide: 0,
-  panelMode: false,
+type ChatSendResult = {
+  success: boolean;
+  text?: string;
+  /** 本次思考过程（开启 showThinking 时由模型返回；已随消息持久化） */
+  reasoning?: string;
+  error?: string;
+  /** 收到数据后被网关/网络掐断：渲染端清空占位、1.2 秒后自动重试一次（只一次） */
+  interrupted?: boolean;
+  /** 用户主动停止生成：保留已生成内容，不标错 */
+  aborted?: boolean;
 };
 
-function petDragTick() {
-  if (!petDragging || !mainWindow || mainWindow.isDestroyed()) return;
-  const cursor = screen.getCursorScreenPoint();
-  const rawX = petDragBase.win.x + (cursor.x - petDragBase.cursor.x);
-  const rawY = petDragBase.win.y + (cursor.y - petDragBase.cursor.y);
-  // 面板态可见内容 650x450 贴窗底；宠物态视觉 side 水平居中、底边对齐
-  const visW = petDragBase.panelMode ? CHAT_WINDOW_SIZE.width : petDragBase.petSide;
-  const visH = petDragBase.panelMode ? CHAT_WINDOW_SIZE.height : petDragBase.petSide;
-  const { x, y } = clampPetWindow(rawX, rawY, PET_WIN_WIDTH, PET_WIN_HEIGHT, visW, visH);
-  mainWindow.setBounds({ x, y, width: PET_WIN_WIDTH, height: PET_WIN_HEIGHT });
-}
-
-ipcMain.on('pet:begin-drag', () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  // 拖拽与漫步互斥：拖拽开始时中断进行中的漫步
-  if (isWandering()) {
-    stopWander();
-    mainWindow.webContents.send('pet:wander-state', false);
-  }
-  const [wx, wy] = mainWindow.getPosition();
-  petDragBase.cursor = screen.getCursorScreenPoint();
-  petDragBase.win = { x: wx, y: wy };
-  petDragBase.panelMode = isChatOpen || isActionsOpen;
-  petDragBase.petSide = getPetWindowSize().width;
-  petDragging = true;
-  // 主进程 16ms 轮询兜底：鼠标快速甩动飞出窗口时渲染端 mousemove 会中断，
-  // 轮询直接读光标位置继续跟随，松手由渲染端 pet:end-drag 结束
-  if (!petDragTimer) petDragTimer = setInterval(petDragTick, 16);
-});
-
-// 渲染端 mousemove 触发的即时更新（低于 16ms 轮询延迟，拖拽更跟手）
-ipcMain.on('pet:drag-move', () => petDragTick());
-
-ipcMain.on('pet:end-drag', () => {
-  petDragging = false;
-  if (petDragTimer) {
-    clearInterval(petDragTimer);
-    petDragTimer = null;
-  }
-});
-
-// 随机漫步：渲染端调度（5s 一次掷骰），主进程校验互斥/开关/精力后执行窗口平移。
-// 漫步状态经 pet:wander-state 推送渲染端，驱动 moving 标志。
-
-/** 移动类动作名（用户手动添加的帧序列/clip 动作可命名为这些名字让宠物具备漫步资格） */
-const MOVE_ACTION_RE = /^(moving|move|walk|走路|移动)$/i;
-
-/** 漫步门槛：宠物需具备移动表现——动作列表含移动类动作；否则窗口平移只是无动画滑行 */
-function hasMoveCapability(): boolean {
-  const config = loadConfig();
-  if (config.petActions?.some((a) => MOVE_ACTION_RE.test(a.name))) return true;
-  return false;
-}
-
-/** media 权限网关：麦克风/摄像头请求按商店设置的感知开关放行（隐私默认全关） */
-function setupMediaPermissionGate(): void {
-  const allowed = (mediaTypes: string[] | undefined): boolean => {
-    const senses = loadConfig().petSenses;
-    if (!senses) return false;
-    if (mediaTypes?.includes('video')) return !!senses.camera;
-    if (mediaTypes?.includes('audio')) return !!senses.mic;
-    return !!(senses.mic || senses.camera);
-  };
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    if (permission === 'media') {
-      callback(allowed((details as { mediaTypes?: string[] }).mediaTypes));
-      return;
+/**
+ * 一次补全（chat:send 与 chat:retry 共用）：以当前档案历史组装请求，流式推送正文与思考过程。
+ * images 仅首次发送携带（重试复用历史里的纯文本）。
+ */
+async function runChatCompletion(win: BrowserWindow, images?: string[]): Promise<ChatSendResult> {
+  const messages = conversationManager.buildMessages();
+  // 附图：末条 user 消息转为多模态 content（聊天历史仍存纯文本，token 友好）
+  if (images?.length) {
+    const last = messages[messages.length - 1];
+    if (last?.role === 'user') {
+      last.content = [
+        { type: 'text', text: typeof last.content === 'string' ? last.content : '' },
+        ...images.slice(0, 4).map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+      ];
     }
-    callback(true);
+  }
+
+  let reasoningText = '';
+  const fullText = await llmService.chat({
+    messages,
+    onChunk: (chunk) => {
+      if (win.isDestroyed()) return;
+      win.webContents.send('chat:chunk', chunk);
+    },
+    onReasoning: (chunk) => {
+      if (win.isDestroyed()) return;
+      reasoningText += chunk;
+      win.webContents.send('chat:reasoning', chunk);
+    },
   });
-  session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => {
-    if (permission === 'media') {
-      const mediaTypes = (details as { mediaTypes?: string[] }).mediaTypes;
-      return allowed(mediaTypes);
-    }
-    return true;
-  });
+
+  conversationManager.addAssistantMessage(fullText, reasoningText);
+  scheduleUpload('chat_history');
+  return { success: true, text: fullText, reasoning: reasoningText.trim() || undefined };
 }
 
-// --- 持续感知：桌面定时查看（主进程）+ 摄像头帧理解 + 视觉描述 ---
-// 视觉理解走智谱 glm-4v-flash（免费，与聊天 Key 共用）；非智谱 API 时用当前模型尝试，失败静默。
+/** 补全失败的统一收口：中断/主动停止单独标记，供渲染端决定是否自动重试 */
+function chatFailure(err: unknown): ChatSendResult {
+  if (err instanceof AbortedError) {
+    return { success: false, error: err.message, aborted: true };
+  }
+  if (err instanceof StreamInterruptError) {
+    return { success: false, error: err.message, interrupted: true };
+  }
+  return { success: false, error: err instanceof Error ? err.message : String(err) };
+}
 
-const SCREEN_SENSE_MS = 10 * 60 * 1000;
-let screenSenseTimer: NodeJS.Timeout | null = null;
+let lastUserMessageAt = 0;
 
-/** 视觉理解：描述一张截图/摄像头帧，以桌宠口吻给出一句轻松评论 */
-async function describeSenseImage(dataUrl: string, kind: 'screen' | 'camera'): Promise<string | null> {
-  const cfg = getLLMConfig();
-  if (!cfg.apiKey || !cfg.baseUrl) return null;
-  const isZhipu = /bigmodel\.cn/i.test(cfg.baseUrl);
-  const model = isZhipu ? 'glm-4v-flash' : cfg.model;
+ipcMain.handle('chat:send', async (event, message: string, images?: string[]) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return { success: false, error: 'No window' };
+
+  if (!llmService.isConfigured()) {
+    return {
+      success: false,
+      error: '请先在设置中配置 API Key 和模型。',
+    };
+  }
+
   try {
-    const res = await fetch(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        max_tokens: 200,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: kind === 'screen'
-                ? '这是用户电脑桌面的截图。观察屏幕上正在发生什么（打开了什么应用/在做什么），用一两句话以桌面宠物的口吻轻松评论（中文，不要逐字读屏幕）。'
-                : '这是摄像头拍到的画面。描述你看到的内容，用一两句话以桌面宠物的口吻轻松评论（中文）。',
-            },
-            { type: 'image_url', image_url: { url: dataUrl } },
-          ],
-        }],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const text = data.choices?.[0]?.message?.content?.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    return text || null;
-  } catch {
-    return null;
+    conversationManager.addUserMessage(message);
+    lastUserMessageAt = Date.now();
+    return await runChatCompletion(win, images);
+  } catch (err) {
+    return chatFailure(err);
   }
-}
-
-/** 选取录屏/截屏源：优先宠物窗当前所在显示器，找不到（窗口异常/屏幕热插拔）回主屏 */
-function pickScreenSource(sources: DesktopCapturerSource[]): DesktopCapturerSource | undefined {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    const nearId = String(screen.getDisplayMatching(mainWindow.getBounds()).id);
-    const near = sources.find((s) => s.display_id === nearId);
-    if (near) return near;
-  }
-  const primaryId = String(screen.getPrimaryDisplay().id);
-  return sources.find((s) => s.display_id === primaryId) || sources[0];
-}
-
-async function screenSenseTick(): Promise<void> {
-  if (!loadConfig().petSenses?.screen) return;
-  try {
-    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1024, height: 576 } });
-    const target = pickScreenSource(sources);
-    if (!target) return;
-    const jpeg = target.thumbnail.toJPEG(70);
-    const desc = await describeSenseImage(`data:image/jpeg;base64,${jpeg.toString('base64')}`, 'screen');
-    if (desc) deliverAgentMessage(desc);
-  } catch {
-    // 感知失败静默（截屏被系统拒绝/网络异常等），下轮重试
-  }
-}
-
-/** 按当前配置启停桌面持续感知循环（config:set 后调用，开关切换实时生效） */
-function syncScreenSenseLoop(): void {
-  if (screenSenseTimer) {
-    clearInterval(screenSenseTimer);
-    screenSenseTimer = null;
-  }
-  if (loadConfig().petSenses?.screen) {
-    screenSenseTimer = setInterval(() => void screenSenseTick(), SCREEN_SENSE_MS);
-  }
-}
-
-ipcMain.handle('pet:wander-start', (_event, opts: { dx: number; durationMs: number }) => {
-  const reject = (reason: string) => ({ ok: false, reason });
-  if (!mainWindow || mainWindow.isDestroyed()) return reject('no-window');
-  if (petDragging || isChatOpen || isActionsOpen || isWandering()) return reject('busy');
-  if (!loadConfig().randomMoveEnabled) return reject('disabled');
-  if (!hasMoveCapability()) return reject('no-move-anim');
-  if (currentPetState.energy <= 30) return reject('tired');
-  const dx = Number.isFinite(opts?.dx) ? Math.max(-400, Math.min(400, Math.round(opts.dx))) : 0;
-  const durationMs = Math.max(500, Math.min(10_000, Math.round(opts?.durationMs ?? 2500)));
-  if (!dx) return reject('noop');
-  const win = mainWindow;
-  startWander(win, dx, durationMs, PET_WIN_WIDTH, PET_WIN_HEIGHT, getPetWindowSize().width, () => {
-    if (!win.isDestroyed()) win.webContents.send('pet:wander-state', false);
-  });
-  win.webContents.send('pet:wander-state', true);
-  return { ok: true };
 });
+
+/**
+ * Chat: 重试失败回复（失败气泡点击「重试」）。
+ * 不重复写入用户消息：历史里该条 user 消息已在，直接重新补全（中断自动重试亦走此通道）。
+ */
+ipcMain.handle('chat:retry', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return { success: false, error: 'No window' };
+  if (!llmService.isConfigured()) {
+    return { success: false, error: '请先在设置中配置 API Key 和模型。' };
+  }
+  const history = conversationManager.getHistory();
+  if (history[history.length - 1]?.role !== 'user') {
+    return { success: false, error: '没有可重试的问题，请重新发送消息' };
+  }
+  try {
+    return await runChatCompletion(win);
+  } catch (err) {
+    return chatFailure(err);
+  }
+});
+
+// Chat: clear conversation history
+ipcMain.handle('chat:clear', () => {
+  conversationManager.clearHistory();
+  scheduleUpload('chat_history');
+  return { success: true };
+});
+
+// Chat: get persisted history (to restore UI after app restart)
+ipcMain.handle('chat:history', () => {
+  return { success: true, history: conversationManager.getHistory() };
+});
+
+// ── 语音合成（朗读 / 试听）────────────────────────────────────────────────
 
 // Edge TTS 语音合成：渲染端传文本与音色/语气参数，返回 mp3 base64（失败 null，渲染端回退系统 TTS）
 ipcMain.handle('tts:speak', (_event, args: Parameters<typeof edgeSpeak>[0]) => edgeSpeak(args));
@@ -981,372 +484,14 @@ ipcMain.handle(
 // GPT-SoVITS 引擎连通性测试（设置页云 TTS 配置的「连接测试」）
 ipcMain.handle('tts:test-gptsovits', (_event, baseUrl: string) => testGptsovitsEngine(baseUrl));
 
-// --- sherpa-onnx 离线语音识别模型（语音唤醒用） ---
-// 识别引擎为 sherpa-onnx zipformer（渲染端 speech-asr SDK）。平台不内置/不自动下载
-// 模型（对齐「资源由用户自行配置」原则）：用户在聊天设置中提供模型包（本地 zip 路径
-// 或下载 URL），主进程校验解压到 userData 模型目录；wasm 运行时随 npm 包自带。
-const SHERPA_DIR_NAME = 'sherpa-asr';
-const SHERPA_DATA_MIN_BYTES = 100 * 1024 * 1024; // .data 权重包约 230MB，防半截文件误判
-/** 模型包必须包含的关键文件（speech-asr SDK 按 m_path 固定文件名加载） */
-const SHERPA_REQUIRED_FILES = [
-  'sherpa-onnx-wasm-main-asr.data',
-  'sherpa-onnx-wasm-main-asr.js',
-  'sherpa-onnx-wasm-main-asr.wasm',
-  'sherpa-onnx-asr.js',
-];
+// ── 智能体主动对话（定时消息）──────────────────────────────────────────────
 
-function sherpaModelDir(): string {
-  return path.join(app.getPath('userData'), SHERPA_DIR_NAME);
-}
-
-/** 解压产物平铺到目录根：SDK 按 <m_path>/<固定文件名> 拼路径，不认子目录 */
-function flattenModelDir(dir: string): void {
-  const walk = (d: string) => {
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      const full = path.join(d, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-        try { fs.rmdirSync(full); } catch { /* 非空目录保留 */ }
-      } else if (d !== dir) {
-        const target = path.join(dir, entry.name);
-        if (!fs.existsSync(target)) fs.renameSync(full, target);
-      }
-    }
-  };
-  walk(dir);
-}
-
-/** 模型是否已导入就绪 */
-function sherpaModelReady(): boolean {
-  try {
-    const dataPath = path.join(sherpaModelDir(), 'sherpa-onnx-wasm-main-asr.data');
-    return fs.statSync(dataPath).size >= SHERPA_DATA_MIN_BYTES;
-  } catch {
-    return false;
-  }
-}
-
-/** 未导入提醒节流（渲染端持续聆听/手动识别可能反复询问，10 分钟最多提醒一次） */
-let sherpaModelMissingNotifiedAt = 0;
-
-ipcMain.handle('sherpa:get-model', () => {
-  if (sherpaModelReady()) return { ok: true, path: sherpaModelDir() };
-  if (Date.now() - sherpaModelMissingNotifiedAt > 10 * 60 * 1000) {
-    sherpaModelMissingNotifiedAt = Date.now();
-    deliverAgentMessage('语音模型包还未导入，请打开聊天设置 →「宠物怎么听懂你说话」导入模型文件，或改用其他识别方式');
-  }
-  return { ok: false };
-});
-
-/** 从用户提供的模型包导入（本地 zip 路径或下载 URL），校验后解压平铺到模型目录 */
-async function importSherpaModel(source: string): Promise<{ ok: boolean; path?: string; error?: string }> {
-  const src = (source || '').trim();
-  if (!src) return { ok: false, error: '请填写模型包的本地路径或下载 URL' };
-  const dir = sherpaModelDir();
-  const tmpZip = path.join(app.getPath('userData'), 'sherpa-model-import.zip');
-  const partPath = `${tmpZip}.part`;
-  try {
-    if (/^https?:\/\//i.test(src)) {
-      const resp = await net.fetch(src, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-      });
-      if (!resp.ok || !resp.body) throw new Error(`下载失败 HTTP ${resp.status}`);
-      const buf = Buffer.from(await resp.arrayBuffer());
-      fs.writeFileSync(partPath, buf);
-      fs.renameSync(partPath, tmpZip);
-    } else {
-      const local = path.normalize(src);
-      if (!fs.existsSync(local)) throw new Error(`本地文件不存在：${local}`);
-      fs.copyFileSync(local, tmpZip);
-    }
-    // 解压前先校验关键文件齐全，避免污染模型目录
-    const zip = new AdmZip(tmpZip);
-    const names = zip.getEntries().map((e) => path.basename(e.entryName));
-    for (const f of SHERPA_REQUIRED_FILES) {
-      if (!names.includes(f)) throw new Error(`模型包缺少文件：${f}`);
-    }
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(dir, { recursive: true });
-    zip.extractAllTo(dir, true);
-    flattenModelDir(dir);
-    fs.rmSync(tmpZip, { force: true });
-    return { ok: true, path: dir };
-  } catch (err) {
-    try { fs.rmSync(partPath, { force: true }); } catch { /* 清理失败忽略 */ }
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-}
-
-ipcMain.handle('sherpa:import-model', (_event, source: string) => importSherpaModel(source));
-
-// --- 云端语音识别（宠物「听懂说话」的在线来源） ---
-// 音频由渲染端采集并编码 WAV，经 IPC 到主进程发起上游请求（Key 不进渲染端，与 LLM 同模式）。
-// 生效配置按 config.voiceAsr.source 实时解析：api=用户自配接口；agent=已安装智能体自带（可替换 Key）。
-
-/** 解析当前生效的云端识别配置；未配置/不完整返回面向用户的错误说明 */
-function resolveAsrApiConfig(): { cfg: VoiceAsrApiConfig } | { error: string } {
-  const { voiceAsr, installedAgentConfig } = loadConfig();
-  const source = voiceAsr?.source || 'local';
-  if (source === 'api') {
-    const cfg = voiceAsr?.api;
-    if (!cfg?.baseUrl || !cfg?.model) return { error: '在线识别接口还没填好（接口地址和模型名必填），请到聊天设置补全' };
-    return { cfg };
-  }
-  if (source === 'agent') {
-    const asr = (installedAgentConfig as { asr?: VoiceAsrApiConfig } | null | undefined)?.asr;
-    if (!asr?.baseUrl || !asr?.model) return { error: '当前智能体没有自带语音识别，请在聊天设置里换一种方式' };
-    return { cfg: { ...asr, apiKey: (voiceAsr?.agentApiKey || '').trim() || asr.apiKey || '' } };
-  }
-  return { error: '当前使用本地语音模型，不经过在线识别' };
-}
-
-/** 调用上游云端识别：transcribe=转写接口；chat=多模态聊天模型 */
-async function callAsrUpstream(cfg: VoiceAsrApiConfig, wavBase64: string): Promise<string> {
-  const base = cfg.baseUrl.trim().replace(/\/+$/, '');
-  if (cfg.mode === 'chat') {
-    const resp = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model: cfg.model,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: '请将这段语音准确转写为文字，只输出转写内容，不要任何解释。' },
-            { type: 'input_audio', input_audio: { data: wavBase64, format: 'wav' } },
-          ],
-        }],
-      }),
-    });
-    if (!resp.ok) throw new Error(`识别接口返回 HTTP ${resp.status}`);
-    const data = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return (data.choices?.[0]?.message?.content || '').trim();
-  }
-  // transcribe：multipart 上传 wav 文件
-  const form = new FormData();
-  form.append('file', new Blob([Buffer.from(wavBase64, 'base64')], { type: 'audio/wav' }), 'audio.wav');
-  form.append('model', cfg.model);
-  if (cfg.language) form.append('language', cfg.language);
-  const resp = await fetch(`${base}/audio/transcriptions`, {
-    method: 'POST',
-    headers: cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : undefined,
-    body: form,
-  });
-  if (!resp.ok) throw new Error(`识别接口返回 HTTP ${resp.status}`);
-  const data = await resp.json() as { text?: string };
-  return (data.text || '').trim();
-}
-
-ipcMain.handle('asr:transcribe', async (_event, payload: { wavBase64?: string }) => {
-  const wavBase64 = (payload?.wavBase64 || '').trim();
-  if (!wavBase64) return { ok: false, error: '没有收到音频数据' };
-  const resolved = resolveAsrApiConfig();
-  if ('error' in resolved) return { ok: false, error: resolved.error };
-  try {
-    const text = await callAsrUpstream(resolved.cfg, wavBase64);
-    return { ok: true, text };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// "重新加载页面"禁止直接 webContents.reload()：透明无边框窗口在 Windows 上重载
-// 会丢失透明度（变成不透明白块），且主进程残留状态（isChatOpen/点击穿透标志/拖拽
-// 定时器）与重载后渲染端的初始状态不同步，导致应用不可用。改为整窗重建：保留
-// 原位置，其余状态全部归零（新窗按固定 650x690 创建、回到宠物模式）。
-function recreatePetWindow() {
-  const old = mainWindow;
-  if (!old || old.isDestroyed()) return;
-  isChatOpen = false;
-  isActionsOpen = false;
-  petDragging = false;
-  stopWander();
-  if (petDragTimer) {
-    clearInterval(petDragTimer);
-    petDragTimer = null;
-  }
-  const [x, y] = old.getPosition();
-  createWindow();
-  mainWindow?.setPosition(x, y);
-  if (!old.isDestroyed()) old.destroy();
-}
-
-// --- 宠物动作系统：手动上传帧序列 / 删除（上限 15 个） ---
-/** 动作增删后广播所有窗口：宠物窗刷新动作面板，宠工坊「宠物资源」页刷新动作列表与互动绑定 */
-function notifyPetActionsChanged() {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('pet:actions-changed', null);
-  }
-}
-
-// 宠工坊「宠物资源」页点播放：动作只能在宠物窗渲染，转交宠物窗播放
-ipcMain.handle('actions:play', (_event, id: string) => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pet:play-action', id);
-  return { success: true };
-});
-
-ipcMain.handle(
-  'actions:add-frames',
-  (_event, name: string, files: Array<{ filename: string; data: Uint8Array }>) => {
-    try {
-      const buffers = (files || []).map((f) => ({ filename: f.filename, data: Buffer.from(f.data) }));
-      const action = addFramesAction(name, buffers);
-      notifyPetActionsChanged();
-      return { success: true, action };
-    } catch (e) {
-      return { success: false, error: e instanceof Error ? e.message : String(e) };
-    }
-  }
-);
-
-ipcMain.handle('actions:remove', (_event, id: string) => {
-  try {
-    removeAction(id);
-    notifyPetActionsChanged();
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : String(e) };
-  }
-});
-
-// --- 内置演示宠物（离线可用，随包分发） ---
-// 注意：apply/reset 不触发云同步。uploadNow 在 petAssetId 为空时会上传 currentPet: null，
-// 会把用户云端保存的宠物引用抹掉。
-ipcMain.handle('builtin:list', () => {
-  try {
-    return { success: true, pets: listBuiltinPets() };
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : String(e), pets: [] };
-  }
-});
-
-ipcMain.handle('builtin:apply', (_event, id: string) => {
-  try {
-    const result = applyBuiltinPet(id);
-    if (result.success) {
-      notifyPetAssetChanged();
-      notifyPetActionsChanged();
-    }
-    return result;
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : String(e) };
-  }
-});
-
-ipcMain.handle('builtin:reset', () => {
-  try {
-    const result = resetBuiltinPet();
-    notifyPetAssetChanged();
-    notifyPetActionsChanged();
-    return result;
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : String(e) };
-  }
-});
-
-// --- 上游美术资源库（GitHub「pet」项目导入的静态素材；随包分发） ---
-// 列表只回元数据（素材可能上千张，一次性回 dataUrl 会撑爆 IPC），图片按需 library:read 取。
-ipcMain.handle('library:list', () => {
-  try {
-    return { success: true, assets: listLibraryAssets() };
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : String(e), assets: [] };
-  }
-});
-
-ipcMain.handle('library:read', (_event, file: string) => readLibraryAsset(file));
-
-ipcMain.handle('library:apply', (_event, file: string, name?: string) => {
-  try {
-    const result = applyLibraryAsset(file, name);
-    if (result.success) {
-      notifyPetAssetChanged();
-      notifyPetActionsChanged();
-    }
-    return result;
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : String(e) };
-  }
-});
-
-ipcMain.handle('library:add-action', (_event, file: string, name?: string) => {
-  try {
-    const result = addLibraryAssetAsAction(file, name);
-    if (result.success) notifyPetActionsChanged();
-    return result;
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : String(e) };
-  }
-});
-
-// 右键宠物：原生上下文菜单（含原页面右键的刷新等选项）
-ipcMain.on('pet:show-context-menu', () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const send = (action: string) => mainWindow?.webContents.send('pet:context-action', action);
-  // 互动功能开关：关闭的功能不出现在右键菜单中（宠物状态总开关关闭时全部隐藏）
-  const petConfig = loadConfig();
-  const petSystemOn = petConfig.petSystemEnabled !== false;
-  const features = petConfig.petFeatures;
-  // 动作子菜单：动作可能很多（单宠上限 128），全量铺开会撑爆原生菜单，
-  // 故「绑定动作优先 + 其余按最近创建取前 N 个」，末尾再给「更多动作…」入口
-  const ACTION_MENU_LIMIT = 20;
-  const actions = petConfig.petActions;
-  const bindings = petConfig.petActionBindings || {};
-  const boundIds = new Set([bindings.feed, bindings.rest, bindings.play].filter(Boolean) as string[]);
-  const boundActions = actions.filter((a) => boundIds.has(a.id));
-  const otherActions = actions
-    .filter((a) => !boundIds.has(a.id))
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, Math.max(0, ACTION_MENU_LIMIT - boundActions.length));
-  const shownActions = [...boundActions, ...otherActions];
-  const actionItems: Electron.MenuItemConstructorOptions[] = [
-    ...shownActions.map((a) => ({
-      label: `${a.name}（${a.source === 'ai' ? 'AI' : '手动'}）`,
-      click: () => mainWindow?.webContents.send('pet:play-action', a.id),
-    })),
-    ...(actions.length > shownActions.length
-      ? [
-          { type: 'separator' as const },
-          {
-            label: `更多动作…（共 ${actions.length} 个）`,
-            click: () => mainWindow?.webContents.send('pet:toggle-actions', null),
-          },
-        ]
-      : []),
-  ];
-  const menu = Menu.buildFromTemplate([
-    { label: isChatOpen ? '收起聊天' : '聊天', click: () => send('toggle-chat') },
-    { label: '资源中心', click: () => void openStoreWindow() },
-    { type: 'separator' },
-    ...(petSystemOn && features.feedEnabled ? [{ label: '喂食', click: () => send('feed') }] : []),
-    ...(petSystemOn && features.restEnabled ? [{ label: '休息', click: () => send('rest') }] : []),
-    ...(petSystemOn && features.playEnabled ? [{ label: '玩耍', click: () => send('play') }] : []),
-    { type: 'separator' },
-    ...(actionItems.length ? [{ label: '播放动作', submenu: actionItems }] : []),
-    { label: '动作管理', click: () => mainWindow?.webContents.send('pet:toggle-actions', null) },
-    { type: 'separator' },
-    { label: '重新加载页面', click: () => recreatePetWindow() },
-    { label: '退出', click: () => app.quit() },
-  ]);
-  menu.popup({ window: mainWindow });
-});
-
-// --- Agent Proactive Conversation（智能体主动发起对话） ---
-
-let lastUserMessageAt = 0;
-
-/** 智能体消息投递（主动对话与持续感知共用）：气泡 + 写入聊天历史 */
+/** 智能体消息投递（主动对话）：写入聊天历史并通知对话窗口 */
 function deliverAgentMessage(text: string): void {
-  const clean = extractActionTag(text, mainWindow);
-  conversationManager.addAssistantMessage(clean);
+  conversationManager.addAssistantMessage(text);
   scheduleUpload('chat_history');
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('pet:agent-message', clean);
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.webContents.send('chat:agent-message', text);
   }
 }
 
@@ -1355,143 +500,46 @@ function startProactive() {
     getConfig: () => loadConfig(),
     isConfigured: () => llmService.isConfigured(),
     isUserActive: () => Date.now() - lastUserMessageAt < 2 * 60_000,
-    getState: () => currentPetState,
     getSystemPrompt: () => conversationManager.getSystemPrompt(),
     getRecentHistory: (n) => conversationManager.getHistory().slice(-n),
-    // 主动对话同样注入动作列表：智能体可在气泡消息中触发动作播放
-    generate: async (messages) => {
-      withActionPrompt(messages);
-      return await llmService.chat({ messages });
-    },
+    generate: async (messages) => llmService.chat({ messages }),
     deliver: deliverAgentMessage,
   });
 }
 
+// ── 应用生命周期与菜单 ─────────────────────────────────────────────────────
+
+/** 应用菜单：替代宠物右键菜单，提供各窗口的打开入口 */
+function buildAppMenu(): void {
+  const menu = Menu.buildFromTemplate([
+    {
+      label: '窗口',
+      submenu: [
+        { label: '创作中心', click: () => openStudioWindow() },
+        { label: '对话', click: () => openChatWindow() },
+        { label: '资源中心', click: () => void openStoreWindow() },
+        { type: 'separator' },
+        { label: '退出', role: 'quit' },
+      ],
+    },
+  ]);
+  Menu.setApplicationMenu(menu);
+}
+
 app.whenReady().then(() => {
-  // 麦克风/摄像头权限网关：按商店设置的感知开关放行
-  setupMediaPermissionGate();
-  // 感知开关已开时启动桌面持续感知循环
-  syncScreenSenseLoop();
+  buildAppMenu();
+  // 启动直接打开工作室（创作中心）窗口；对话与资源中心由菜单按需打开
+  openStudioWindow();
 
-  // 录屏源提供（渲染端 getDisplayMedia 必需）：按「查看桌面」开关网关放行
-  session.defaultSession.setDisplayMediaRequestHandler((_options, callback) => {
-    if (!loadConfig().petSenses?.screen) {
-      callback({});
-      return;
-    }
-    void desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-      const target = pickScreenSource(sources);
-      callback(target ? { video: target } : {});
-    });
-  });
-
-  // 感知-查看桌面：截取屏幕画面返回 jpeg dataUrl（需在商店设置中开启）
-  ipcMain.handle('sense:capture-screen', async () => {
-    if (!loadConfig().petSenses?.screen) {
-      return { success: false, error: '未开启「查看桌面」权限（商店 → 设置 → 感知能力）' };
-    }
-    try {
-      const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 720 } });
-      const target = pickScreenSource(sources);
-      if (!target) return { success: false, error: '未找到可截取的屏幕' };
-      // NativeImage.toDataURL 不支持质量参数，转 JPEG buffer 控制 base64 体积
-      const jpeg = target.thumbnail.toJPEG(75);
-      return { success: true, dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` };
-    } catch (e) {
-      return { success: false, error: e instanceof Error ? e.message : String(e) };
-    }
-  });
-
-  // 感知-摄像头持续帧：渲染端定时抓帧上送，视觉理解后触发主动对话（需在商店设置中开启）
-  ipcMain.handle('sense:camera-frame', async (_event, dataUrl: string) => {
-    if (!loadConfig().petSenses?.camera) return { success: false, error: '未开启摄像头感知' };
-    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return { success: false, error: '无效的图像数据' };
-    const desc = await describeSenseImage(dataUrl, 'camera');
-    if (desc) deliverAgentMessage(desc);
-    return { success: true };
-  });
-
-  // petaction://local/<filename>?p=<encoded-abs-path> → 本地资源文件
-  // （动作帧图 / 3D 模型 / sherpa 语音模型：仅允许 pet-actions、pets 与 sherpa-asr
-  //   三个目录内文件；path 段携带真实文件名，供 pixi/three 加载器按扩展名选择解析器）
-  const actionsDir = path.join(app.getPath('userData'), 'pet-actions');
-  const petsDir = path.join(app.getPath('userData'), 'pets');
-  // sherpa 语音模型目录（渲染端 speech-asr SDK 按 <m_path>/<文件名> 经 petaction:// 加载）
-  const sherpaAsrDir = sherpaModelDir();
-  // 文件名 → 绝对路径索引：Live2D/GLTF 等加载器按模型 URL 解析相对资源时丢失 ?p= 参数，
-  // 按 path 段文件名在白名单目录内兜底查找（懒构建，目录小、开销可忽略）
-  let fileIndex: Map<string, string> | null = null;
-  const buildFileIndex = () => {
-    const map = new Map<string, string>();
-    const walk = (dir: string) => {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) walk(full);
-        else if (!map.has(entry.name)) map.set(entry.name, full);
-      }
-    };
-    walk(actionsDir);
-    walk(petsDir);
-    walk(sherpaAsrDir);
-    return map;
-  };
-  protocol.handle('petaction', async (request) => {
-    try {
-      const url = new URL(request.url);
-      let normalized = path.normalize(decodeURIComponent(url.searchParams.get('p') || ''));
-      if (!url.searchParams.get('p')) {
-        // 无 ?p=：取 path 段末段文件名兜底解析（sherpa 模型目录 URL 即此形式）
-        const name = decodeURIComponent(url.pathname.split('/').pop() || '');
-        fileIndex = fileIndex ?? buildFileIndex();
-        const resolved = fileIndex.get(name);
-        if (!name || !resolved) return new Response('not found', { status: 404 });
-        normalized = resolved;
-      }
-      if (
-        !normalized ||
-        !(normalized.startsWith(actionsDir) || normalized.startsWith(petsDir) || normalized.startsWith(sherpaAsrDir))
-      ) {
-        return new Response('forbidden', { status: 403 });
-      }
-      const cors = { 'Access-Control-Allow-Origin': '*' };
-      // 媒体文件（视频动作的 webm 等）需要按 Range 分段响应，视频才能播放与拖动进度条；
-      // 其它文件（帧图/模型/语音模型）继续走下面的 net.fetch 分支，保持它们原有的 Content-Type 推断。
-      const mediaType = PETACTION_MEDIA_TYPES[path.extname(normalized).toLowerCase()];
-      const rangeHeader = request.headers.get('Range');
-      if (mediaType && rangeHeader) {
-        return serveLocalMediaRange(normalized, mediaType, rangeHeader, cors);
-      }
-      // dev 下渲染端是 http origin，fetch petaction:// 属跨源，需带 CORS 头
-      const resp = await net.fetch(pathToFileURL(normalized).toString());
-      const headers = new Headers(resp.headers);
-      headers.set('Access-Control-Allow-Origin', '*');
-      // 声明支持分段：Chromium 才会对媒体发出 Range 请求（否则只能顺序下载、无法 seek）
-      if (mediaType) headers.set('Accept-Ranges', 'bytes');
-      return new Response(resp.body, { status: resp.status, headers });
-    } catch (e) {
-      return new Response(`bad request: ${e}`, { status: 400 });
-    }
-  });
-
-  createWindow();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) openStudioWindow();
   });
 
   // Start agent proactive conversation scheduler
   startProactive();
-
 });
 
-// Flush pending debounced pet state write and cloud sync uploads before exiting
 app.on('before-quit', () => {
-  flushPendingPetStateSave();
   flushAllOnQuit();
 });
 

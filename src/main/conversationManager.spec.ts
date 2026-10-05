@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import type { AppConfig } from './config';
-import type { ConversationManager, PetStateSnapshot } from './conversationManager';
+import type { ConversationManager } from './conversationManager';
 
 // config.ts 依赖 electron app.getPath('userData')：用临时目录替代真实 userData，
 // 使「按档案隔离落盘」「旧单档案迁移」等用例可以走真实读写。
@@ -28,23 +28,10 @@ afterEach(() => {
   fs.rmSync(userDataDir, { recursive: true, force: true });
 });
 
-const petState: PetStateSnapshot = { hunger: 80, mood: 80, energy: 80, affection: 50 };
-
 function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
   return {
-    petSystemEnabled: true,
-    randomMoveEnabled: true,
     agentType: 'default',
     userProfile: { name: '测试用户', preferences: {} },
-    petState: { hunger: 80, mood: 80, energy: 80, affection: 50 },
-    petWindow: { width: 300, height: 300, opacity: 1 },
-    petFeatures: {
-      feedEnabled: true,
-      restEnabled: true,
-      playEnabled: true,
-      affectionEnabled: true,
-    },
-    petActions: [],
     platform: { baseUrl: '', frontendUrl: '', accessToken: '', refreshToken: '', user: null },
     ...over,
   };
@@ -52,7 +39,7 @@ function makeConfig(over: Partial<AppConfig> = {}): AppConfig {
 
 // 不落盘场景（无档案）：历史仅存内存，测试不产生磁盘 IO
 function makeManager(config: AppConfig): ConversationManager {
-  return new conv.ConversationManager(config, petState);
+  return new conv.ConversationManager(config);
 }
 
 describe('conversationManager 智能体提示词', () => {
@@ -62,7 +49,7 @@ describe('conversationManager 智能体提示词', () => {
     );
     const prompt = manager.getSystemPrompt();
     expect(prompt).toContain('你是傲娇猫娘');
-    expect(prompt).toContain('桌面宠物'); // 基础人格仍在
+    expect(prompt).toContain('智能助手'); // 基础人格仍在
   });
 
   it('智能体提示词排在用户自定义提示词之前', () => {
@@ -97,19 +84,17 @@ describe('conversationManager 智能体提示词', () => {
     expect(noField.getSystemPrompt()).not.toContain('undefined');
 
     const notObject = makeManager(makeConfig({ installedAgentConfig: 'raw-string' }));
-    expect(notObject.getSystemPrompt()).toContain('桌面宠物');
+    expect(notObject.getSystemPrompt()).toContain('智能助手');
 
     const nullConfig = makeManager(makeConfig({ installedAgentConfig: null }));
     expect(nullConfig.getSystemPrompt()).toContain('测试用户');
   });
 
-  it('系统提示词包含宠物状态与用户名', () => {
-    const manager = makeManager(
-      makeConfig({ petState: { hunger: 10, mood: 20, energy: 90, affection: 50 } })
-    );
+  it('系统提示词包含用户名与当前时间', () => {
+    const manager = makeManager(makeConfig());
     const prompt = manager.getSystemPrompt();
     expect(prompt).toContain('测试用户');
-    expect(prompt).toContain('饿'); // hunger 10 → "现在有点饿了"
+    expect(prompt).toContain('精准时间');
   });
 });
 
@@ -156,7 +141,7 @@ describe('conversationManager 多档案消息隔离（T2）', () => {
       llmActiveProfileId: activeId,
       profileMessages: {},
     });
-    return new conv.ConversationManager(configModule.loadConfig(), petState);
+    return new conv.ConversationManager(configModule.loadConfig());
   }
 
   /** 切换激活档案（与 config:set → updateConfig 的真实链路一致） */
@@ -186,7 +171,7 @@ describe('conversationManager 多档案消息隔离（T2）', () => {
   it('重启（新建管理器实例）后按激活档案恢复历史', () => {
     const manager = setup('p_b');
     manager.addUserMessage('B 的问题');
-    const restarted = new conv.ConversationManager(configModule.loadConfig(), petState);
+    const restarted = new conv.ConversationManager(configModule.loadConfig());
     expect(restarted.getHistory().map((m) => m.content)).toEqual(['B 的问题']);
   });
 
@@ -225,7 +210,7 @@ describe('conversationManager 多档案消息隔离（T2）', () => {
 
   it('云端 profileMessages 在本地为空时整体恢复（含外部边界清洗）', () => {
     configModule.saveConfig({ llmProfiles: [profileA, profileB], llmActiveProfileId: 'p_a' });
-    const manager = new conv.ConversationManager(configModule.loadConfig(), petState);
+    const manager = new conv.ConversationManager(configModule.loadConfig());
 
     const restored = manager.restoreAllProfilesFromCloud({
       p_a: [{ role: 'user', content: '云端 A' }],
@@ -263,7 +248,7 @@ describe('conversationManager 旧单档案聊天记录迁移（T2）', () => {
       { role: 'system', content: '系统提示词不应落盘' },
     ]);
 
-    const manager = new conv.ConversationManager(configModule.loadConfig(), petState, legacyPath);
+    const manager = new conv.ConversationManager(configModule.loadConfig(), legacyPath);
 
     expect(manager.getHistory().map((m) => m.content)).toEqual(['旧问题', '旧回答']);
     expect(fs.existsSync(legacyPath)).toBe(false);
@@ -278,7 +263,7 @@ describe('conversationManager 旧单档案聊天记录迁移（T2）', () => {
     });
     const legacyPath = writeLegacy('chat-history.json', [{ role: 'user', content: '旧问题' }]);
 
-    const manager = new conv.ConversationManager(configModule.loadConfig(), petState, legacyPath);
+    const manager = new conv.ConversationManager(configModule.loadConfig(), legacyPath);
 
     expect(manager.getHistory().map((m) => m.content)).toEqual(['新结构']);
     expect(fs.existsSync(legacyPath)).toBe(true);
@@ -289,7 +274,7 @@ describe('conversationManager 旧单档案聊天记录迁移（T2）', () => {
       { role: 'user', content: '旧问题' },
       { role: 'assistant', content: '旧回答' },
     ]);
-    const manager = new conv.ConversationManager(configModule.loadConfig(), petState, legacyPath);
+    const manager = new conv.ConversationManager(configModule.loadConfig(), legacyPath);
 
     expect(manager.getHistory().map((m) => m.content)).toEqual(['旧问题', '旧回答']);
     expect(manager.getActiveProfileId()).toBe('');
@@ -299,7 +284,7 @@ describe('conversationManager 旧单档案聊天记录迁移（T2）', () => {
 
   it('未绑定历史在用户创建首个档案后仍保留在未绑定键下（不丢失）', () => {
     const legacyPath = writeLegacy('chat-history.json', [{ role: 'user', content: '旧问题' }]);
-    const manager = new conv.ConversationManager(configModule.loadConfig(), petState, legacyPath);
+    const manager = new conv.ConversationManager(configModule.loadConfig(), legacyPath);
 
     configModule.saveConfig({
       llmProfiles: [legacyProfile],
