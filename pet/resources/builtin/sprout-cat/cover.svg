@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="芽芽猫">
+  <title>芽芽猫（内置演示宠物 · 本项目自产）</title>
+  <defs>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b7eccd"/>
+      <stop offset="1" stop-color="#6fcf97"/>
+    </linearGradient>
+  </defs>
+  <path d="M28 46 L34 22 L54 38 Z" fill="url(#fur)"/>
+  <path d="M100 46 L94 22 L74 38 Z" fill="url(#fur)"/>
+  <ellipse cx="64" cy="74" rx="42" ry="38" fill="url(#fur)"/>
+  <circle cx="50" cy="72" r="5" fill="#1e1f22"/>
+  <circle cx="78" cy="72" r="5" fill="#1e1f22"/>
+  <path d="M60 87 q4 4 8 0" stroke="#1e1f22" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M64 40 q3 -12 12 -14" stroke="#3f8f5f" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <circle cx="78" cy="24" r="5" fill="#7ddc8a"/>
+</svg>

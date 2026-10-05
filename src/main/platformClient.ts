@@ -6,7 +6,7 @@ import path from 'path';
 import { app } from 'electron';
 import { loadConfig, saveConfig, type AppConfig, type InstalledVoice, type VoiceConfig } from './config';
 
-export type PlatformAssetType = 'agent' | 'voice';
+export type PlatformAssetType = 'agent' | 'voice' | 'pet';
 
 /** 渲染端经 IPC 传来的待上传文件（结构化克隆：原始文件名 + 字节） */
 export interface UploadFilePayload {
@@ -86,19 +86,23 @@ interface DownloadResponse {
   version?: string;
 }
 
-/** 本地安装目录名（智能体 / 音色资源字节） */
+/** 本地安装目录名（智能体 / 音色 / 宠物资源字节） */
 function assetPath(type: PlatformAssetType): string {
-  return type === 'agent' ? 'agents' : 'voices';
+  if (type === 'agent') return 'agents';
+  if (type === 'voice') return 'voices';
+  return 'pets';
 }
 
-/** 平台接口资源路径 */
+/** 平台接口资源路径（宠物包走 /pet-packs，与 pet/api/endpoints.ts 的 PET_PACK_API 同口径） */
 function apiPath(type: PlatformAssetType): string {
-  return type === 'agent' ? 'agents' : 'voices';
+  if (type === 'agent') return 'agents';
+  if (type === 'voice') return 'voices';
+  return 'pet-packs';
 }
 
 function assertAssetType(type: string): asserts type is PlatformAssetType {
-  if (type !== 'agent' && type !== 'voice') {
-    throw new Error('资源类型必须是 agent 或 voice');
+  if (type !== 'agent' && type !== 'voice' && type !== 'pet') {
+    throw new Error('资源类型必须是 agent、voice 或 pet');
   }
 }
 
@@ -229,7 +233,7 @@ export class PlatformClient {
     for (const [key, value] of Object.entries(payload.fields)) {
       if (value !== undefined && value !== null && value !== '') form.append(key, value);
     }
-    return this.postForm(payload.type === 'agent' ? '/agents' : '/voices', form);
+    return this.postForm(`/${apiPath(payload.type)}`, form);
   }
 
   /** multipart 提交（大文件不做本地体积限制，超时给足） */

@@ -12,10 +12,13 @@ import {
   type InstalledVoice,
   type LlmProfile,
   type AgentTask,
+  type PetAssetRef,
   type PlatformUser,
   type TtsCloudConfig,
 } from '../types';
 import { sanitizeAgentTasks } from '../agentTasks';
+// 宠物四维规则（纯函数）来自共享包 pet/domain，经 mobile/src/pet/domain.ts shim 引用
+import { DEFAULT_VITALS, feed, normalizeVitals, play, rest, type PetVitals } from '../pet/domain';
 
 const STORAGE_KEY = 'mobile-pet-store';
 /** 默认走阿里云 ECS 常驻服务（7×24）；Android 模拟器可在设置中改为 http://10.0.2.2:3001/api */
@@ -75,6 +78,17 @@ interface AppStore {
   lastUserMsgAt: number;
   /** 智能体最近一次主动消息（到点任务/自主搭话）时间戳：自主搭话据此重新计时，避免连环打扰（不持久化） */
   lastAgentMsgAt: number;
+  // ── 宠物（共享包 pet/；四维演化规则统一在 @pet/domain 纯函数里）──
+  /** 四维生命体征（饱腹/心情/精力/好感）；持久化 */
+  petState: PetVitals;
+  /** 宠物主体功能是否启用（关闭时冻结/隐藏）；持久化 */
+  petStateEnabled: boolean;
+  /** 形象资源是否就绪（下载/解压完成，可渲染）；持久化 */
+  petStateReady: boolean;
+  /** 当前选用的宠物形象引用（null = 未安装）；持久化 */
+  petAsset: PetAssetRef | null;
+  /** 已下载到本机的宠物形象列表；持久化 */
+  downloadedPets: PetAssetRef[];
   // actions
   setAuth: (user: PlatformUser, token: string, refreshToken?: string) => void;
   logout: () => void;
@@ -101,12 +115,23 @@ interface AppStore {
   patchAgentTasks: (patches: Array<Partial<AgentTask> & { id: string }>) => void;
   /** 到点消息落地：写入该智能体的对话存档；仅当它是当前激活档案时才同时更新顶层 messages */
   pushAgentTaskMessage: (profileId: string, msg: ChatMsg) => void;
+  // ── 宠物动作（编排 @pet/domain 的纯函数，数值规则不在此重复）──
+  /** 喂食：饱腹 +15、好感 +2 */
+  feedPet: () => void;
+  /** 玩耍：心情 +20、精力 -10、好感 +5 */
+  playWithPet: () => void;
+  /** 休息：精力 +30、饱腹 -5 */
+  restPet: () => void;
+  /** 设置当前宠物形象（安装/选用后写入） */
+  setPetAsset: (asset: PetAssetRef) => void;
+  /** 清除当前宠物形象（卸载/停用） */
+  clearPetAsset: () => void;
   hydrate: () => Promise<void>;
 }
 
 type PersistState = Omit<
   AppStore,
-  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setTtsEnabled' | 'hydrate' | 'removeMessage' | 'switchProfile' | 'toggleProfileEnabled' | 'duplicateProfile' | 'addAgentTask' | 'patchAgentTasks' | 'pushAgentTaskMessage'
+  'hydrated' | 'setAuth' | 'logout' | 'setBaseUrl' | 'patch' | 'appendMessages' | 'patchMessage' | 'appendMessageChunk' | 'clearMessages' | 'setTtsEnabled' | 'hydrate' | 'removeMessage' | 'switchProfile' | 'toggleProfileEnabled' | 'duplicateProfile' | 'addAgentTask' | 'patchAgentTasks' | 'pushAgentTaskMessage' | 'feedPet' | 'playWithPet' | 'restPet' | 'setPetAsset' | 'clearPetAsset'
 >;
 
 const PERSIST_KEYS: Array<keyof PersistState> = [
@@ -133,6 +158,11 @@ const PERSIST_KEYS: Array<keyof PersistState> = [
   'hotApply',
   'hotRolledBack',
   'agentTasks',
+  'petState',
+  'petStateEnabled',
+  'petStateReady',
+  'petAsset',
+  'downloadedPets',
 ];
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -207,6 +237,13 @@ export const useAppStore = create<AppStore>((set) => ({
   agentTasks: [],
   lastUserMsgAt: 0,
   lastAgentMsgAt: 0,
+
+  // 宠物：四维初值沿用共享模块 DEFAULT_VITALS（80/80/80/50）
+  petState: { ...DEFAULT_VITALS },
+  petStateEnabled: true,
+  petStateReady: false,
+  petAsset: null,
+  downloadedPets: [],
 
   setAuth: (user, token, refreshToken) =>
     set((s) => ({ user, token, refreshToken: refreshToken !== undefined ? refreshToken : s.refreshToken })),
@@ -348,6 +385,13 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setTtsEnabled: (enabled) => set({ ttsEnabled: enabled }),
 
+  // ── 宠物动作：只做「取旧值 → 过纯函数 → 存新值」，数值规则全在 @pet/domain ──
+  feedPet: () => set((s) => ({ petState: feed(s.petState) })),
+  playWithPet: () => set((s) => ({ petState: play(s.petState) })),
+  restPet: () => set((s) => ({ petState: rest(s.petState) })),
+  setPetAsset: (asset) => set({ petAsset: asset }),
+  clearPetAsset: () => set({ petAsset: null }),
+
   hydrate: async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -448,6 +492,12 @@ export const useAppStore = create<AppStore>((set) => ({
           hotRolledBack: Array.isArray(data.hotRolledBack) ? (data.hotRolledBack as number[]) : [],
           // 旧版持久化字段 petTasks → agentTasks：升级后不丢已排期的任务
           agentTasks: sanitizeAgentTasks(data.agentTasks ?? data.petTasks),
+          // 宠物：四维容错归一（缺失/损坏 → DEFAULT_VITALS）；开关与资源列表按持久化恢复
+          petState: normalizeVitals(data.petState),
+          petStateEnabled: typeof data.petStateEnabled === 'boolean' ? data.petStateEnabled : true,
+          petStateReady: typeof data.petStateReady === 'boolean' ? data.petStateReady : false,
+          petAsset: (data.petAsset as PetAssetRef | null | undefined) ?? null,
+          downloadedPets: Array.isArray(data.downloadedPets) ? (data.downloadedPets as PetAssetRef[]) : [],
         });
       }
     } catch {

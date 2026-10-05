@@ -1,4 +1,5 @@
 /** 与桌面端共享的数据结构（经平台 /api/sync/* 同步） */
+import type { PetVitals } from './pet/domain';
 
 /** LLM API 档案 = 智能体：每个档案就是一个独立智能体，人设 + 独立对话
  *  桌面端 config.llmProfiles 同构，Key 服务端加密落库、传输时解密 */
@@ -233,4 +234,19 @@ export interface AssetItem {
   downloads?: number;
   description?: string | null;
   [key: string]: unknown;
+}
+
+// ── 宠物主体功能模块（共享包 `pet/`；领域类型经 `./pet/domain` shim，契约类型直接引用 `pet/api`）──
+
+/** 当前安装/选用的宠物形象引用（跨端契约，见 pet/api/syncKeys.ts；桌面/平台/移动同构） */
+export type { PetAssetRef, PetPackSummary } from '../../pet/api';
+
+/** 宠物运行态聚合视图：四维生命体征 + 功能开关 + 形象资源就绪标记 */
+export interface PetState {
+  /** 四维数值（饱腹/心情/精力/好感），演化规则来自 @pet/domain 的纯函数 */
+  vitals: PetVitals;
+  /** 宠物主体功能是否启用（关闭时冻结/隐藏） */
+  enabled: boolean;
+  /** 形象资源是否就绪（下载/解压完成，可渲染） */
+  ready: boolean;
 }

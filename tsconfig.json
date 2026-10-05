@@ -14,9 +14,10 @@
     "isolatedModules": true,
     "noEmit": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@pet/*": ["./pet/*"]
     }
   },
-  "include": ["src", "src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "packages"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src", "src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "pet"],
+  "exclude": ["node_modules", "dist", "pet/resources/upstream"]
 }

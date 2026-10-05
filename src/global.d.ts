@@ -1,3 +1,5 @@
+import type { PetVitals } from '@pet/domain';
+
 export {};
 
 declare module 'react' {
@@ -148,6 +150,79 @@ export interface StoredChatMessage {
   reasoning?: string;
 }
 
+// ── 宠物（镜像 src/main/config.ts 的 PetSettings）────────────────────────────
+
+/** 宠物动作定义（帧序列 / 模型内置 clip / 视频） */
+export interface PetActionConfig {
+  id: string;
+  name: string;
+  kind: 'frames' | 'clip' | 'video';
+  interaction?: 'none' | 'feed' | 'rest' | 'play';
+  frameRate?: number;
+  frameFiles?: string[];
+  clipName?: string;
+  videoFile?: string;
+  petAssetId?: string;
+  builtinPetId?: string;
+}
+
+/** 互动绑定：feed/rest/play → 动作 id */
+export type PetActionBindings = Partial<Record<'feed' | 'rest' | 'play', string>>;
+
+/** 已安装到本机的宠物（资源包 / 内置形象） */
+export interface InstalledPet {
+  id: string;
+  name: string;
+  format: string;
+  localPath?: string;
+  version?: string;
+  installedAt: number;
+  fromStore?: boolean;
+}
+
+/** 宠物窗口外观 */
+export interface PetWindowSettings {
+  width: number;
+  height: number;
+  /** 0~1 透明度 */
+  opacity: number;
+}
+
+/** 宠物功能开关（喂食/玩耍/休息） */
+export interface PetFeatureSettings {
+  feedEnabled: boolean;
+  playEnabled: boolean;
+  restEnabled: boolean;
+}
+
+/** 宠物系统设置（与 pet/api 的 12 个配置键对应 + 窗口/开关等本机偏好） */
+export interface PetSettings {
+  petAssetPath: string;
+  petAssetName: string;
+  petAssetId: string;
+  petAssetFormat: string;
+  builtinPet: string;
+  petActions: PetActionConfig[];
+  petActionBindings: PetActionBindings;
+  petState: PetVitals;
+  petStateReady: boolean;
+  petSelfDescription: string;
+  currentPet: string;
+  downloadedPets: InstalledPet[];
+  petWindow: PetWindowSettings;
+  petFeatures: PetFeatureSettings;
+  petSystemEnabled: boolean;
+  moodFromChat: boolean;
+}
+
+/** 宠物运行时状态（主进程 → 宠物窗口） */
+export interface PetRuntimeState {
+  vitals: PetVitals;
+  ready: boolean;
+  /** 当前选用的宠物（无则 null） */
+  current: InstalledPet | null;
+}
+
 export interface AppConfig {
   agentType: string;
   userProfile: UserProfile;
@@ -197,6 +272,8 @@ export interface AppConfig {
   agentConfigPath?: string;
   installedAgentId?: string;
   installedAgentConfig?: unknown;
+  /** 宠物系统设置（与共享模块 pet/api 的 12 个配置键对应，另含窗口/开关等本机偏好） */
+  pet?: PetSettings;
 }
 
 /** 平台账号用户（镜像 AppConfig.platform.user） */
@@ -210,7 +287,7 @@ export interface PlatformAuthState {
 }
 
 /** 创作中心工作区 id */
-export type StudioWorkspaceTab = 'agents' | 'voices';
+export type StudioWorkspaceTab = 'agents' | 'voices' | 'pets';
 
 /** 待上传文件：渲染端读成字节随 IPC 传给主进程（结构化克隆，不经文件系统） */
 export interface PublishFilePayload {
@@ -294,6 +371,26 @@ declare global {
           user?: AccountUser | null;
         }) => Promise<PlatformAuthState>;
         clearAuth: () => Promise<{ loggedIn: boolean }>;
+      };
+
+      /** 宠物窗口 / 宠物库（桌宠功能模块） */
+      pet: {
+        /** 宠物运行时状态（四维 + 就绪态 + 当前宠物） */
+        getState: () => Promise<PetRuntimeState>;
+        /** 打开桌宠悬浮窗 */
+        open: () => Promise<{ success: boolean }>;
+        /** 关闭桌宠悬浮窗 */
+        close: () => Promise<{ success: boolean }>;
+        /** 互动动作：feed / play / rest，返回互动后的四维 */
+        action: (kind: 'feed' | 'play' | 'rest') => Promise<{ success: boolean; vitals?: PetVitals }>;
+        /** 安装宠物（资源包 id） */
+        install: (id: string) => Promise<{ success: boolean; pet?: InstalledPet }>;
+        /** 卸载宠物 */
+        uninstall: (id: string) => Promise<{ success: boolean }>;
+        /** 主进程广播宠物状态变化 */
+        onState: (callback: (state: PetRuntimeState) => void) => (() => void);
+        /** 主进程投递宠物消息（主动搭话等） */
+        onMessage: (callback: (message: string) => void) => (() => void);
       };
 
       /** 创作中心：内嵌在资源中心窗口内容区（不再单独开窗） */

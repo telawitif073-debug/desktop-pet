@@ -11,6 +11,7 @@ import ProfilePage from './pages/ProfilePage';
 import WorkshopPage from './pages/WorkshopPage';
 import AdminPage from './pages/AdminPage';
 import AgentsPage from './pages/AgentsPage';
+import PetPacksPage from './pages/PetPacksPage';
 
 const { Header, Content } = Layout;
 
@@ -122,6 +123,8 @@ export default function App() {
             <Route path="/workshop" element={<WorkshopPage />} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
+            {/* 宠物包商店：骨架阶段暂不挂顶部导航，仅登记路由（后续再接菜单） */}
+            <Route path="/pets" element={<ProtectedRoute><PetPacksPage /></ProtectedRoute>} />
             <Route path="/admin" element={user?.role === 'admin' ? <AdminPage user={user} /> : <Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

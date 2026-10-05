@@ -10,6 +10,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AgentsService } from '../agents/agents.service';
 import { VoicesService } from '../voices/voices.service';
+import { PetPacksService } from '../pet-packs/pet-packs.service';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -18,6 +19,7 @@ export class AdminController {
   constructor(
     private readonly agentsService: AgentsService,
     private readonly voicesService: VoicesService,
+    private readonly petPacksService: PetPacksService,
   ) {}
 
   @Post('approve/:type/:id')
@@ -35,13 +37,15 @@ export class AdminController {
     id: string,
     status: 'approved' | 'rejected',
   ) {
-    // `type` 是**资源载体**名：agent → agent_assets、voice → voice_assets。
-    // （宠物载体 `pet_pack` 随宠物系统整体下线。）
-    if (type !== 'agent' && type !== 'voice') {
-      throw new BadRequestException('资源类型必须是 agent / voice');
+    // `type` 是**资源载体**名：agent → agent_assets、voice → voice_assets、pet_pack → pet_packs。
+    // 注意与 reviews/download_records 的 `asset_type='pet'` 不同名——后者是评价域的
+    // 资源类型（历史上就叫 pet），语义没变，故不随载体改名。
+    if (type !== 'agent' && type !== 'voice' && type !== 'pet_pack') {
+      throw new BadRequestException('资源类型必须是 agent / voice / pet_pack');
     }
 
     if (type === 'voice') return this.voicesService.updateStatus(id, status);
+    if (type === 'pet_pack') return this.petPacksService.updateStatus(id, status);
     return this.agentsService.updateStatus(id, status);
   }
 }

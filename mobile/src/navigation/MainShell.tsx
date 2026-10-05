@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ChatScreen from '../screens/ChatScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AdminScreen from '../screens/AdminScreen';
+import PetScreen from '../screens/PetScreen';
 import StoreDrawer from '../components/StoreDrawer';
 import { useAgentTaskScheduler } from '../agentTaskScheduler';
 import { useAgentProactive } from '../agentProactive';
@@ -23,6 +24,8 @@ export default function MainShell(): React.JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  // 宠物页（占位骨架）：从右下角浮标进入，后续阶段替换为悬浮形象
+  const [petOpen, setPetOpen] = useState(false);
   // drawerOpen 的最新值（PanResponder 闭包只创建一次，须经 ref 读取，避免陈旧闭包）
   const drawerOpenRef = useRef(false);
   drawerOpenRef.current = drawerOpen;
@@ -55,6 +58,27 @@ export default function MainShell(): React.JSX.Element {
         }}
       />
       <SettingsScreen visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {/* 宠物入口浮标：进入宠物页（占位骨架），zIndex 低于商店抽屉，抽屉打开时被遮罩覆盖 */}
+      <Pressable
+        style={[styles.petEntry, { bottom: insets.bottom + 112 }]}
+        onPress={() => setPetOpen(true)}
+        hitSlop={8}
+      >
+        <Text style={styles.petEntryText}>🐾</Text>
+      </Pressable>
+      <Modal visible={petOpen} animationType="slide" onRequestClose={() => setPetOpen(false)}>
+        <View style={[styles.petHeader, { paddingTop: insets.top + 8 }]}>
+          <Pressable onPress={() => setPetOpen(false)} hitSlop={10}>
+            <Text style={styles.adminBack}>‹ 返回</Text>
+          </Pressable>
+        </View>
+        <PetScreen
+          onOpenStore={() => {
+            setPetOpen(false);
+            setDrawerOpen(true);
+          }}
+        />
+      </Modal>
       <Modal visible={adminOpen} animationType="slide" onRequestClose={() => setAdminOpen(false)}>
         <View style={[styles.adminHeader, { paddingTop: insets.top + 8 }]}>
           <Pressable onPress={() => setAdminOpen(false)} hitSlop={10}>
@@ -73,4 +97,7 @@ const styles = StyleSheet.create({
   adminHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingBottom: 8, backgroundColor: '#fff', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#EEE' },
   adminBack: { fontSize: 15, color: '#4D6BFE', width: 60 },
   adminTitle: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+  petHeader: { paddingHorizontal: 14, paddingBottom: 8, backgroundColor: '#fff' },
+  petEntry: { position: 'absolute', right: 14, zIndex: 800, elevation: 800, width: 46, height: 46, borderRadius: 23, backgroundColor: '#4D6BFE', alignItems: 'center', justifyContent: 'center' },
+  petEntryText: { fontSize: 22 },
 });

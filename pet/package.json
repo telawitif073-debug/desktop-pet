@@ -1,0 +1,21 @@
+{
+  "name": "@pet/module",
+  "version": "1.0.0",
+  "private": true,
+  "description": "宠物功能模块（pet）：纯共享领域 domain / 契约 api / 展示逻辑 ui —— 桌面、移动、平台前端、后端共用",
+  "type": "module",
+  "sideEffects": false,
+  "main": "domain/index.ts",
+  "types": "domain/index.ts",
+  "exports": {
+    "./domain": "./domain/index.ts",
+    "./api": "./api/index.ts",
+    "./ui": "./ui/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "sync:backend": "node tools/sync-to-backend.mjs",
+    "verify:sync": "node tools/verify-sync.mjs",
+    "manifest": "node tools/build-resource-manifest.mjs"
+  }
+}

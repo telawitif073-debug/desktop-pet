@@ -15,6 +15,9 @@ import { pullAfterLogin, scheduleUpload, flushAllOnQuit, bindChatStore } from '.
 import { edgeSpeak } from './main/tts';
 import { synthVoice, testGptsovitsEngine } from './main/ttsCloud';
 import { startAgentProactive } from './main/agentProactive';
+import { createPetWindow } from './main/pet/petWindow';
+import { installPet, uninstallPet } from './main/pet/petLibrary';
+import { buildPetRuntimeState, interactPetState } from './main/pet/petState';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -26,6 +29,8 @@ const STUDIO_WINDOW_SIZE = { width: 1100, height: 720 };
 let chatWindow: BrowserWindow | null = null;
 let studioWindow: BrowserWindow | null = null;
 let storeWindow: BrowserWindow | null = null;
+/** 桌宠悬浮窗（透明/无边框/置顶；宠物功能模块） */
+let petWindow: BrowserWindow | null = null;
 /** 内嵌在资源中心窗口内容区的子视图（同一份桌面渲染包 #/workshop/embedded） */
 let workshopView: WebContentsView | null = null;
 /** 待投放的内嵌工作区（资源中心导航指定，如 agents/voices） */
@@ -109,6 +114,31 @@ function openStudioWindow(): BrowserWindow {
   if (target.kind === 'url') void studioWindow.loadURL(target.url);
   else void studioWindow.loadFile(target.file, { hash: '/workshop' });
   return studioWindow;
+}
+
+/**
+ * 桌宠悬浮窗：透明 / 无边框 / 置顶 / 不进任务栏，加载同一份渲染包的 `#/pet` 路由。
+ * 尺寸与透明度取自 config.pet.petWindow；窗口属性与 preload 基线在 pet/petWindow.ts 收口。
+ */
+function openPetWindow(): BrowserWindow {
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.focus();
+    return petWindow;
+  }
+  petWindow = createPetWindow({
+    preloadPath: path.join(__dirname, 'preload.js'),
+    target: rendererUrl('#/pet'),
+  });
+  petWindow.on('closed', () => {
+    petWindow = null;
+  });
+  return petWindow;
+}
+
+/** 宠物状态广播：仅推给桌宠窗口（其它窗口不消费宠物状态） */
+function broadcastPetState(): void {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  petWindow.webContents.send('pet:state', buildPetRuntimeState());
 }
 
 /** 商店启动提示页（拉起平台服务期间展示，避免白屏） */
@@ -325,6 +355,42 @@ ipcMain.handle(
   },
 );
 
+// ── 宠物窗口与宠物库（桌宠功能模块）────────────────────────────────────────
+
+// 宠物运行时状态（四维 + 就绪态 + 当前宠物）
+ipcMain.handle('pet:get-state', () => buildPetRuntimeState());
+
+// 打开 / 关闭桌宠悬浮窗
+ipcMain.handle('pet:open', () => {
+  openPetWindow();
+  return { success: true };
+});
+
+ipcMain.handle('pet:close', () => {
+  if (petWindow && !petWindow.isDestroyed()) petWindow.close();
+  return { success: true };
+});
+
+// 互动动作（喂食 / 玩耍 / 休息）：沿用共享模块的四维规则并落盘，随后广播新状态
+ipcMain.handle('pet:action', (_event, kind: 'feed' | 'play' | 'rest') => {
+  const vitals = interactPetState(kind);
+  broadcastPetState();
+  return { success: true, vitals };
+});
+
+// 安装宠物（骨架：登记到本机宠物库；真实解包见 main/pet/petPack.ts）
+ipcMain.handle('pet:install', (_event, id: string) => {
+  const pets = installPet({ id, name: id, format: '', installedAt: Date.now(), fromStore: true });
+  return { success: true, pet: pets.find((p) => p.id === id) ?? null };
+});
+
+// 卸载宠物
+ipcMain.handle('pet:uninstall', (_event, id: string) => {
+  uninstallPet(id);
+  broadcastPetState();
+  return { success: true };
+});
+
 // ── 配置读写 ──────────────────────────────────────────────────────────────
 
 ipcMain.handle('config:get', () => {
@@ -517,6 +583,7 @@ function buildAppMenu(): void {
       submenu: [
         { label: '创作中心', click: () => openStudioWindow() },
         { label: '对话', click: () => openChatWindow() },
+        { label: '宠物', click: () => openPetWindow() },
         { label: '资源中心', click: () => void openStoreWindow() },
         { type: 'separator' },
         { label: '退出', role: 'quit' },

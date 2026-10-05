@@ -23,7 +23,7 @@ export class DownloadRecord {
   @JoinColumn({ name: 'user_id' })
   user: User | null;
 
-  @Column({ name: 'asset_type', type: 'enum', enum: ['agent', 'voice'] })
+  @Column({ name: 'asset_type', type: 'enum', enum: ['agent', 'voice', 'pet'] })
   assetType: AssetType;
 
   @Column({ name: 'asset_id', type: 'uuid' })

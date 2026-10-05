@@ -10,10 +10,13 @@ import {
 import { User } from '../users/user.entity';
 
 /**
- * 评价针对的独立资源类型：`agent` → agent_assets，`voice` → voice_assets。
- * （历史值 `action` / `pet` 随宠物系统整体下线，已由 migration 1791100000000 从枚举中移除。）
+ * 评价针对的独立资源类型：`agent` → agent_assets，`voice` → voice_assets，
+ * `pet` → pet_packs。
+ * 注：宠物系统重建后讨论域资源类型**沿用历史名 `pet`**（与 admin 审核路由的载体名
+ * `pet_pack` 刻意不同名，映射见 `pet-domain/api/limits.ts`）。
+ * 迁移尚未补齐前，数据库枚举可能暂时与本声明不一致。
  */
-export type AssetType = 'agent' | 'voice';
+export type AssetType = 'agent' | 'voice' | 'pet';
 
 @Entity('reviews')
 @Index(['assetType', 'assetId'])
@@ -28,7 +31,7 @@ export class Review {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @Column({ name: 'asset_type', type: 'enum', enum: ['agent', 'voice'] })
+  @Column({ name: 'asset_type', type: 'enum', enum: ['agent', 'voice', 'pet'] })
   assetType: AssetType;
 
   @Column({ name: 'asset_id', type: 'uuid' })

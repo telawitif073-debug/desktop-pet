@@ -13,7 +13,11 @@
     "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@pet/*": ["../../pet/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../../pet"]
 }

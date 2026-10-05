@@ -4,6 +4,16 @@
  */
 import { useAppStore } from '../store/appStore';
 import type { AssetItem, VoiceConfig } from '../types';
+// 宠物包契约与路由常量来自共享包 pet/api（前后端同一份，避免路径/字段漂移）
+import {
+  PET_PACK_API,
+  PET_PACK_UPLOAD_FIELDS,
+  type CreatePetPackInput,
+  type ListPetPacksQuery,
+  type PetPackDetail,
+  type PetPackDownloadResult,
+  type PetPackSummary,
+} from '../../../pet/api';
 
 function buildUrl(path: string): string {
   const base = useAppStore.getState().baseUrl.replace(/\/$/, '');
@@ -390,4 +400,56 @@ export async function multiChatSend(
     method: 'POST',
     body: JSON.stringify({ content, history: history ?? [] }),
   });
+}
+
+// --- 宠物包资产（商店「宠物」板块；路由/字段常量见共享包 pet/api/endpoints） ---
+
+/** 宠物包列表（仅返回摘要视图，不含载体 URL） */
+export async function listPetPacks(query?: ListPetPacksQuery): Promise<{ items: PetPackSummary[]; total: number }> {
+  let qs = '';
+  if (query) {
+    const usp = new URLSearchParams();
+    if (query.search) usp.set('search', query.search);
+    if (query.status) usp.set('status', query.status);
+    if (query.category) usp.set('category', query.category);
+    if (query.bodyKind) usp.set('bodyKind', query.bodyKind);
+    if (query.sort) usp.set('sort', query.sort);
+    if (query.page) usp.set('page', String(query.page));
+    if (query.limit) usp.set('limit', String(query.limit));
+    qs = usp.toString() ? `?${usp.toString()}` : '';
+  }
+  const res = await request<{ items: PetPackSummary[]; total: number }>(`${PET_PACK_API.list}${qs}`);
+  return Array.isArray(res) ? { items: res, total: res.length } : res;
+}
+
+/** 宠物包详情（含派生字段：载体 URL / sha256 / 字节数 / 清单） */
+export async function getPetPack(id: string): Promise<PetPackDetail> {
+  return request<PetPackDetail>(PET_PACK_API.detail(id));
+}
+
+/** 下载宠物包：触发后端计数并返回可直连的载体 URL（相对地址转绝对） */
+export async function downloadPetPack(id: string): Promise<PetPackDownloadResult> {
+  const res = await request<PetPackDownloadResult>(PET_PACK_API.download(id), { method: 'POST' });
+  const root = useAppStore.getState().baseUrl.replace(/\/api\/?$/, '');
+  return { ...res, url: new URL(res.url, `${root}/`).toString() };
+}
+
+/** 发布入参：zip 包体 + 可选预览图（RN 文件对象，uri 指向本地文件；派生字段由服务端生成） */
+export interface PublishPetPackInput extends CreatePetPackInput {
+  file: { uri: string; name: string; type?: string };
+  preview?: { uri: string; name: string; type?: string };
+}
+
+/** 发布宠物包（multipart/form-data；字段名与服务端 FileInterceptor 同一份） */
+export async function publishPetPack(input: PublishPetPackInput): Promise<PetPackDetail> {
+  const form = new FormData();
+  form.append(PET_PACK_UPLOAD_FIELDS.file, input.file as unknown as Blob);
+  if (input.preview) form.append(PET_PACK_UPLOAD_FIELDS.preview, input.preview as unknown as Blob);
+  form.append(PET_PACK_UPLOAD_FIELDS.name, input.name);
+  if (input.description) form.append(PET_PACK_UPLOAD_FIELDS.description, input.description);
+  if (input.category) form.append(PET_PACK_UPLOAD_FIELDS.category, input.category);
+  if (input.tags?.length) form.append(PET_PACK_UPLOAD_FIELDS.tags, JSON.stringify(input.tags));
+  form.append(PET_PACK_UPLOAD_FIELDS.version, input.version || '1.0.0');
+  // 注意：request() 会识别 FormData 并删除 JSON Content-Type，让 fetch 自动生成 multipart boundary
+  return request<PetPackDetail>(PET_PACK_API.list, { method: 'POST', body: form });
 }

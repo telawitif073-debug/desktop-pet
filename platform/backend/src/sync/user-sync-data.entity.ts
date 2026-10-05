@@ -10,8 +10,8 @@ import {
 } from 'typeorm';
 import { User } from '../users/user.entity';
 
-/** 同步数据类别：客户端配置（含 LLM profiles）/ 聊天记录 */
-export type SyncKind = 'config' | 'chat_history';
+/** 同步数据类别：客户端配置（含 LLM profiles）/ 宠物状态 / 聊天记录 */
+export type SyncKind = 'config' | 'pet_state' | 'chat_history';
 
 /** 用户云同步数据：每用户每类别一行，last-write-wins（updatedAt 判新旧） */
 @Entity('user_sync_data')
@@ -27,7 +27,7 @@ export class UserSyncData {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @Column({ type: 'enum', enum: ['config', 'chat_history'] })
+  @Column({ type: 'enum', enum: ['config', 'pet_state', 'chat_history'] })
   kind: SyncKind;
 
   @Column({ type: 'jsonb' })

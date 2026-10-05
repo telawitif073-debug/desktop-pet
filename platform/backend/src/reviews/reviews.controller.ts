@@ -8,7 +8,8 @@ import { User } from '../users/user.entity';
 import { AssetType } from './review.entity';
 
 class CreateReviewDto {
-  @IsIn(['agent'])
+  // 通用评价入口只覆盖 agent / pet；voice 走 `POST /voices/:id/review` 自身路由
+  @IsIn(['agent', 'pet'])
   assetType: AssetType;
 
   @IsUUID()
@@ -35,10 +36,10 @@ export class ReviewsController {
     @Query('assetType') assetType: AssetType,
     @Query('assetId') assetId: string,
   ) {
-    // 入参必须显式校验：`asset_type` 现在是收窄过的枚举（agent/voice），
-    // 传旧值（如 'pet'）或不合法 uuid 会被 Postgres 拒绝并冒成 500，而不是干净的 400。
-    if (assetType !== 'agent' && assetType !== 'voice') {
-      throw new BadRequestException('资源类型必须是 agent / voice');
+    // 入参必须显式校验：`asset_type` 现在是收窄过的枚举（agent/voice/pet），
+    // 传旧值（如 'action'）或不合法 uuid 会被 Postgres 拒绝并冒成 500，而不是干净的 400。
+    if (assetType !== 'agent' && assetType !== 'voice' && assetType !== 'pet') {
+      throw new BadRequestException('资源类型必须是 agent / voice / pet');
     }
     if (!isUUID(assetId)) {
       throw new BadRequestException('assetId 必须是 uuid');
@@ -73,8 +74,8 @@ export class ReviewsController {
     @Param('assetType') assetType: AssetType,
     @Param('assetId') assetId: string,
   ) {
-    if (assetType !== 'agent' && assetType !== 'voice') {
-      throw new BadRequestException('资源类型必须是 agent / voice');
+    if (assetType !== 'agent' && assetType !== 'voice' && assetType !== 'pet') {
+      throw new BadRequestException('资源类型必须是 agent / voice / pet');
     }
     return this.reviewsService.deleteDownload(assetType, assetId, user.id);
   }

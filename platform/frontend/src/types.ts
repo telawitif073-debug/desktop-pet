@@ -1,5 +1,21 @@
-export type AssetType = 'agent';
+export type AssetType = 'agent' | 'voice' | 'pet';
 export type AssetStatus = 'pending' | 'approved' | 'rejected';
+
+/**
+ * 宠物包契约类型 —— 直接复用共享模块 `pet/api`（跨端唯一来源），避免前后端字段漂移。
+ * 命名与本地类型无冲突，故在此统一再导出，页面按需从 `../types` 引入。
+ */
+export type {
+  PetPackSummary,
+  PetPackDetail,
+  PetPackStatus,
+  PetPackSort,
+  PetPackDownloadResult,
+  CreatePetPackInput,
+  UpdatePetPackInput,
+  ListPetPacksQuery,
+  PetPackErrorCode,
+} from '@pet/api';
 
 export interface User {
   id: string;
@@ -31,8 +47,8 @@ export interface Asset {
   updatedAt: string;
 }
 
-export interface PageResponse {
-  items: Asset[];
+export interface PageResponse<T = Asset> {
+  items: T[];
   total: number;
   page: number;
   limit: number;

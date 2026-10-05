@@ -21,7 +21,7 @@ export default function ProfilePage() {
   const [form] = Form.useForm();
   const [downloaded, setDownloaded] = useState<DownloadedEntry[]>([]);
   const [downloadLoading, setDownloadLoading] = useState(true);
-  const [activeIds, setActiveIds] = useState<{ agent: string | null }>({ agent: null });
+  const [activeIds, setActiveIds] = useState<Record<string, string | null>>({ agent: null });
   const [applying, setApplying] = useState<string | null>(null);
 
   const load = () => { setLoading(true); listMine(type).then(setItems).catch((err) => messageApi.error(getErrorMessage(err))).finally(() => setLoading(false)); };
@@ -48,6 +48,8 @@ export default function ProfilePage() {
   // 把某个已下载资源安装为当前智能体
   const applyDownloaded = async (entry: DownloadedEntry) => {
     if (!electronPlatform || !entry.asset) return;
+    // 桌面端安装桥当前仅支持智能体（宠物包后续再接入）
+    if (entry.assetType !== 'agent') return;
     setApplying(entry.assetId);
     try {
       await electronPlatform.install(entry.assetType, entry.assetId);
@@ -61,7 +63,7 @@ export default function ProfilePage() {
   // 删除已下载资源：移除本地安装文件（客户端内）并清除下载记录
   const removeDownloaded = async (entry: DownloadedEntry) => {
     try {
-      if (electronPlatform) await electronPlatform.uninstall(entry.assetType, entry.assetId);
+      if (electronPlatform && entry.assetType === 'agent') await electronPlatform.uninstall(entry.assetType, entry.assetId);
       await deleteDownloaded(entry.assetType, entry.assetId);
       setDownloaded((current) => current.filter((item) => !(item.assetType === entry.assetType && item.assetId === entry.assetId)));
       setActiveIds((current) => ({ ...current, [entry.assetType]: current[entry.assetType] === entry.assetId ? null : current[entry.assetType] }));

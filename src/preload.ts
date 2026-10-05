@@ -92,6 +92,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }) => ipcRenderer.invoke('workshop:embed', payload) as Promise<{ success: boolean }>,
   },
 
+  // 宠物窗口 / 宠物库（桌宠功能模块）：窗口与库操作走 IPC，状态与消息走主进程广播
+  pet: {
+    getState: () => ipcRenderer.invoke('pet:get-state'),
+    open: () => ipcRenderer.invoke('pet:open') as Promise<{ success: boolean }>,
+    close: () => ipcRenderer.invoke('pet:close') as Promise<{ success: boolean }>,
+    /** 互动动作：feed / play / rest */
+    action: (kind: 'feed' | 'play' | 'rest') =>
+      ipcRenderer.invoke('pet:action', kind) as Promise<{ success: boolean; vitals?: unknown }>,
+    install: (id: string) => ipcRenderer.invoke('pet:install', id) as Promise<{ success: boolean; pet?: unknown }>,
+    uninstall: (id: string) => ipcRenderer.invoke('pet:uninstall', id) as Promise<{ success: boolean }>,
+    /** 主进程广播宠物状态变化（四维 / 就绪态 / 当前宠物） */
+    onState: createListener('pet:state'),
+    /** 主进程投递宠物消息（主动搭话等） */
+    onMessage: createListener('pet:message'),
+  },
+
   // Event listeners
   onChatChunk: createListener('chat:chunk'),
   /** 思考过程增量（reasoning_content/reasoning；与正文分流，受 showThinking 控制显示） */

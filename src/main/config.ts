@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import { DEFAULT_VITALS, normalizeVitals, type PetVitals } from '@pet/domain';
 
 export interface LLMConfig {
   provider: string;
@@ -248,6 +249,95 @@ export interface SpeechSettings {
   volume: number;
 }
 
+// ── 宠物（共享模块 pet/ 的桌面配置形态）────────────────────────────────────
+
+/** 宠物动作定义（帧序列 / 模型内置 clip / 视频；与 pet/domain 的 PetActionLike 对齐） */
+export interface PetActionConfig {
+  id: string;
+  name: string;
+  kind: 'frames' | 'clip' | 'video';
+  interaction?: 'none' | 'feed' | 'rest' | 'play';
+  frameRate?: number;
+  frameFiles?: string[];
+  clipName?: string;
+  videoFile?: string;
+  petAssetId?: string;
+  builtinPetId?: string;
+}
+
+/** 互动绑定：feed/rest/play → 动作 id（缺省 = 按动作池自动挑选） */
+export type PetActionBindings = Partial<Record<'feed' | 'rest' | 'play', string>>;
+
+/** 已安装到本机的宠物（资源包 / 内置形象） */
+export interface InstalledPet {
+  id: string;
+  name: string;
+  /** image / pack / live2d / model3d */
+  format: string;
+  localPath?: string;
+  version?: string;
+  installedAt: number;
+  fromStore?: boolean;
+}
+
+/** 宠物窗口外观 */
+export interface PetWindowSettings {
+  width: number;
+  height: number;
+  /** 0~1 透明度 */
+  opacity: number;
+}
+
+/** 宠物功能开关（喂食/玩耍/休息；关闭的维度不衰减） */
+export interface PetFeatureSettings {
+  feedEnabled: boolean;
+  playEnabled: boolean;
+  restEnabled: boolean;
+}
+
+/**
+ * 宠物系统设置：与 `pet/api/syncKeys.ts` 的 PET_CONFIG_KEYS 12 个键一一对应，
+ * 外加窗口外观 / 功能开关 / 总开关 / 聊天联动心情四个本机偏好。
+ */
+export interface PetSettings {
+  petAssetPath: string;
+  petAssetName: string;
+  petAssetId: string;
+  petAssetFormat: string;
+  builtinPet: string;
+  petActions: PetActionConfig[];
+  petActionBindings: PetActionBindings;
+  petState: PetVitals;
+  petStateReady: boolean;
+  petSelfDescription: string;
+  currentPet: string;
+  downloadedPets: InstalledPet[];
+  petWindow: PetWindowSettings;
+  petFeatures: PetFeatureSettings;
+  petSystemEnabled: boolean;
+  moodFromChat: boolean;
+}
+
+/** 宠物设置默认值（四维沿用共享模块的 DEFAULT_VITALS） */
+export const DEFAULT_PET_SETTINGS: PetSettings = {
+  petAssetPath: '',
+  petAssetName: '',
+  petAssetId: '',
+  petAssetFormat: '',
+  builtinPet: '',
+  petActions: [],
+  petActionBindings: {},
+  petState: { ...DEFAULT_VITALS },
+  petStateReady: false,
+  petSelfDescription: '',
+  currentPet: '',
+  downloadedPets: [],
+  petWindow: { width: 220, height: 260, opacity: 0.9 },
+  petFeatures: { feedEnabled: true, playEnabled: true, restEnabled: true },
+  petSystemEnabled: true,
+  moodFromChat: true,
+};
+
 export interface AppConfig {
   agentType: string;
   userProfile: UserProfile;
@@ -278,6 +368,8 @@ export interface AppConfig {
   installedAgentId?: string;
   /** 已安装智能体：人设（name/systemPrompt）；聊天 LLM 参数仍一律由用户配置（平台不提供 API） */
   installedAgentConfig?: unknown;
+  /** 宠物系统设置（与共享模块 pet/api 的 12 个配置键对应，另含窗口/开关等本机偏好） */
+  pet?: PetSettings;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -306,6 +398,8 @@ const DEFAULT_CONFIG: AppConfig = {
   ttsCloudConfig: { ...DEFAULT_TTS_CLOUD_CONFIG },
   showThinking: false,
   thinkingLang: 'auto',
+  // 宠物设置（默认关闭状态就绪，形象/动作由用户导入或安装后填充）
+  pet: normalizePetSettings(DEFAULT_PET_SETTINGS),
 };
 
 let cachedConfig: AppConfig | null = null;
@@ -404,6 +498,101 @@ function normalizeTtsCloudConfig(value: unknown): TtsCloudConfig {
   };
 }
 
+/** 宠物动作归一化：剔除无 id/无 name 的条目，补齐 kind 与数值字段（幂等） */
+function normalizePetActions(value: unknown): PetActionConfig[] {
+  if (!Array.isArray(value)) return [];
+  const out: PetActionConfig[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const a = item as Partial<PetActionConfig>;
+    if (typeof a.id !== 'string' || !a.id || typeof a.name !== 'string' || !a.name) continue;
+    out.push({
+      id: a.id,
+      name: a.name,
+      kind: a.kind === 'clip' || a.kind === 'video' ? a.kind : 'frames',
+      ...(a.interaction ? { interaction: a.interaction } : {}),
+      ...(typeof a.frameRate === 'number' && Number.isFinite(a.frameRate) ? { frameRate: a.frameRate } : {}),
+      ...(Array.isArray(a.frameFiles)
+        ? { frameFiles: a.frameFiles.filter((f): f is string => typeof f === 'string') }
+        : {}),
+      ...(typeof a.clipName === 'string' ? { clipName: a.clipName } : {}),
+      ...(typeof a.videoFile === 'string' ? { videoFile: a.videoFile } : {}),
+      ...(typeof a.petAssetId === 'string' ? { petAssetId: a.petAssetId } : {}),
+      ...(typeof a.builtinPetId === 'string' ? { builtinPetId: a.builtinPetId } : {}),
+    });
+  }
+  return out;
+}
+
+/** 已安装宠物归一化：剔除无 id 的条目，补齐 name/format/installedAt */
+function normalizeInstalledPets(value: unknown): InstalledPet[] {
+  if (!Array.isArray(value)) return [];
+  const out: InstalledPet[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const p = item as Partial<InstalledPet>;
+    if (typeof p.id !== 'string' || !p.id) continue;
+    out.push({
+      id: p.id,
+      name: typeof p.name === 'string' && p.name ? p.name : p.id,
+      format: typeof p.format === 'string' ? p.format : '',
+      ...(typeof p.localPath === 'string' ? { localPath: p.localPath } : {}),
+      ...(typeof p.version === 'string' ? { version: p.version } : {}),
+      installedAt: typeof p.installedAt === 'number' ? p.installedAt : 0,
+      ...(p.fromStore === true ? { fromStore: true } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * 宠物设置归一化（幂等）：缺失/类型不对的字段回落默认值，四维走共享模块 normalizeVitals 消毒。
+ * 兼容旧配置：老版本可能只写入了 PET_CONFIG_KEYS 里的部分键。
+ */
+export function normalizePetSettings(value: unknown): PetSettings {
+  const src = (value && typeof value === 'object' ? value : {}) as Partial<PetSettings>;
+  const win = (src.petWindow && typeof src.petWindow === 'object' ? src.petWindow : {}) as Partial<PetWindowSettings>;
+  const feats = (src.petFeatures && typeof src.petFeatures === 'object' ? src.petFeatures : {}) as Partial<PetFeatureSettings>;
+  const bindings = (src.petActionBindings && typeof src.petActionBindings === 'object'
+    ? src.petActionBindings
+    : {}) as PetActionBindings;
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const size = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : fallback;
+  const ratio = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
+  return {
+    petAssetPath: str(src.petAssetPath),
+    petAssetName: str(src.petAssetName),
+    petAssetId: str(src.petAssetId),
+    petAssetFormat: str(src.petAssetFormat),
+    builtinPet: str(src.builtinPet),
+    petActions: normalizePetActions(src.petActions),
+    petActionBindings: {
+      ...(typeof bindings.feed === 'string' ? { feed: bindings.feed } : {}),
+      ...(typeof bindings.rest === 'string' ? { rest: bindings.rest } : {}),
+      ...(typeof bindings.play === 'string' ? { play: bindings.play } : {}),
+    },
+    petState: normalizeVitals(src.petState),
+    petStateReady: src.petStateReady === true,
+    petSelfDescription: str(src.petSelfDescription),
+    currentPet: str(src.currentPet),
+    downloadedPets: normalizeInstalledPets(src.downloadedPets),
+    petWindow: {
+      width: size(win.width, DEFAULT_PET_SETTINGS.petWindow.width),
+      height: size(win.height, DEFAULT_PET_SETTINGS.petWindow.height),
+      opacity: ratio(win.opacity, DEFAULT_PET_SETTINGS.petWindow.opacity),
+    },
+    petFeatures: {
+      feedEnabled: feats.feedEnabled !== false,
+      playEnabled: feats.playEnabled !== false,
+      restEnabled: feats.restEnabled !== false,
+    },
+    petSystemEnabled: src.petSystemEnabled !== false,
+    moodFromChat: src.moodFromChat !== false,
+  };
+}
+
 export function loadConfig(): AppConfig {
   if (cachedConfig) return cachedConfig;
 
@@ -429,6 +618,7 @@ export function loadConfig(): AppConfig {
         ttsCloudConfig: normalizeTtsCloudConfig(parsed.ttsCloudConfig),
         showThinking: parsed.showThinking === true,
         thinkingLang: parsed.thinkingLang === 'zh' || parsed.thinkingLang === 'en' ? parsed.thinkingLang : 'auto',
+        pet: normalizePetSettings(parsed.pet),
       };
       if (loaded.platform.frontendUrl === 'http://localhost:5173') {
         loaded.platform.frontendUrl = DEFAULT_CONFIG.platform.frontendUrl;
@@ -477,6 +667,10 @@ export function saveConfig(config: Partial<AppConfig>): AppConfig {
       : current.ttsCloudConfig,
     showThinking: config.showThinking ?? current.showThinking ?? false,
     thinkingLang: config.thinkingLang ?? current.thinkingLang ?? 'auto',
+    // 宠物设置：局部补丁浅合并后归一化（幂等；未给 pet 时保留当前值）
+    pet: config.pet !== undefined
+      ? normalizePetSettings({ ...(current.pet || {}), ...config.pet })
+      : current.pet ?? DEFAULT_PET_SETTINGS,
   };
   const configPath = getConfigPath();
   try {

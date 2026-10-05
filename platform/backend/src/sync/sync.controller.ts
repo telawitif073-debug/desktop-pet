@@ -6,7 +6,7 @@ import { User } from '../users/user.entity';
 import { SyncService } from './sync.service';
 
 class SyncDataDto {
-  // data 形态随 kind 而异：config 为对象，chat_history 为数组（空数组=清空语义）
+  // data 形态随 kind 而异：config/pet_state 为对象，chat_history 为数组（空数组=清空语义）
   @IsDefined()
   data!: unknown;
 }
@@ -25,6 +25,16 @@ export class SyncController {
   @Put('config')
   putConfig(@CurrentUser() user: User, @Body() dto: SyncDataDto) {
     return this.syncService.putKind(user.id, 'config', dto.data);
+  }
+
+  @Get('pet-state')
+  getPetState(@CurrentUser() user: User) {
+    return this.syncService.getKind(user.id, 'pet_state');
+  }
+
+  @Put('pet-state')
+  putPetState(@CurrentUser() user: User, @Body() dto: SyncDataDto) {
+    return this.syncService.putKind(user.id, 'pet_state', dto.data);
   }
 
   @Get('chat-history')

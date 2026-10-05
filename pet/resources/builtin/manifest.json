@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "note": "本项目自产的内置演示宠物（不含第三方素材；无 webm）。entry 为相对本目录的路径，渲染端按 bodyKinds 分流。",
+  "pets": [
+    {
+      "id": "sprout-cat",
+      "name": "芽芽猫",
+      "description": "薄荷绿的小猫，头顶冒着一株嫩芽。",
+      "author": "本项目自产",
+      "license": "MIT",
+      "entry": "sprout-cat/cover.svg",
+      "bodyKinds": ["image"],
+      "actions": []
+    }
+  ]
+}

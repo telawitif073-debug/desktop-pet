@@ -1,5 +1,5 @@
 {
   "extends": "@react-native/typescript-config",
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": ["**/*.ts", "**/*.tsx", "../pet/**/*.ts"],
   "exclude": ["**/node_modules", "**/Pods"]
 }

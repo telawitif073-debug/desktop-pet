@@ -1,13 +1,27 @@
+const path = require('path');
 const { getDefaultConfig } = require('@react-native/metro-config');
 
 /**
  * Metro configuration
  * https://reactnative.dev/docs/metro
  *
- * 说明：此前移动端引用桌面端共享的宠物主体功能模块（`src/pet/**` / `packages/pet-domain`），
- * 故在 watchFolders 里加入了 mobile/ 之外的源码目录；宠物系统下线后移动端不再引用任何
- * mobile/ 之外的源码，watchFolders 及共享源码解析一并移除，回到 RN 默认配置。
+ * 说明：移动端经 watchFolders 引用仓库根目录的共享宠物模块 `pet/`（纯 TS，零依赖），
+ * 与桌面端 `src/pet`、平台前端共用同一份领域逻辑；RN 侧经 `mobile/src/pet/domain.ts`
+ * 再导出 shim 引用。`pet/resources/upstream` 是第三方素材（约 60MB，不参与打包），
+ * 列入 blockList 避免 Metro 扫描，防止触发文件监听上限/拖慢启动。
  *
  * @type {import('@react-native/metro-config').MetroConfig}
  */
-module.exports = getDefaultConfig(__dirname);
+const config = getDefaultConfig(__dirname);
+
+// 共享宠物模块源码目录（位于 mobile/ 之外，需显式加入监听与解析范围）
+config.watchFolders = [path.resolve(__dirname, '..', 'pet')];
+
+// 排除宠物模块内的第三方素材目录（体积大、无 JS 依赖，无需被 Metro 扫描）
+const petUpstream = /[\\/]pet[\\/]resources[\\/]upstream[\\/].*/;
+const defaultBlockList = config.resolver.blockList;
+config.resolver.blockList = Array.isArray(defaultBlockList)
+  ? [...defaultBlockList, petUpstream]
+  : [defaultBlockList, petUpstream].filter(Boolean);
+
+module.exports = config;

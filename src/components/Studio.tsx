@@ -34,11 +34,12 @@ import {
  * 所有写操作走 config:set（saveConfig）→ 持久化并触发防抖云同步。
  */
 
-type Workspace = 'agents' | 'voices';
+type Workspace = 'agents' | 'voices' | 'pets';
 
 const WORKSPACES: Array<{ id: Workspace; label: string; hint: string }> = [
   { id: 'agents', label: '智能体', hint: '智能体列表、编辑器与发布' },
   { id: 'voices', label: '音色', hint: '音色库与发布音色' },
+  { id: 'pets', label: '宠物', hint: '本机宠物库与桌宠窗口' },
 ];
 
 /** 历史入口（动作/发布等）→ 现行工作区 */
@@ -124,7 +125,7 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
   useEffect(() => {
     const cleanup = window.electronAPI?.onStudioWorkspace((tab) => {
       const target = LEGACY_WORKSPACE[tab] ?? tab;
-      if (target === 'agents' || target === 'voices') setWorkspace(target);
+      if (target === 'agents' || target === 'voices' || target === 'pets') setWorkspace(target);
       if (target === 'agents') setAgentPane('editor');
     });
     return () => cleanup?.();
@@ -146,6 +147,8 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
   const profiles = config?.llmProfiles ?? [];
   const activeId = config?.llmActiveProfileId ?? '';
   const installedVoices = config?.downloadedVoices ?? [];
+  /** 本机宠物库（宠物工作区展示；安装/解包由主进程宠物模块负责） */
+  const installedPets = config?.pet?.downloadedPets ?? [];
   const visible = useMemo(() => filterProfiles(profiles, query), [profiles, query]);
   const selected = profiles.find((p) => p.id === selectedId);
 
@@ -409,6 +412,39 @@ const Studio = ({ brand = '创作中心', embedded = false }: { brand?: string; 
             )}
           </section>
           <VoicePublishForm onNotify={showNotice} />
+        </main>
+      )}
+
+      {/* 宠物：本机宠物库 + 打开桌宠悬浮窗（安装/解包后续接入 main/pet/petPack.ts） */}
+      {workspace === 'pets' && (
+        <main style={{ flex: 1, padding: 16, overflowY: 'auto', minHeight: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>本机宠物库（{installedPets.length}）</div>
+          <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.8, marginBottom: 10 }}>
+            已安装到本机的宠物形象在这里查看；桌宠悬浮窗可从菜单「窗口 → 宠物」打开，或点右侧按钮。
+          </div>
+          <button
+            type="button"
+            onClick={() => void window.electronAPI?.pet.open()}
+            style={{ ...smallBtn(), padding: '5px 12px', borderColor: C.accent, color: C.accent, marginBottom: 12 }}
+          >
+            打开桌宠窗口
+          </button>
+          {installedPets.length === 0 ? (
+            <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.8 }}>还没有安装宠物。</div>
+          ) : (
+            installedPets.map((pet) => (
+              <div
+                key={pet.id}
+                style={{ padding: 8, marginBottom: 6, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 6 }}
+              >
+                <div style={{ fontSize: 12, color: C.text }}>{pet.name}</div>
+                <div style={{ fontSize: 11, color: C.sub }}>
+                  {pet.format || '未知格式'}
+                  {pet.fromStore ? ' · 来自资源中心' : ' · 本机'}
+                </div>
+              </div>
+            ))
+          )}
         </main>
       )}
 
