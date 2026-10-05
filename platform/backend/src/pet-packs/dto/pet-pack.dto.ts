@@ -1,12 +1,9 @@
 import {
   IsArray,
   IsIn,
-  IsInt,
   IsOptional,
   IsString,
-  Max,
   MaxLength,
-  Min,
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -46,7 +43,7 @@ export class ListPetPacksQueryDto {
 
 /**
  * 发布宠物包（multipart 文本字段）。
- * 文件字段是 `file`（必填，.zip）；`previewUrl` 等派生字段不由本 DTO 承载。
+ * 文件字段是 `pack`（必填，.zip）与 `preview`（可选卡片图）；二进制不由本 DTO 承载。
  * `packUrl` / `packSha256` / `bodyKinds` / `manifest` 全部由服务端校验派生，不接受客户端填写。
  */
 export class CreatePetPackDto {
@@ -82,7 +79,8 @@ export class UpdatePetPackDto {
   @IsOptional() @IsString() @MaxLength(50)
   category?: string;
 
-  @IsOptional() @IsArray()
+  @IsOptional()
+  @IsArray()
   @IsString({ each: true })
   tags?: string[];
 
@@ -91,18 +89,4 @@ export class UpdatePetPackDto {
 
   @IsOptional() @IsString() @MaxLength(20)
   version?: string;
-}
-
-/** 宠物包评价入参（`POST /pet-packs/:id/review`） */
-export class PetPackReviewDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(5)
-  rating?: number;
-
-  @IsOptional()
-  @IsString()
-  comment?: string;
 }

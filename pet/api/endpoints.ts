@@ -13,9 +13,10 @@ export const PET_PACK_API = {
   review: (id: string) => `/pet-packs/${id}/review`,
 } as const;
 
-/** 发布宠物包的 multipart 字段名（后端 FileInterceptor 与前端表单同一份） */
+/** 发布宠物包的 multipart 字段名（后端 FileFieldsInterceptor 与前端表单同一份） */
 export const PET_PACK_UPLOAD_FIELDS = {
-  file: 'file',
+  /** zip 包体（后端 FileFieldsInterceptor 字段名为 `pack`） */
+  file: 'pack',
   preview: 'preview',
   name: 'name',
   description: 'description',

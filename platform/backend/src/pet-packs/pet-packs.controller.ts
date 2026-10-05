@@ -10,19 +10,17 @@ import {
   Post,
   Put,
   Query,
-  UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import * as path from 'path';
+import { Type } from 'class-transformer';
+import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { PetPacksService } from './pet-packs.service';
-import {
-  CreatePetPackDto,
-  ListPetPacksQueryDto,
-  PetPackReviewDto,
-  UpdatePetPackDto,
-} from './dto/pet-pack.dto';
+import { CreatePetPackDto, ListPetPacksQueryDto, UpdatePetPackDto } from './dto/pet-pack.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { JwtOptionalGuard } from '../common/guards/jwt-optional.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -30,16 +28,24 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
 import { ReviewsService } from '../reviews/reviews.service';
+import { PET_PACK_MAX_BYTES } from './pack-inspection';
 import { validateUploadMetadata } from '../uploads/upload-validation';
-import { PET_PACK_MAX_ARCHIVE_BYTES } from '../pet-domain/api';
+
+class PetPackReviewDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  rating?: number;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
+}
 
 /**
  * 宠物商店（宠物包）接口。
- *
- * 路由与 `pet-domain/api/endpoints` 的 `PET_PACK_API` 一一对应：
- * list `/pet-packs`、mine `/pet-packs/mine`、detail `/pet-packs/:id`、
- * approve `/pet-packs/:id/approve`、reject `/pet-packs/:id/reject`、
- * download `/pet-packs/:id/download`、review `/pet-packs/:id/review`。
  *
  * 发布（`POST /pet-packs`）当前**仅管理员可用**（先行用于内部/测试发布与真实包联调）：
  * 它必须在服务端解包跑 `evaluatePetPack`（设计文档 D3），不合格直接 400 —— 避免重演旧
@@ -54,37 +60,46 @@ export class PetPacksController {
 
   /**
    * 发布宠物包（管理员）。
-   * multipart：`file`（必填 .zip）、文本字段见 {@link CreatePetPackDto}。
-   * 校验不通过 → 400；通过 → 落库 `status=pending`。
+   * multipart：`pack`（必填 .zip）、`preview`（可选卡片图）、文本字段见 {@link CreatePetPackDto}。
+   * 校验不通过 → 400（响应体含 `errors` / `rejected`）；通过 → 落库 `status=pending`。
    */
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: PET_PACK_MAX_ARCHIVE_BYTES },
-      fileFilter: (_req, file, cb) => {
-        try {
-          const ext = validateUploadMetadata(file.originalname, file.mimetype);
-          if (ext !== '.zip') {
-            cb(new BadRequestException('宠物包必须是 .zip 压缩包'), false);
-            return;
+    FileFieldsInterceptor(
+      [
+        { name: 'pack', maxCount: 1 },
+        { name: 'preview', maxCount: 1 },
+      ],
+      {
+        storage: memoryStorage(),
+        limits: { fileSize: PET_PACK_MAX_BYTES, files: 2 },
+        fileFilter: (_req, file, cb) => {
+          try {
+            if (file.fieldname === 'pack') {
+              if (path.extname(file.originalname).toLowerCase() !== '.zip') {
+                throw new BadRequestException('宠物包必须是 .zip 压缩包');
+              }
+            } else {
+              validateUploadMetadata(file.originalname, file.mimetype);
+            }
+            cb(null, true);
+          } catch (error) {
+            cb(error as Error, false);
           }
-          cb(null, true);
-        } catch (error) {
-          cb(error as Error, false);
-        }
+        },
       },
-    }),
+    ),
   )
   publish(
-    @UploadedFile() file: Express.Multer.File | undefined,
+    @UploadedFiles() files: { pack?: Express.Multer.File[]; preview?: Express.Multer.File[] },
     @Body() dto: CreatePetPackDto,
     @CurrentUser() user: User,
   ) {
-    if (!file) throw new BadRequestException('未收到宠物包文件（字段名 file）');
-    return this.petPacksService.create({ file, dto, authorId: user.id });
+    const pack = files?.pack?.[0];
+    if (!pack) throw new BadRequestException('未收到宠物包文件（字段名 pack）');
+    return this.petPacksService.publish({ pack, preview: files?.preview?.[0], dto, authorId: user.id });
   }
 
   @Get()

@@ -17,7 +17,7 @@ import { User } from '../users/user.entity';
  * `.trae/documents/pet-store-successor-design.md` §1.1）：
  * 旧的 `pet_assets` 把一只宠物定义成**单个 `file_url`**，于是无法表达
  * 「这是宠物本体」，只能靠文件名 glob 猜 → 图标/背景/键帽都能被当宠物装上。
- * 新标准（`pet/domain/resource.ts` 的 `evaluatePetPack`）要求一个宠物必须是资源包，
+ * 新标准（`src/pet/resource.ts` 的 `evaluatePetPack`）要求一个宠物必须是资源包，
  * 且包内**至少有一个「够格本体」**（body-model / body-animation / body-still），
  * 否则整个包判 invalid。
  *
